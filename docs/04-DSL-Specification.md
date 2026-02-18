@@ -39,16 +39,21 @@ Case-sensitive. Keywords are reserved (see Section 1.6).
 ## 1.3 Literals
 
 ```ebnf
-integer   = decimal | hex | binary ;
-decimal   = digit , { digit | "_" } ;
-hex       = "0x" , hex_digit , { hex_digit | "_" } ;
-binary    = "0b" , bit , { bit | "_" } ;
-hex_digit = digit | "A"…"F" | "a"…"f" ;
-bit       = "0" | "1" ;
-boolean   = "true" | "false" ;
-string    = '"' , { string_char } , '"' ;
+integer     = decimal | hex | binary ;
+decimal     = digit , { digit | "_" } ;
+hex         = "0x" , hex_digit , { hex_digit | "_" } ;
+binary      = "0b" , bit , { bit | "_" } ;
+hex_digit   = digit | "A"…"F" | "a"…"f" ;
+bit         = "0" | "1" ;
+float       = digit , { digit } , "." , digit , { digit } ;
+boolean     = "true" | "false" ;
+string      = '"' , { string_char } , '"' ;
 string_char = ? UTF-8 except '"' and '\' ? | "\\" | '\"' | "\n" | "\r" | "\t" ;
 ```
+
+Float literals (e.g., `3.14`, `0.5`) are supported for context fields of type `f32`
+and `f64`. Timer durations continue to use integer literals only. Using a float literal
+where an integer is required is diagnostic `FSM-E0005`.
 
 ## 1.4 Comments
 
@@ -61,17 +66,21 @@ doc_comment   = "///" , { ? not newline ? } ;  (* attaches to next declaration *
 ## 1.5 Keywords
 
 ```
-after       as          bool        cancel      choice
-const       context     deep_history  defer     done
-else        enum        every        export     extern
-f32         f64         false        feature    final
-fork        i8          i16          i32        i64
-import      initial     is           join       junction
-language    machine     ms           on         opaque
-priority    pure        raise        region     schedule
-send        shallow_history  state   target     to
-true        u8          u16          u32        u64
+after       as              bool        cancel      choice
+composite   const           context     deep_history defer
+done        else            enum        every       export
+extern      f32             f64         false       feature
+final       fork            i8          i16         i32
+i64         import          initial     is          join
+junction    language        machine     ms          on
+opaque      parallel        priority    pure        raise
+region      schedule        send        shallow_history state
+submachine  target          to          true        u8
+u16         u32             u64
 ```
+
+The `as` keyword is reserved for explicit type casting (see §3.1).
+The `submachine` keyword is reserved for future submachine syntax (see §15).
 
 ## 1.6 Operators and Delimiters
 
@@ -79,6 +88,7 @@ true        u8          u16          u32        u64
 ->   ~>   :   ,   ;   .   =   @
 {    }    (   )   [   ]
 ==   !=   <   >   <=  >=  &&  ||  !
++    -    *   /   %   &   |   ^   ~   <<  >>
 ```
 
 ---
@@ -227,6 +237,48 @@ type =
 `opaque "my_struct_t"` maps to the C type verbatim. No field-comparison guards allowed
 on opaque fields (`FSM-E0303`).
 
+## 3.1 Type Casting — `as` Operator
+
+**No implicit type promotion.** All numeric conversions require an explicit `as` cast.
+
+```ebnf
+cast_expr = unary_expr , [ "as" , type_name ] ;
+```
+
+Examples:
+```fsm
+ctx.speed_u32 = ctx.speed_u16 as u32
+ctx.ratio = ctx.count as f32
+```
+
+- Permitted casts: any integer type to any integer type, any integer to `f32`/`f64`,
+  `f32` to `f64`, `f64` to `f32` (may lose precision — `FSM-W0604`).
+- Casting between incompatible types (e.g., `bool as u32`, `opaque as u16`) is
+  `FSM-E0012`.
+- The `as` keyword has higher precedence than binary operators but lower than
+  unary operators and postfix access (see §8.7.1 precedence table).
+
+## 3.2 Integer Overflow Behavior
+
+| Category | Behavior |
+|---|---|
+| **Unsigned overflow** | Modular arithmetic (wraps). `255_u8 + 1` = `0_u8`. |
+| **Signed overflow (compile-time)** | Diagnostic `FSM-E0206` if the compiler can prove overflow in a constant expression. |
+| **Signed overflow (runtime)** | Target-defined: C99 = undefined behavior, C++17 = implementation-defined. Generated code SHOULD include overflow checks in debug builds (`FSM_ASSERT`). |
+| **Division by zero (compile-time)** | Diagnostic `FSM-E0207`. |
+| **Negative value in unsigned context** | Diagnostic `FSM-E0208` if a negative literal or provably negative expression is assigned to an unsigned field. |
+
+## 3.3 String Type Restrictions
+
+String literals (`"..."`) are **NOT** a valid context field type. Strings appear only in:
+1. `@id("...")` annotations.
+2. `language` and `feature` header declarations.
+3. `import "path"` declarations.
+4. `opaque "type_name"` type specifications.
+
+Using a string literal in a context field default value, guard expression, or action
+expression is a parse error (`FSM-E0010`). There is no `string` type for context fields.
+
 ---
 
 # 4. Machine Definition
@@ -316,7 +368,7 @@ config_entry =
     identifier , "=" , ( integer | boolean | identifier ) ;
 ```
 
-Standard keys: `capacity`, `overflow` (`drop-oldest` | `drop-newest` | `assert` | `error`).
+Standard keys: `capacity`, `overflow` (`drop_oldest` | `drop_newest` | `assert` | `error`).
 
 ## 4.4 Target Block
 
@@ -327,7 +379,7 @@ target_block =
 
 Built-in targets: `C99`, `C99-RTOS`, `Cpp17`, `Simulation`.
 
-Standard keys: `strategy` (`switch-based` | `table-driven`), `allow_float`, `max_nesting`.
+Standard keys: `strategy` (`switch_based` | `table_driven`), `allow_float`, `max_nesting`.
 
 ## 4.5 Initial Declaration
 
@@ -546,7 +598,7 @@ internal_decl =
 
 ## 8.3 Local Transition
 
-Target MUST be a proper descendant of the source state (`FSM-E0104` otherwise).
+Target MUST be a proper descendant of the source state (`FSM-E0110` otherwise).
 
 ```ebnf
 local_decl =
@@ -680,27 +732,52 @@ bin_op =
 literal = integer | boolean | string | qualified_name ;
 ```
 
-### 8.7.1 Operator Precedence
+### 8.7.1 Operator Precedence (Normative, Pratt-Parsing-Friendly)
 
-Precedence from highest (binds tightest) to lowest. Same level = left-associative.
+This table defines 10 precedence levels suitable for a Pratt parser implementation.
+Precedence from highest (binds tightest) to lowest. Same level = left-associative
+unless noted.
 
-| Level | Operators | Associativity |
-|---|---|---|
-| 7 (highest) | unary `!`, `-`, `~` | Right |
-| 6 | `*`, `/`, `%` | Left |
-| 5 | `+`, `-` | Left |
-| 4 | `<<`, `>>` | Left |
-| 3 | `&`, `^`, `\|` (bitwise) | Left |
-| 2 | `==`, `!=`, `<`, `>`, `<=`, `>=` | Left |
-| 1 | `&&` | Left |
-| 0 (lowest) | `\|\|` | Left |
+| Level | Category | Operators | Associativity |
+|---|---|---|---|
+| 10 (highest) | Primary | literals, identifiers, `(expr)`, `field_ref` | N/A |
+| 9 | Postfix | `.` (field access), `(args)` (function call) | Left |
+| 8 | Cast | `as` | Left |
+| 7 | Unary | `!`, `-`, `~` | Right (prefix) |
+| 6 | Multiplicative | `*`, `/`, `%` | Left |
+| 5 | Additive | `+`, `-` | Left |
+| 4 | Shift | `<<`, `>>` | Left |
+| 3 | Bitwise | `&`, `^`, `\|` | Left |
+| 2 | Comparison | `==`, `!=`, `<`, `>`, `<=`, `>=` | Left |
+| 1 | Logical AND | `&&` | Left |
+| 0 (lowest) | Logical OR | `\|\|` | Left |
+
+**Pratt parser binding powers:** Each level maps to a left binding power (LBP). The
+parser calls `parse_expr(min_bp)` where `min_bp` starts at 0. Right-associative operators
+(unary prefix) use `rbp = lbp` instead of `rbp = lbp + 1`.
 
 **Examples:**
 - `ctx.a + ctx.b * 2` → `ctx.a + (ctx.b * 2)` (level 6 before level 5)
 - `ctx.x > 0 && ctx.y < 10` → `(ctx.x > 0) && (ctx.y < 10)` (level 2 before level 1)
-- `!ctx.flag && ctx.speed > 0` → `(!ctx.flag) && (ctx.speed > 0)` (unary before level 2)
+- `!ctx.flag && ctx.speed > 0` → `(!ctx.flag) && (ctx.speed > 0)` (unary before comparison)
+- `ctx.speed as u32 + 10` → `(ctx.speed as u32) + 10` (cast before additive)
 
-The guard expression sublanguage uses the **same precedence table** for its operators.
+The guard expression sublanguage uses the **same precedence table** for its operators
+(restricted to comparison, logical, and unary operators).
+
+### 8.7.2 Function Call vs. Identifier Disambiguation
+
+An identifier followed by `(` is **always** parsed as a function call in both
+expression/guard context and action context. There is no ambiguity: FSM-Lang has no
+tuple syntax or grouping-after-identifier construct.
+
+```
+identifier "("  →  function call (always)
+identifier      →  variable reference or extern name (no parens)
+```
+
+In guard context, only `pure extern` functions may be called. In action context, any
+declared `extern` function may be called.
 
 ```ebnf
 ```
@@ -716,6 +793,9 @@ The guard expression sublanguage uses the **same precedence table** for its oper
 - Heap allocation (`malloc`, `new`)
 - Stack-allocated arrays
 - Direct pointer arithmetic on context fields (use extern wrappers)
+- **Payload field writes:** `payload.field = expr` is forbidden. Payload fields are
+  **read-only** in all action blocks. Writing to a payload field is `FSM-E0006`.
+  Payload fields may only be read (e.g., `ctx.speed = payload.target_speed`).
 
 ---
 
@@ -918,7 +998,7 @@ export machine DeviceManager {
 
     queue {
         capacity = 32
-        overflow = drop-oldest
+        overflow = drop_oldest
     }
 
     @id("init-top")
@@ -1023,12 +1103,12 @@ export machine DeviceManager {
     // ── Target profiles ───────────────────────────────────────────────────────
 
     target C99 {
-        strategy    = switch-based
+        strategy    = switch_based
         allow_float = false
     }
 
     target Cpp17 {
-        strategy    = switch-based
+        strategy    = switch_based
         allow_float = false
     }
 }
@@ -1173,15 +1253,21 @@ defer_stmt       = "defer" , identifier ;
 (* Action expression language — richer than guard_expr *)
 expr             = unary_expr
                  | expr , bin_op , expr
+                 | cast_expr
                  | "(" , expr , ")"
                  | identifier , "(" , [ expr , { "," , expr } ] , ")"
                  | field_ref
                  | literal ;
+cast_expr        = unary_expr , "as" , type ;
 unary_expr       = ( "!" | "-" | "~" ) , expr ;
 bin_op           = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
                  | "<<" | ">>" | "&&" | "||"
                  | "==" | "!=" | "<" | ">" | "<=" | ">=" ;
-literal          = integer | boolean | string | qualified_name ;
+literal          = integer | float | boolean | string | qualified_name ;
+
+(* Submachine — [future] post-v1.0, requires feature submachines *)
+submachine_decl  = [ doc_comment ] , [ stable_id ] ,
+                   "submachine" , identifier , "{" , { machine_item } , "}" ;
 
 after_decl           = [ doc_comment ] , [ stable_id ] ,
                        "after" , const_expr , "ms" ,
@@ -1200,7 +1286,78 @@ doc_comment      = "///" , { ? not newline ? } ;
 
 ---
 
-# 14. File Extension and Identifiers
+# 14. Annotations — Ordering and Semantics
+
+## 14.1 Annotation Ordering
+
+When both `@id(...)` and `/// doc comment` precede a declaration, the **canonical
+order** is:
+
+1. `@id("stable-id")` — first
+2. `/// doc comment` — second (one or more lines)
+3. Declaration (`state`, `machine`, `on`, etc.)
+
+```fsm
+@id("motor-idle")
+/// The idle state. Entered on startup and after STOP.
+state Idle {
+    @id("t-idle-running")
+    /// Transition to Running when START event received.
+    on START -> Running
+}
+```
+
+The formatter enforces this order (see FSM-SPEC-FMT §15). The parser accepts either
+order but emits `FSM-H0006` (hint) if the order is reversed.
+
+## 14.2 Stable ID Uniqueness
+
+Stable IDs MUST be unique within a machine. Duplicate IDs are `FSM-E0025`.
+Stable IDs are preserved across renames and used for history storage, trace records,
+and toolchain references.
+
+---
+
+# 15. Submachine Syntax [Future — Post-v1.0]
+
+The `submachine` construct is **feature-flagged** (`feature submachines`) and is
+reserved for post-v1.0. The grammar production is included here for forward reference.
+
+```ebnf
+submachine_decl =
+    [ doc_comment ] ,
+    [ stable_id ] ,
+    "submachine" , identifier ,
+    "{" , machine_body , "}" ;
+
+machine_body = { machine_item } ;
+```
+
+A submachine creates an independent execution context that can be referenced from
+a parent machine via the `is` keyword:
+
+```fsm
+// [future] — not available in v1.0
+feature submachines
+
+submachine ConnectionHandler {
+    initial Idle
+    state Idle { ... }
+    state Connected { ... }
+}
+
+machine Parent {
+    state Link is ConnectionHandler { }
+}
+```
+
+Implementations MUST reject `submachine` declarations with `FSM-E0600` ("feature
+`submachines` is not enabled") unless `feature submachines` is declared. Semantics
+are defined in FSM-SPEC-SEM §12.
+
+---
+
+# 16. File Extension and Identifiers
 
 | Attribute | Value |
 |---|---|

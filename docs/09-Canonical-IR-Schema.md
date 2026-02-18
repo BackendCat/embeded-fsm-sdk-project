@@ -14,8 +14,8 @@ writes the IR; none reads `.fsm` source directly.
 
 # 1. Design Principles
 
-1. **Round-trippable.** IR → DSL regeneration (`fsm decompile`) MUST be possible. The
-   output need not be byte-for-byte identical to the original source, but MUST be
+1. **Round-trippable.** IR → DSL regeneration (`fsm decompile`) SHOULD be possible (post-v1.0 goal). The
+   output need not be byte-for-byte identical to the original source, but SHOULD be
    semantically equivalent and re-compilable to the same IR.
 
 2. **Source-location preserving.** Every node in the IR MUST carry a `loc` field

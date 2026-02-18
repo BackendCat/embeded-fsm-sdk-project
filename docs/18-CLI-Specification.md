@@ -169,9 +169,9 @@ fsm generate [OPTIONS] <FILE>...
 |---|---|---|---|
 | `--target <TARGET>` | `-t` | `c99` | `c99` \| `cpp17` — code generation target |
 | `--out <DIR>` | `-o` | `./generated/` | Output directory |
-| `--strategy <S>` | | `switch` | `switch` \| `table` — codegen strategy |
+| `--strategy <S>` | | `switch_based` | `switch_based` \| `table_driven` — codegen strategy |
 | `--queue-size <N>` | | `8` | Event queue capacity (must be power of 2) |
-| `--queue-overflow <P>` | | `assert` | `assert` \| `drop-oldest` \| `drop-newest` |
+| `--queue-overflow <P>` | | `assert` | `assert` \| `drop_oldest` \| `drop_newest` |
 | `--isr-safe` | | off | Enable ISR-safe queue |
 | `--no-stl` | | off | Disable STL (C++ target only) |
 | `--impl-style <S>` | | `crtp` | `crtp` \| `vtable` (C++ target only) |
@@ -403,6 +403,53 @@ debounce_ms = 200
 4. `fsm.toml` in each parent directory up to root
 5. `$HOME/.fsm/config.toml` (user-global defaults)
 6. Built-in defaults (lowest priority)
+
+### 6.1 Configuration Merge Semantics
+
+When multiple configuration sources exist, they are merged from lowest to highest
+priority (built-in defaults → user-global → project → env → CLI flag). Each key is
+resolved independently using **last-writer-wins** semantics.
+
+**Per-key merge behavior:**
+
+| Key category | Merge strategy | Example |
+|---|---|---|
+| Scalar values (`target`, `strategy`, `indent_size`, `port`, etc.) | **Replace** — higher-priority value overwrites lower | CLI `--target cpp17` overwrites `fsm.toml` `target = "c99"` |
+| Boolean flags (`warn_as_error`, `isr_safe`, `virtual_clock`) | **Replace** | `--warn-as-error` overrides `warn_as_error = false` in config |
+| Array values (`allow`, `deny`) | **Append** — higher-priority arrays are concatenated after lower | User-global `allow = ["FSM-W0500"]` + project `allow = ["FSM-W0200"]` → `["FSM-W0500", "FSM-W0200"]` |
+| `out` (output directory) | **Replace** with path resolution: relative paths resolve relative to the config file that declares them | Project `fsm.toml` with `out = "generated/"` resolves to `<project-root>/generated/` |
+
+**Precedence rules:**
+
+1. CLI flags ALWAYS override all config file values and environment variables.
+2. Environment variables override all config file values.
+3. The nearest `fsm.toml` (by directory walk) overrides more distant ones.
+4. User-global `$HOME/.fsm/config.toml` provides defaults only — never overrides
+   project-level config.
+5. If no configuration source sets a key, the built-in default is used.
+
+**Multiple `fsm.toml` files in the directory hierarchy:**
+
+Only the **nearest** `fsm.toml` to the input file is loaded. Parent `fsm.toml` files
+are NOT merged — the nearest one shadows all parents. This prevents unexpected
+inheritance from distant ancestor directories.
+
+```
+project/
+├── fsm.toml              ← project-level (used for files in project/)
+├── src/
+│   ├── fsm.toml          ← subdirectory-level (used for files in src/)
+│   └── motor.fsm         ← uses src/fsm.toml, NOT project/fsm.toml
+└── lib/
+    └── sensor.fsm        ← uses project/fsm.toml (no lib/fsm.toml)
+```
+
+**Diagnostic for conflicting config:**
+
+If a CLI flag contradicts a config file value, the CLI flag wins silently. If two
+config keys are mutually exclusive (e.g., `--stdout` with `--out`), the tool MUST emit
+exit code `4` with message: `"conflicting options: --stdout and --out cannot be used
+together"`.
 
 ---
 

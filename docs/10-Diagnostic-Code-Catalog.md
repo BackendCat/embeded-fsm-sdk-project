@@ -111,7 +111,41 @@ state Idle$ {}   // FSM-E0001: unexpected character '$'
 
 **Example:**
 ```
-after 999999999999999999999ms -> Timeout;   // FSM-E0004: integer overflow
+after 999999999999999999999ms -> Timeout   // FSM-E0004: integer overflow
+```
+
+---
+
+### FSM-E0005 — Float literal in integer context
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | A float literal (e.g., `3.14`) was used where an integer is required. Float literals are only valid for context fields of type `f32` or `f64`. Timer durations, queue capacities, and priority values require integer literals. |
+| **Fix** | Use an integer literal, or change the target field type to `f32`/`f64`. |
+
+**Example:**
+```
+after 1.5 ms -> Timeout   // FSM-E0005: float literal in integer context (timer duration)
+```
+
+---
+
+### FSM-E0006 — Write to read-only payload field
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | An action block attempted to assign a value to a payload field. Payload fields are read-only in all contexts — they represent the incoming event data and MUST NOT be modified. |
+| **Fix** | Copy the payload value to a context field first: `ctx.field = payload.field`, then modify the context field. |
+
+**Example:**
+```
+on START -> Running: {
+    payload.target_speed = 0;   // FSM-E0006: cannot write to read-only payload field
+}
 ```
 
 ---
@@ -128,7 +162,7 @@ after 999999999999999999999ms -> Timeout;   // FSM-E0004: integer overflow
 **Example:**
 ```
 state Idle {
-    on START Idle;   // FSM-E0010: expected '->', found identifier
+    on START Idle   // FSM-E0010: expected '->', found identifier
 ```
 
 ---
@@ -140,6 +174,22 @@ state Idle {
 | **Severity** | Error |
 | **Recoverable** | No |
 | **Description** | Source ends while the parser is still inside an open declaration. |
+
+---
+
+### FSM-E0012 — Invalid `as` cast
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | An `as` cast was used between incompatible types. Permitted casts: integer-to-integer, integer-to-float, `f32`↔`f64`. Boolean, opaque, and enum types cannot be cast. |
+| **Fix** | Remove the invalid cast or use an intermediate type. |
+
+**Example:**
+```
+ctx.flag = ctx.speed as bool   // FSM-E0012: cannot cast u16 to bool
+```
 
 ---
 
@@ -174,8 +224,10 @@ state Idle { }   // FSM-E0021
 ### FSM-E0022 — Duplicate event name
 
 ```
-event START;
-event START(speed: u16);   // FSM-E0022
+events {
+    START
+    START(speed : u16)   // FSM-E0022
+}
 ```
 
 ---
@@ -183,7 +235,10 @@ event START(speed: u16);   // FSM-E0022
 ### FSM-E0023 — Duplicate context field name
 
 ```
-context { speed: u16; speed: u32; }   // FSM-E0023: duplicate 'speed'
+context {
+    speed : u16
+    speed : u32   // FSM-E0023: duplicate 'speed'
+}
 ```
 
 ---
@@ -191,8 +246,8 @@ context { speed: u16; speed: u32; }   // FSM-E0023: duplicate 'speed'
 ### FSM-E0024 — Duplicate extern name
 
 ```
-extern pure isReady() -> bool;
-extern isReady() -> bool;   // FSM-E0024
+pure extern isReady() : bool
+extern isReady() : bool   // FSM-E0024
 ```
 
 ---
@@ -220,8 +275,8 @@ extern isReady() -> bool;   // FSM-E0024
 
 **Example:**
 ```
-initial -> Idle;
-state Running { on STOP -> Idle; }
+initial Idle
+state Running { on STOP -> Idle }
 // FSM-E0100: 'Idle' not found in machine scope (forgot to declare it)
 ```
 
@@ -235,7 +290,7 @@ Trigger: An `on`, `raise`, `send`, or `defer` references an event name not decla
 in the machine's `event` block.
 
 ```
-on LAUNCH -> Space;   // FSM-E0101: 'LAUNCH' is not declared
+on LAUNCH -> Space   // FSM-E0101: 'LAUNCH' is not declared
 ```
 
 ---
@@ -276,22 +331,22 @@ submachine reference).
 
 **Example:**
 ```
-extern logAndCheck() -> bool;          // no 'pure'
+extern logAndCheck() : bool          // no 'pure'
 
-on START [logAndCheck()] -> Running;   // FSM-E0106
+on START [logAndCheck()] -> Running   // FSM-E0106
 ```
 
 ---
 
 ### FSM-E0107 — No initial declaration
 
-Trigger: A composite state or the machine root has no `initial -> X` declaration.
+Trigger: A composite state or the machine root has no `initial` declaration.
 
 ```
 machine Motor {
     state Idle { }
     state Running { }
-    // FSM-E0107: missing 'initial -> Idle' (or similar)
+    // FSM-E0107: missing 'initial Idle' (or similar)
 }
 ```
 
@@ -299,7 +354,7 @@ machine Motor {
 
 ### FSM-E0108 — Multiple initial declarations
 
-Trigger: Two or more `initial ->` declarations in the same region.
+Trigger: Two or more `initial` declarations in the same region.
 
 ---
 
@@ -314,8 +369,10 @@ Trigger: Two or more `initial ->` declarations in the same region.
 ### FSM-E0200 — Type mismatch in guard expression
 
 ```
-context { running: bool; }
-on START [ctx.running > 10] -> Fast;   // FSM-E0200: cannot compare bool with integer
+context {
+    running : bool
+}
+on START [ctx.running > 10] -> Fast   // FSM-E0200: cannot compare bool with integer
 ```
 
 ---
@@ -323,8 +380,10 @@ on START [ctx.running > 10] -> Fast;   // FSM-E0200: cannot compare bool with in
 ### FSM-E0201 — Type mismatch in assignment
 
 ```
-context { speed: u16; }
-entry: { ctx.speed = true; }   // FSM-E0201: cannot assign bool to u16
+context {
+    speed : u16
+}
+entry : ctx.speed = true   // FSM-E0201: cannot assign bool to u16
 ```
 
 ---
@@ -336,8 +395,8 @@ entry: { ctx.speed = true; }   // FSM-E0201: cannot assign bool to u16
 ### FSM-E0203 — Wrong number of arguments to extern
 
 ```
-extern pure isReady(threshold: u16) -> bool;
-on START [isReady()] -> Running;   // FSM-E0203: expected 1 argument, found 0
+pure extern isReady(threshold : u16) : bool
+on START [isReady()] -> Running   // FSM-E0203: expected 1 argument, found 0
 ```
 
 ---
@@ -351,6 +410,54 @@ Trigger: `payload.field = value` — payload fields are read-only.
 ### FSM-E0205 — Invalid left-hand side of assignment
 
 Trigger: Left side of `=` is not a `ctx.field` reference.
+
+---
+
+### FSM-E0206 — Integer overflow in constant expression
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | A compile-time constant expression overflows the target integer type. For signed types, overflow is always an error. For unsigned types, this error is only emitted for constant expressions in `const` declarations (runtime unsigned overflow wraps per §3.2). |
+| **Fix** | Use a wider type or reduce the expression value. |
+
+**Example:**
+```
+const MAX = 256 * 256 * 256 * 256   // FSM-E0206: overflow in u32 constant (4294967296 > u32 max)
+```
+
+---
+
+### FSM-E0207 — Division by zero in constant expression
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | No |
+| **Description** | A compile-time constant expression divides by zero. |
+
+**Example:**
+```
+const RATIO = 100 / 0   // FSM-E0207: division by zero in constant expression
+```
+
+---
+
+### FSM-E0208 — Negative value in unsigned context
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | A negative literal or provably negative constant expression is assigned to an unsigned integer field. |
+
+**Example:**
+```
+context {
+    count: u16 = -1   // FSM-E0208: negative value -1 in unsigned context (u16)
+}
+```
 
 ---
 
@@ -369,8 +476,8 @@ Trigger: Left side of `=` is not a `ctx.field` reference.
 
 **Example:**
 ```
-on START [ctx.speed > 5]  -> Medium;
-on START [ctx.speed > 10] -> Fast;   // FSM-E0300: overlaps with above guard
+on START [ctx.speed > 5]  -> Medium
+on START [ctx.speed > 10] -> Fast   // FSM-E0300: overlaps with above guard
 ```
 
 **Fix options:**
@@ -396,6 +503,62 @@ MUST be unconditional.
 ---
 
 ### FSM-E0304 — Parallel state region has no initial declaration
+
+---
+
+### FSM-E0310 — Deferred event conflicts with explicit transition
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | A state declares both `defer E` and an explicit `on E -> ...` transition for the same event E. Deferral and explicit handling are mutually exclusive for the same event in the same state. |
+| **Fix** | Remove either the `defer` or the `on` transition. |
+
+**Example:**
+```
+state Processing {
+    defer DATA_RECEIVED
+    on DATA_RECEIVED -> Handling   // FSM-E0310: conflicts with defer above
+}
+```
+
+---
+
+### FSM-E0600 — Parallel region has no `initial` declaration
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | A `region` block inside a parallel state has no `initial` declaration. Every region MUST declare exactly one initial state. |
+| **Fix** | Add `initial StateName` inside the region block. |
+
+**Example:**
+```
+parallel Monitor {
+    region Sensors {
+        state Idle { }       // FSM-E0600: region 'Sensors' has no initial declaration
+        state Active { }
+    }
+}
+```
+
+---
+
+### FSM-E0750 — Fork target is not a parallel region
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | A `fork` pseudo-state lists a target that is not an initial state within a region of a parallel state, or the targets are not in distinct regions of the same parallel state. |
+| **Fix** | Ensure all fork targets are initial states in different regions of the same parallel state. |
+
+**Example:**
+```
+fork StartAll -> { Idle, Running }   // FSM-E0750: Idle and Running are not in parallel regions
+```
 
 ---
 
@@ -464,7 +627,7 @@ Trigger: A self-transition on a composite state using `->` (external) instead of
 | | |
 |---|---|
 | **Severity** | Warning |
-| **Description** | A `~>` history transition is reachable before any exit from the parent state has been recorded. Behavior on first entry is unspecified unless a `default ->` is declared. |
+| **Description** | A transition targeting a history pseudo-state (`-> History`) is reachable before any exit from the parent state has been recorded. Behavior on first entry is unspecified unless a `default ->` is declared. |
 | **Fix** | Add `default -> StateName` to the history declaration. |
 
 ---
@@ -513,7 +676,7 @@ Trigger: A self-transition on a composite state using `->` (external) instead of
 ### FSM-W0400 — Timer duration is zero
 
 ```
-after 0ms -> Timeout;   // FSM-W0400: zero-duration timer fires immediately on entry
+after 0ms -> Timeout   // FSM-W0400: zero-duration timer fires immediately on entry
 ```
 
 ---
@@ -521,7 +684,7 @@ after 0ms -> Timeout;   // FSM-W0400: zero-duration timer fires immediately on e
 ### FSM-W0401 — Timer duration unusually large
 
 ```
-after 999999999ms -> Timeout;   // FSM-W0401: ~11.5 days — verify units
+after 999999999ms -> Timeout   // FSM-W0401: ~11.5 days — verify units
 ```
 
 ---
@@ -534,6 +697,76 @@ after 999999999ms -> Timeout;   // FSM-W0401: ~11.5 days — verify units
 
 Trigger: An event is declared in the `event` block but never appears on any transition
 (`on`), never raised (`raise`/`send`), and never deferred (`defer`).
+
+---
+
+### FSM-W0600 — Region with single state
+
+| | |
+|---|---|
+| **Severity** | Warning |
+| **Suppressible** | Yes |
+| **Description** | A parallel region contains only one state. A region with a single state provides no behavioral benefit and suggests the parallel structure may be unnecessary. |
+| **Fix** | Consider removing the region or adding additional states. Suppress with `// fsm-lint:disable FSM-W0600` if intentional. |
+
+**Example:**
+```
+parallel Trivial {
+    region OnlyOne {
+        initial Sole
+        state Sole { }   // FSM-W0600: region 'OnlyOne' has only one state
+    }
+}
+```
+
+---
+
+### FSM-W0601 — Timer duration exceeds 24 hours
+
+| | |
+|---|---|
+| **Severity** | Warning |
+| **Suppressible** | Yes |
+| **Description** | A timer duration exceeds 86,400,000 milliseconds (24 hours). Very long timers may indicate a unit error (e.g., seconds used where milliseconds expected) and may exceed platform timer resolution. |
+| **Fix** | Verify the duration is correct. Suppress with `// fsm-lint:disable FSM-W0601` if intentional. |
+
+**Example:**
+```
+after 100000000 ms -> Timeout   // FSM-W0601: duration 100000000ms (~27.8 hours) exceeds 24 hours
+```
+
+---
+
+### FSM-W0602 — Unreachable state (no incoming transitions, not initial)
+
+| | |
+|---|---|
+| **Severity** | Warning |
+| **Suppressible** | Yes |
+| **Description** | A state has no incoming transitions and is not declared as the `initial` state of any scope. The state can never become active. |
+| **Fix** | Add a transition targeting this state, mark it as `initial`, or remove it. |
+
+**Example:**
+```
+state Orphan { }   // FSM-W0602: 'Orphan' has no incoming transitions and is not initial
+```
+
+---
+
+### FSM-W0603 — Guard always evaluates to true/false (constant guard)
+
+| | |
+|---|---|
+| **Severity** | Warning |
+| **Suppressible** | Yes |
+| **Description** | A guard expression can be statically proven to always evaluate to the same boolean value. A guard that is always true makes the transition unconditional; a guard that is always false makes the transition dead. |
+| **Fix** | Remove the guard if always true, or remove the transition if always false. |
+
+**Example:**
+```
+on START [true] -> Running        // FSM-W0603: guard always evaluates to true
+on STOP [ctx.x > 0 && ctx.x < 0] -> Error  // FSM-W0603: guard always evaluates to false
+```
 
 ---
 
@@ -580,7 +813,7 @@ state Idle { }
 
 ```
 // Hint: "This transition is always enabled when event RESET is received."
-on RESET -> Error;
+on RESET -> Error
 ```
 
 ### FSM-H0004 — Single-region parallel state
@@ -596,7 +829,7 @@ parallel Redundant {
 
 ```
 // Hint: "Use 'every Xms: action()' instead of a self-transition with 'after Xms'."
-after 100ms -> Self;
+after 100ms -> Self
 ```
 
 ---

@@ -159,8 +159,8 @@ The extension MUST NOT activate on VS Code startup without a `.fsm` file present
   },
   {
     "command": "fsm.openSimulator",
-    "key": "ctrl+shift+s",
-    "mac": "cmd+shift+s",
+    "key": "ctrl+alt+s",
+    "mac": "cmd+alt+s",
     "when": "editorLangId == fsm-lang"
   },
   {
@@ -419,12 +419,12 @@ The extension MUST NOT activate on VS Code startup without a `.fsm` file present
       "        ${2:field}: ${3:u32} = ${4:0};",
       "    }",
       "",
-      "    event ${5:EVENT};",
+      "    events { ${5:EVENT} }",
       "",
-      "    initial -> ${6:Idle};",
+      "    initial ${6:Idle}",
       "",
       "    state ${6:Idle} {",
-      "        on ${5:EVENT} -> ${7:Next};",
+      "        on ${5:EVENT} -> ${7:Next}",
       "    }",
       "",
       "    state ${7:Next} {",
@@ -451,7 +451,7 @@ The extension MUST NOT activate on VS Code startup without a `.fsm` file present
     "prefix": "composite",
     "body": [
       "composite ${1:Name} {",
-      "    initial -> ${2:Sub};",
+      "    initial ${2:Sub}",
       "",
       "    state ${2:Sub} {",
       "        $0",
@@ -465,12 +465,12 @@ The extension MUST NOT activate on VS Code startup without a `.fsm` file present
     "body": [
       "parallel ${1:Name} {",
       "    region ${2:First} {",
-      "        initial -> ${3:Idle};",
+      "        initial ${3:Idle}",
       "        state ${3:Idle} { $0 }",
       "    }",
       "",
       "    region ${4:Second} {",
-      "        initial -> ${5:Idle};",
+      "        initial ${5:Idle}",
       "        state ${5:Idle} { }",
       "    }",
       "}"
@@ -509,16 +509,16 @@ The extension MUST NOT activate on VS Code startup without a `.fsm` file present
     "description": "Choice pseudo-state with branches"
   },
   "Pure extern guard": {
-    "prefix": "extern pure",
+    "prefix": "pure extern",
     "body": [
-      "extern pure ${1:checkCondition}(${2:threshold: u32}) -> bool;"
+      "pure extern ${1:checkCondition}(${2:threshold: u32}) : bool"
     ],
     "description": "Pure extern guard declaration"
   },
   "Extern action": {
     "prefix": "extern",
     "body": [
-      "extern ${1:doAction}(${2:param: u32});"
+      "extern ${1:doAction}(${2:param: u32})"
     ],
     "description": "Extern action declaration"
   }
@@ -607,6 +607,105 @@ If `fsmLang.compilerPath` is set, the user-specified path takes precedence.
 If the bundled binary is not found for the current platform, the extension MUST show
 an error notification: `"FSM Studio: No bundled binary for {platform}-{arch}. Please
 install fsm manually and set fsmLang.compilerPath."`
+
+---
+
+# 13. Language Server Lifecycle and Crash Recovery
+
+The extension manages the `fsm-lang-server` process and implements automatic crash
+recovery with exponential backoff.
+
+### 13.1 Normal Lifecycle
+
+| Event | Extension behavior |
+|---|---|
+| Extension activates | Spawn `fsm-lang-server` with stdio transport; connect `vscode-languageclient` |
+| Server ready | Update status bar to `$(check) FSM`; publish capabilities |
+| File opened | Forward `textDocument/didOpen` to server |
+| File changed | Forward `textDocument/didChange` to server (server debounces internally) |
+| File closed | Forward `textDocument/didClose` to server |
+| Extension deactivates | Send `shutdown` request; wait 2 seconds; send `exit` notification; kill process if still alive |
+
+### 13.2 Crash Detection and Recovery
+
+The extension monitors the server process via `vscode-languageclient`'s built-in crash
+detection. When the server process exits unexpectedly (non-zero exit code or signal):
+
+```typescript
+const clientOptions: LanguageClientOptions = {
+    errorHandler: {
+        error: (error, message, count) => {
+            return { action: ErrorAction.Continue };
+        },
+        closed: () => {
+            if (crashCount < MAX_RESTARTS) {
+                crashCount++;
+                const delay = BASE_DELAY_MS * Math.pow(3, crashCount - 1);
+                return {
+                    action: CloseAction.Restart,
+                    message: `FSM Language Server crashed. Restarting in ${delay / 1000}s... (attempt ${crashCount}/${MAX_RESTARTS})`
+                };
+            }
+            return { action: CloseAction.DoNotRestart };
+        }
+    }
+};
+```
+
+**Recovery parameters:**
+
+| Parameter | Value |
+|---|---|
+| `MAX_RESTARTS` | 3 |
+| `BASE_DELAY_MS` | 3000 (3 seconds) |
+| Backoff multiplier | 3× (exponential) |
+| Attempt 1 delay | 3 seconds |
+| Attempt 2 delay | 9 seconds |
+| Attempt 3 delay | 27 seconds |
+| After 3 failures | Stop auto-restart; show manual restart button |
+
+**Status bar during recovery:**
+
+| State | Icon | Text | Tooltip |
+|---|---|---|---|
+| Restarting (attempt N) | `$(sync~spin)` | `FSM` | `FSM Language Server restarting (attempt N/3)...` |
+| Failed (all attempts exhausted) | `$(circle-slash)` | `FSM (stopped)` | `FSM Language Server stopped. Click to restart.` |
+
+**After all restart attempts fail:**
+
+1. Status bar shows `$(circle-slash) FSM (stopped)`.
+2. A notification is shown:
+   ```
+   "FSM Language Server has stopped after 3 restart attempts.
+   [Restart Language Server] [Show Log] [Dismiss]"
+   ```
+3. Clicking "Restart Language Server" invokes `fsm.restartLanguageServer` command,
+   resets the crash counter, and attempts a fresh start.
+4. Clicking "Show Log" opens the Output Channel for `FSM Language Server`.
+
+**Crash counter reset:**
+
+The crash counter resets to 0 after the server has been running successfully for 60
+seconds. This prevents a single transient crash from permanently consuming a restart
+attempt.
+
+```typescript
+const RESET_DELAY_MS = 60_000;
+let resetTimer: NodeJS.Timeout | undefined;
+
+function onServerReady(): void {
+    resetTimer = setTimeout(() => {
+        crashCount = 0;
+    }, RESET_DELAY_MS);
+}
+
+function onServerCrash(): void {
+    if (resetTimer) {
+        clearTimeout(resetTimer);
+        resetTimer = undefined;
+    }
+}
+```
 
 ---
 

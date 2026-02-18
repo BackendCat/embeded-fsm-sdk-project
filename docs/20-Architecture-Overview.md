@@ -698,7 +698,7 @@ fsm-lexer          (no_std, no deps)
               │
               └──► fsm-analyzer     (depends on: fsm-parser, fsm-ir)
                         │
-                        └──► fsm-ir          (depends on: serde, serde_json)
+                        └──► fsm-ir          (depends on: serde, serde_json, fsm-parser [SourceLocation only])
                                   │
                         ┌─────────┴──────────────────────┐
                         │                                │
@@ -708,7 +708,7 @@ fsm-lexer          (no_std, no deps)
                         └───────────┬────────────────────┘
                                     │
                               fsm-simulator
-                              (depends on: fsm-ir)
+                              (depends on: fsm-ir, fsm-analyzer)
                               (WASM feature: fsm-wasm wraps this)
                                     │
                               fsm-lsp
@@ -728,9 +728,9 @@ fsm-lexer          (no_std, no deps)
 ```
 
 **Key rules:**
-- `fsm-ir` MUST NOT depend on `fsm-parser` or `fsm-analyzer` (avoid cycles).
+- `fsm-ir` depends on `fsm-parser` for `SourceLocation` only — no other parser types are imported.
 - `fsm-codegen-*` MUST depend on `fsm-ir` only — not on the parser or analyzer.
-- `fsm-simulator` takes IR as input — it MUST NOT depend on the parser.
+- `fsm-simulator` depends on `fsm-ir` and `fsm-analyzer` (for semantic validation at load time).
 - `fsm-lsp` is the only crate that imports the full pipeline.
 - `fsm-formatter` depends only on the CST — it does NOT need `fsm-analyzer` or IR.
 - `fsm-wasm` re-exports the full pipeline with `#[wasm_bindgen]` attributes.
@@ -752,7 +752,245 @@ cd editors/vscode && npx vsce package
 
 ---
 
-# 12. Architecture Decision Records
+# 12. Public API Surface — Per-Crate Contracts
+
+Each crate exposes a minimal public API. Crates MUST NOT depend on types from
+other crates beyond what is listed in the dependency graph (§11.5).
+
+## 12.1 `fsm-lexer` Public API
+
+```rust
+// Re-exported types
+pub struct Span { pub start: usize, pub end: usize }
+pub struct Token { pub kind: TokenKind, pub span: Span }
+pub enum TokenKind { /* ~60 variants — see §3.3 */ }
+
+// Public functions
+pub struct Lexer<'src> { /* ... */ }
+impl<'src> Lexer<'src> {
+    pub fn new(src: &'src str) -> Self;
+    pub fn next_token(&mut self) -> Token;
+    pub fn tokenize(src: &'src str) -> Vec<Token>;
+}
+```
+
+## 12.2 `fsm-parser` Public API
+
+```rust
+pub fn parse(src: &str) -> ParseResult;
+pub fn parse_incremental(old_tree: &SyntaxNode, edit: &TextEdit) -> ParseResult;
+
+pub struct ParseResult {
+    pub tree: SyntaxNode,
+    pub errors: Vec<ParseError>,
+}
+
+// AST node types (thin wrappers over CST nodes)
+pub struct MachineDecl(SyntaxNode);
+pub struct StateDecl(SyntaxNode);
+pub struct EventDecl(SyntaxNode);
+pub struct ExternDecl(SyntaxNode);
+pub struct TransitionDecl(SyntaxNode);
+pub struct GuardExpr(SyntaxNode);
+pub struct ActionList(SyntaxNode);
+pub struct ContextBlock(SyntaxNode);
+pub struct RegionDecl(SyntaxNode);
+// ... (one per grammar rule)
+```
+
+## 12.3 `fsm-analyzer` Public API
+
+```rust
+pub fn analyze(ast: &[MachineDecl]) -> AnalysisResult;
+pub fn analyze_incremental(
+    prev: &AnalysisResult, changed: &MachineDecl
+) -> AnalysisResult;
+
+pub struct AnalysisResult {
+    pub ir: IrDocument,
+    pub diagnostics: Vec<AnalysisDiagnostic>,
+    pub symbol_table: SymbolTable,
+}
+```
+
+## 12.4 `fsm-ir` Public API
+
+```rust
+// Types
+pub struct IrDocument { pub version: String, pub machines: Vec<MachineObject> }
+pub struct MachineObject { pub id: String, pub name: String, /* ... */ }
+pub struct StateNode { pub id: String, pub name: String, pub kind: StateKind, /* ... */ }
+pub struct TransitionObject { pub id: String, pub source: String, pub target: String, /* ... */ }
+pub enum StateKind { Simple, Composite, Parallel, Final, Choice, Junction, Fork, Join }
+
+// Serialization
+pub fn to_json(doc: &IrDocument) -> Result<String, IrError>;
+pub fn from_json(json: &str) -> Result<IrDocument, IrError>;
+
+// Builder API
+pub struct MachineBuilder { /* ... */ }
+impl MachineBuilder {
+    pub fn new(name: &str) -> Self;
+    pub fn add_state(&mut self, state: StateNode) -> &mut Self;
+    pub fn add_transition(&mut self, trans: TransitionObject) -> &mut Self;
+    pub fn build(self) -> MachineObject;
+}
+
+// Visitor — see §12.8
+pub trait IrVisitor { /* ... */ }
+```
+
+## 12.5 `fsm-codegen-c` Public API
+
+```rust
+pub fn generate(ir: &IrDocument, config: &CodegenConfig) -> Result<EmittedFiles, CodegenError>;
+
+pub struct CodegenConfig {
+    pub strategy: CodegenStrategy,
+    pub queue_capacity: u8,
+    pub queue_overflow: OverflowPolicy,
+    pub isr_safe: bool,
+}
+
+pub struct EmittedFiles {
+    pub header: String,       // Motor.h content
+    pub source: String,       // Motor.c content
+    pub impl_header: String,  // Motor_impl.h content
+    pub conf_header: String,  // Motor_conf.h content
+}
+```
+
+## 12.6 `fsm-codegen-cpp` Public API
+
+```rust
+pub fn generate(ir: &IrDocument, config: &CppCodegenConfig) -> Result<EmittedFiles, CodegenError>;
+
+pub struct CppCodegenConfig {
+    pub strategy: CodegenStrategy,
+    pub impl_style: ImplStyle,       // Crtp | VtableClassic
+    pub stl_profile: StlProfile,     // NoStl | UseStl
+    pub queue_capacity: u8,
+    pub queue_overflow: OverflowPolicy,
+    pub isr_safe: bool,
+}
+```
+
+## 12.7 `fsm-simulator` Public API
+
+```rust
+pub struct Interpreter { /* ... */ }
+impl Interpreter {
+    pub fn new(machine: &MachineObject) -> Self;
+    pub fn init(&mut self, context: Option<ContextValues>) -> StepResult;
+    pub fn dispatch(&mut self, event: SimEvent) -> Vec<StepRecord>;
+    pub fn tick(&mut self, elapsed_ms: u32) -> Vec<StepRecord>;
+    pub fn configuration(&self) -> &ActiveConfiguration;
+    pub fn context(&self) -> &ContextValues;
+    pub fn set_context_field(&mut self, name: &str, value: JsonValue) -> Result<(), SimError>;
+    pub fn set_breakpoint(&mut self, bp: Breakpoint) -> BreakpointId;
+    pub fn clear_breakpoint(&mut self, id: BreakpointId);
+    pub fn trace(&self) -> &[StepRecord];
+}
+```
+
+## 12.8 `fsm-ir` Visitor Pattern
+
+The `IrVisitor` trait provides a default traversal of the IR tree. Implementations
+override specific `visit_*` methods. The `walk_*` methods provide default traversal
+that calls child visitors.
+
+```rust
+pub trait IrVisitor {
+    fn visit_document(&mut self, doc: &IrDocument)        { self.walk_document(doc); }
+    fn visit_machine(&mut self, m: &MachineObject)        { self.walk_machine(m); }
+    fn visit_state(&mut self, s: &StateNode)              { self.walk_state(s); }
+    fn visit_transition(&mut self, t: &TransitionObject)  {}
+    fn visit_guard(&mut self, g: &GuardExpr)              {}
+    fn visit_action(&mut self, a: &ActionStatement)       {}
+    fn visit_statement(&mut self, s: &Statement)          {}
+    fn visit_expr(&mut self, e: &Expr)                    {}
+    fn visit_timer(&mut self, t: &TimerDecl)              {}
+    fn visit_context_field(&mut self, f: &FieldDecl)      {}
+    fn visit_event(&mut self, e: &EventDecl)              {}
+    fn visit_region(&mut self, r: &RegionNode)            { self.walk_region(r); }
+
+    // Default traversal methods
+    fn walk_document(&mut self, doc: &IrDocument) {
+        for m in &doc.machines { self.visit_machine(m); }
+    }
+    fn walk_machine(&mut self, m: &MachineObject) {
+        for f in &m.context.fields { self.visit_context_field(f); }
+        for e in &m.events { self.visit_event(e); }
+        for s in &m.states { self.visit_state(s); }
+        for t in &m.transitions { self.visit_transition(t); }
+        for tmr in &m.timers { self.visit_timer(tmr); }
+    }
+    fn walk_state(&mut self, s: &StateNode) {
+        for child in &s.children { self.visit_state(child); }
+        for r in &s.regions { self.visit_region(r); }
+    }
+    fn walk_region(&mut self, r: &RegionNode) {
+        for s in &r.states { self.visit_state(s); }
+    }
+}
+```
+
+Used by: `fsm-codegen-c` (CodegenPlan builder), `fsm-codegen-cpp` (same),
+`fsm-analyzer` (reachability analysis), `fsm-simulator` (interpreter traversal).
+
+## 12.9 Formatter CST API
+
+The formatter operates on the **CST** (Concrete Syntax Tree), NOT the AST or IR.
+This preserves comments, whitespace, and original token positions.
+
+```rust
+// CST node types (from fsm-parser, used by fsm-formatter)
+pub enum SyntaxKind {
+    // Composite nodes (non-terminal)
+    SourceFile, MachineDecl, StateDecl, RegionDecl, ContextBlock,
+    EventsBlock, EventDecl, ExternDecl, TransitionDecl, InternalDecl,
+    LocalDecl, CompletionDecl, AfterDecl, EveryDecl, DeferDecl,
+    GuardExpr, ActionList, Statement, Expr, ChoiceDecl, JunctionDecl,
+    ForkDecl, JoinDecl, HistoryDecl, FinalDecl, InitialDecl,
+    FieldDecl, ParamDecl, TypeRef, StableId, DocComment,
+    IfStmt, WhileStmt, ForStmt, AssignStmt, CallExpr, CastExpr,
+
+    // Token nodes (terminal) — one per TokenKind
+    KwMachine, KwState, /* ... all token kinds from fsm-lexer ... */
+    Whitespace, Newline, LineComment, BlockComment,
+}
+
+// fsm-parser → fsm-formatter interface
+pub struct SyntaxNode { /* rowan GreenNode wrapper */ }
+impl SyntaxNode {
+    pub fn kind(&self) -> SyntaxKind;
+    pub fn text_range(&self) -> TextRange;
+    pub fn children(&self) -> impl Iterator<Item = SyntaxNode>;
+    pub fn children_with_tokens(&self) -> impl Iterator<Item = SyntaxElement>;
+    pub fn first_token(&self) -> Option<SyntaxToken>;
+    pub fn last_token(&self) -> Option<SyntaxToken>;
+}
+
+pub struct SyntaxToken { /* rowan GreenToken wrapper */ }
+impl SyntaxToken {
+    pub fn kind(&self) -> SyntaxKind;
+    pub fn text(&self) -> &str;
+    pub fn text_range(&self) -> TextRange;
+}
+
+pub enum SyntaxElement {
+    Node(SyntaxNode),
+    Token(SyntaxToken),
+}
+```
+
+The formatter walks the CST using `children_with_tokens()` to access both structural
+nodes and trivia (whitespace, comments). It rebuilds the output string by applying
+formatting rules to the structure while preserving comment content verbatim.
+
+---
+
+# 13. Architecture Decision Records (Renumbered from §12)
 
 ## ADR-001: Why Rust for the Toolchain
 
@@ -822,16 +1060,90 @@ expressed in TypeScript. Heavy computation is offloaded to WASM workers.
 
 ## 13.1 Error Handling
 
-All public APIs return `Result<T, FsmError>`. `FsmError` is a non-exhaustive enum:
+All public APIs return `Result<T, FsmError>`. Each crate defines its own error type
+that converts into the top-level `FsmError`.
+
+### Per-Crate Error Types
+
+```rust
+// fsm-lexer — no errors (emits TokenKind::Error tokens instead)
+
+// fsm-parser
+pub enum ParseError {
+    UnexpectedToken { span: Span, expected: Vec<TokenKind>, found: TokenKind },
+    UnterminatedString { span: Span },
+    UnterminatedComment { span: Span },
+    UnexpectedEof { span: Span },
+}
+
+// fsm-analyzer
+pub enum AnalysisError {
+    DuplicateDeclaration { name: String, first: Span, second: Span, code: &'static str },
+    UnresolvedReference { name: String, span: Span, code: &'static str },
+    TypeMismatch { expected: TypeRef, found: TypeRef, span: Span, code: &'static str },
+    DeterminismConflict { transitions: Vec<TransitionId>, code: &'static str },
+    ReachabilityViolation { state: String, code: &'static str },
+}
+
+// fsm-ir
+pub enum IrError {
+    SchemaVersionMismatch { expected: String, found: String },
+    InvalidNodeId { id: String },
+    SerializationError(serde_json::Error),
+}
+
+// fsm-codegen-c / fsm-codegen-cpp
+pub enum CodegenError {
+    UnsupportedConstruct { construct: String, reason: String },
+    NamingConflict { name: String },
+    IoError(std::io::Error),
+}
+
+// fsm-simulator
+pub enum SimError {
+    InstanceNotFound { id: String },
+    InvalidEvent { name: String },
+    CompletionLoopDetected,
+    ClockViolation { msg: String },
+}
+
+// fsm-formatter
+pub enum FormatError {
+    ParseError(Vec<ParseError>),  // formatter needs a valid CST
+    IoError(std::io::Error),
+}
+```
+
+### Error Propagation Path
+
+```
+fsm-lexer    → TokenKind::Error (no Result)
+    │
+fsm-parser   → Result<ParseResult, Vec<ParseError>>
+    │
+fsm-analyzer → Result<AnalysisResult, Vec<AnalysisError>>
+    │
+fsm-ir       → Result<IrDocument, IrError>
+    │
+    ├── fsm-codegen-c   → Result<EmittedFiles, CodegenError>
+    ├── fsm-codegen-cpp  → Result<EmittedFiles, CodegenError>
+    ├── fsm-simulator    → Result<StepResult, SimError>
+    └── fsm-formatter    → Result<String, FormatError>
+```
+
+Top-level `FsmError` aggregates all error types:
 
 ```rust
 #[non_exhaustive]
 pub enum FsmError {
-    ParseError(Vec<ParseError>),
-    AnalysisError(Vec<AnalysisDiagnostic>),
-    IoError(std::io::Error),
-    JsonError(serde_json::Error),
-    SchemaVersionMismatch { expected: String, found: String },
+    Parse(Vec<ParseError>),
+    Analysis(Vec<AnalysisError>),
+    Ir(IrError),
+    Codegen(CodegenError),
+    Simulator(SimError),
+    Format(FormatError),
+    Io(std::io::Error),
+    Json(serde_json::Error),
 }
 ```
 

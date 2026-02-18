@@ -126,13 +126,34 @@ The server reads the following keys via `workspace/configuration` on startup and
   "insertText": "machine ${1:Name} {\n    $0\n}"
 }
 ```
-Full keyword list: `machine`, `state`, `parallel`, `composite`, `event`, `extern`,
-`pure`, `context`, `initial`, `final`, `history`, `shallow`, `deep`, `choice`,
-`junction`, `fork`, `join`, `entry`, `exit`, `on`, `after`, `every`, `defer`,
-`raise`, `send`, `to`, `if`, `else`, `while`, `for`, `priority`, `internal`.
 
-**State names** — `kind: 7` (Class), triggered after `->`, `~>`, `initial ->`,
-`history default ->`
+```json
+{
+  "label": "composite",
+  "kind": 14,
+  "detail": "(keyword)",
+  "insertTextFormat": 2,
+  "insertText": "composite ${1:Name} {\n    initial ${2:Sub}\n\n    state ${2:Sub} {\n        $0\n    }\n}"
+}
+```
+
+```json
+{
+  "label": "parallel",
+  "kind": 14,
+  "detail": "(keyword)",
+  "insertTextFormat": 2,
+  "insertText": "parallel ${1:Name} {\n    region ${2:First} {\n        initial ${3:Sub}\n        state ${3:Sub} { $0 }\n    }\n}"
+}
+```
+Full keyword list (matches Doc 04 §1.5): `machine`, `state`, `composite`, `parallel`,
+`events`, `event`, `extern`, `pure`, `context`, `initial`, `final`, `history`,
+`shallow`, `deep`, `choice`, `junction`, `fork`, `join`, `entry`, `exit`, `on`,
+`after`, `every`, `defer`, `raise`, `send`, `to`, `if`, `else`, `while`, `for`,
+`priority`, `feature`, `language`, `region`, `ms`.
+
+**State names** — `kind: 7` (Class), triggered after `->`, `~>`, `initial`,
+`history shallow`, `history deep`
 ```json
 {
   "label": "Running",
@@ -177,10 +198,10 @@ Full keyword list: `machine`, `state`, `parallel`, `composite`, `event`, `extern
 **Snippets** — offered on empty lines within state bodies
 ```json
 [
-  { "label": "on EVENT -> TARGET", "insertText": "on ${1:EVENT} -> ${2:Target};", "kind": 15 },
-  { "label": "after Xms -> TARGET", "insertText": "after ${1:1000}ms -> ${2:Timeout};", "kind": 15 },
-  { "label": "entry block", "insertText": "entry: {\n    $0\n}", "kind": 15 },
-  { "label": "exit block",  "insertText": "exit: {\n    $0\n}", "kind": 15 }
+  { "label": "on EVENT -> TARGET", "insertText": "on ${1:EVENT} -> ${2:Target}", "kind": 15 },
+  { "label": "after Xms -> TARGET", "insertText": "after ${1:1000} ms -> ${2:Timeout}", "kind": 15 },
+  { "label": "entry action", "insertText": "entry : ${1:action}", "kind": 15 },
+  { "label": "exit action",  "insertText": "exit : ${1:action}", "kind": 15 }
 ]
 ```
 
@@ -267,7 +288,7 @@ Returns all reference locations for the entity under cursor.
 
 | Entity | References include |
 |---|---|
-| State | All `->` transition targets, all `initial ->`, all `history default ->`, all fork targets, all join sources |
+| State | All `->` transition targets, all `initial` declarations, all `history default ->`, all fork targets, all join sources |
 | Event | All `on E`, `raise E`, `send E`, `defer E` |
 | Extern | All call sites in guards and action blocks |
 | Context field | All `ctx.field` reads and writes |
@@ -316,7 +337,7 @@ Code actions are offered when the cursor is within a diagnostic span.
 | Diagnostic code | Action kind | Title | Effect |
 |---|---|---|---|
 | FSM-E0100 (Unknown state) | `quickfix` | "Create state `X`" | Inserts skeleton `state X { }` |
-| FSM-E0107 (No initial) | `quickfix` | "Add initial declaration" | Inserts `initial -> FirstState;` |
+| FSM-E0107 (No initial) | `quickfix` | "Add initial declaration" | Inserts `initial FirstState` |
 | FSM-E0106 (Non-pure extern in guard) | `quickfix` | "Add `pure` to extern `X`" | Inserts `pure` modifier |
 | FSM-W0200 (Loop in action) | `quickfix` | "Suppress with comment" | Inserts `// fsm-lint:disable FSM-W0200` |
 | FSM-W0500 (Unused extern) | `quickfix` | "Remove unused extern `X`" | Deletes the extern declaration |
@@ -349,6 +370,11 @@ Code actions are offered when the cursor is within a diagnostic span.
 | 8 | `operator` | `->`, `~>`, `:`, `=`, `[`, `]`, `&&`, `\|\|`, comparison operators |
 | 9 | `comment` | Line comments, block comments |
 | 10 | `decorator` | `@id(...)` annotation |
+
+**Pseudo-state keywords** — The keywords `choice`, `junction`, `fork`, and `join` use
+token type index 5 (`keyword`) with modifier index 0 (`declaration`) at their
+declaration sites. Pseudo-state names appearing as transition targets (e.g., after
+`->` or `~>`) use token type index 1 (`type`).
 
 ### Token Modifier Legend
 
@@ -406,13 +432,16 @@ Machine: Motor
   │     └── STOP
   ├── externs
   │     └── isSpeedValid (pure)
-  └── states
-        ├── Idle (simple)
-        │     └── after 5000ms -> Error
-        ├── Running (composite)
-        │     ├── Normal (simple)
-        │     └── Fast (simple)
-        └── Error (simple, final)
+  ├── states
+  │     ├── Idle (simple)
+  │     │     └── after 5000ms -> Error
+  │     ├── Running (composite)
+  │     │     ├── Normal (simple)
+  │     │     └── Fast (simple)
+  │     └── Error (simple, final)
+  └── pseudo-states
+        ├── SpeedSelect (choice)
+        └── StartAll (fork)
 ```
 
 ---

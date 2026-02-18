@@ -205,15 +205,44 @@ function compute_exit_set(transitions) → ordered list of states:
     return topological_sort(exit_set, order = innermost_first)
 ```
 
-## 6.2 Execution Order
+## 6.2 Execution Order — Precise Algorithm
 
-Exit actions MUST be called in **innermost-first** order. For a configuration
-`Root → Operational → Running`:
+Exit actions MUST be called in **innermost-first** order. The algorithm for computing
+the ordered exit sequence from a source state S up to (but not including) the LCA:
+
+```
+function ordered_exit_sequence(source, lca) → list of states:
+    sequence ← []
+    current ← source
+
+    while current ≠ lca:
+        if current is parallel:
+            (* Exit all regions in reverse declaration order *)
+            for region R in reverse(current.regions):
+                leaf ← active_leaf_in(R)
+                sequence += ordered_exit_sequence(leaf, R)
+                (* Do NOT add R itself — it is part of current *)
+        sequence.append(current)
+        current ← current.parent
+
+    return sequence
+```
+
+For a configuration `Root → Operational → Running`:
 
 ```
 call exit_Running()
 call exit_Operational()
 (Root is the LCA — not exited)
+```
+
+For a configuration `Root → Monitor{Sensors.Active, Output.On}` where Monitor is LCA:
+
+```
+(* Reverse region order: Output exits first, then Sensors *)
+call exit_On()         (* Output region leaf *)
+call exit_Active()     (* Sensors region leaf *)
+(* Monitor is the LCA — not exited *)
 ```
 
 ## 6.3 Parallel Regions Exit Order
@@ -253,10 +282,37 @@ function compute_entry_set(transitions) → ordered list of states:
     return topological_sort(entry_set, order = outermost_first)
 ```
 
-## 7.2 Execution Order
+## 7.2 Execution Order — Precise Algorithm
 
-Entry actions MUST be called in **outermost-first** order. For entering
-`Operational → Running`:
+Entry actions MUST be called in **outermost-first** order. The algorithm for computing
+the ordered entry sequence from the LCA down to the target:
+
+```
+function ordered_entry_sequence(lca, target) → list of states:
+    (* Build path from LCA's direct child down to target *)
+    path ← []
+    current ← target
+    while current.parent ≠ lca:
+        path.prepend(current)
+        current ← current.parent
+    path.prepend(current)  (* LCA's direct child *)
+
+    sequence ← []
+    for state S in path:
+        sequence.append(S)
+        call entry_action(S)
+        if S is parallel AND S ≠ target:
+            (* Enter all regions that are NOT on the path to target *)
+            for region R in S.regions:
+                if R does not contain any state in path:
+                    sequence += enter_initial_substates(R)
+
+    (* Expand initial substates of the target *)
+    sequence += expand_initial(target)
+    return sequence
+```
+
+For entering `Operational → Running`:
 
 ```
 call entry_Operational()
@@ -289,17 +345,17 @@ function expand_initial(state) → list of states:
 ## 8.1 Shallow History
 
 Shallow history stores the **direct active child** of the parent composite state.
-On the next `~>` (history transition) into that composite, that direct child is entered
-(and its own initial expansion runs normally).
+On the next transition targeting the history pseudo-state (`-> History`) into that composite,
+that direct child is entered (and its own initial expansion runs normally).
 
 ```
 Composite: Operating
-  Shallow history: ~>History
+  Shallow history: -> History
   States: Idle, Working, Finishing
 
 If configuration was Operating.Working when Operating was exited:
   history_Operating = Working
-Next ~>History entry: enters Working (then expands Working's initial substate if composite)
+Next -> History entry: enters Working (then expands Working's initial substate if composite)
 ```
 
 ## 8.2 Deep History
@@ -309,7 +365,7 @@ On restore, the exact leaf state is re-entered via the full path.
 
 ## 8.3 First Entry (No History Stored)
 
-If no history is stored and a `~>` transition is taken:
+If no history is stored and a `-> History` transition is taken:
 - If `history` has a `defaultTarget`: enter that state.
 - If no `defaultTarget`: FSM-W0100 is emitted at compile time. At runtime, the
   machine MUST emit an assertion failure (FSM_ASSERT) or enter the initial substate
@@ -369,6 +425,43 @@ queue (after release):  [D, E, A, B, C]
 
 Deferred events MUST NOT be immediately re-deferred if the new state also has `defer E`.
 The release only happens on exit from the last deferring state in the ancestor chain.
+
+## 10.5 Deferred Events in Parallel Regions
+
+When a machine has parallel regions, deferral is evaluated **per-region**. A `defer E`
+declaration in one region does NOT prevent other regions from processing event E.
+
+**Normative rule:** During dispatch of event E to a parallel state:
+1. For each active region R, check if the active state in R has `defer E`.
+2. If region R defers E: E is added to R's defer set. R does not process E.
+3. If region R does NOT defer E: R processes E normally (transition selection proceeds).
+4. E is only added to the machine-level defer set if ALL active regions defer E.
+
+**Example:**
+```
+parallel Monitor {
+    region Sensors {
+        state Calibrating {
+            defer DATA_RECEIVED    // Sensors defers DATA_RECEIVED
+            on CALIBRATE_DONE -> Active
+        }
+        state Active {
+            on DATA_RECEIVED -> Processing
+        }
+    }
+    region Output {
+        state Idle {
+            on DATA_RECEIVED -> Rendering  // Output processes DATA_RECEIVED
+        }
+    }
+}
+```
+
+When Monitor is active with `Sensors.Calibrating` and `Output.Idle`, and
+`DATA_RECEIVED` is dispatched:
+- Sensors region: defers the event (Calibrating has `defer DATA_RECEIVED`)
+- Output region: processes the event (transitions `Idle → Rendering`)
+- The event is NOT machine-level deferred because Output handled it.
 
 ---
 
@@ -487,16 +580,25 @@ would have fired in the elapsed interval, in chronological order.
 ## 15.1 Machine Definition
 
 ```
-machine TrafficLight {
-    context { green_ms: u32 = 30000; }
-    event TIMER;
-    initial -> Red;
+language fsm 2.0
+feature timers
 
-    state Red   { after 30000ms -> Green; }
-    state Green { after ctx.green_ms ms -> Yellow; }
-    state Yellow { after 5000ms -> Red; }
+machine TrafficLight {
+    context {
+        green_ms : u32 = 30000
+    }
+    events { TIMER }
+    initial Red
+
+    state Red    { after 30000 ms -> Green }
+    state Green  { after 30000 ms -> Yellow }
+    state Yellow { after 5000 ms -> Red }
 }
 ```
+
+> **Note:** The `green_ms` context field is declared for illustrative purposes.
+> Runtime-variable timer durations (`after ctx.green_ms ms`) are a post-v1.0 feature;
+> v1.0 timers use compile-time constant values only.
 
 ## 15.2 Step-by-Step Execution
 

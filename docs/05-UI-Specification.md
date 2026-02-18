@@ -563,7 +563,7 @@ All commands prefixed with `FSM Studio:`.
 | Command | Default Keybinding | Description |
 |---|---|---|
 | `FSM Studio: Open Diagram` | `Ctrl+Shift+D` | Open diagram for current file. |
-| `FSM Studio: Open Simulator` | `Ctrl+Shift+S` | Open simulator panel. |
+| `FSM Studio: Open Simulator` | `Ctrl+Alt+S` | Open simulator panel. |
 | `FSM Studio: Generate Code` | `Ctrl+Shift+G` | Run code generator for current file. |
 | `FSM Studio: Compile to IR` | — | Emit canonical JSON model. |
 | `FSM Studio: Format Document` | `Shift+Alt+F` | Format current `.fsm` file. |
@@ -750,7 +750,7 @@ Identical feature set to VS Code extension diagram panel (§1.5) with adaptation
 
 Identical feature set to VS Code simulator panel (§1.6) with adaptations:
 - Layout is vertical (stacked sections) instead of horizontal to fit narrower panel.
-- WebSocket connects to `fsm-sim` at configured URL (default: `ws://localhost:7400`).
+- WebSocket connects to `fsm-sim` at configured URL (default: `ws://localhost:7842`).
 - If `fsm-sim` is not running, shows a connection error banner with setup instructions.
 
 ### Simulator tab layout (vertical stacking)
@@ -813,10 +813,10 @@ Accessible via `⚙` icon (bottom-left of sidebar, above status bar).
 │                                                                  │
 │ CODE GENERATION                                                  │
 │ Default profile   [C99 ▾]                                        │
-│ Strategy          [switch-based ▾]                               │
+│ Strategy          [switch_based ▾]                               │
 │                                                                  │
 │ SIMULATOR                                                        │
-│ Server URL        [ws://localhost:7400          ]                 │
+│ Server URL        [ws://localhost:7842          ]                 │
 │ Auto-connect      [● On  ○ Off]                                  │
 │                                                                  │
 │ APPEARANCE                                                       │
@@ -876,7 +876,7 @@ Maximum share payload: 64KB uncompressed. If exceeded, shows error:
 
 ### Queue overflow
 
-- Toast notification: "⚠ Queue overflow: event dropped (drop-oldest policy)."
+- Toast notification: "⚠ Queue overflow: event dropped (drop_oldest policy)."
 - Trace log entry: `⚠ OVERFLOW: EVENT_NAME dropped`.
 - Diagram: queue overflow indicator badge on machine name.
 

@@ -55,9 +55,16 @@ naming conventions to ensure compatibility with VS Code themes.
 | Pseudo-state keywords (`initial`, `final`, `history`, `choice`, `junction`, `fork`, `join`) | `keyword.type.pseudo.fsm` |
 | History type (`shallow`, `deep`) | `keyword.other.history.fsm` |
 | `to` keyword (in `send E to M`) | `keyword.operator.to.fsm` |
+| `as` keyword | `keyword.operator.as.fsm` |
 | `priority` keyword | `keyword.other.priority.fsm` |
 | `internal` keyword | `keyword.modifier.internal.fsm` |
+| Submachine keyword | `keyword.declaration.submachine.fsm` |
 | `region` keyword | `keyword.declaration.region.fsm` |
+| `events` keyword | `keyword.declaration.events.fsm` |
+| `feature` keyword | `keyword.declaration.feature.fsm` |
+| `language` keyword | `keyword.declaration.language.fsm` |
+| `entry` keyword | `keyword.control.entry.fsm` |
+| `exit` keyword | `keyword.control.exit.fsm` |
 | `ms` unit | `keyword.other.unit.fsm` |
 | Machine name (declaration) | `entity.name.type.machine.fsm` |
 | State name (declaration) | `entity.name.type.state.fsm` |
@@ -71,12 +78,13 @@ naming conventions to ensure compatibility with VS Code themes.
 | `payload` keyword | `variable.language.payload.fsm` |
 | `.` field access | `punctuation.accessor.fsm` |
 | `->` arrow | `keyword.operator.arrow.fsm` |
-| `~>` history arrow | `keyword.operator.history-arrow.fsm` |
+| `~>` local arrow | `keyword.operator.local-arrow.fsm` |
 | `[` `]` guard delimiters | `punctuation.definition.guard.fsm` |
 | Guard expression | `meta.guard.fsm` |
 | `@id(...)` annotation | `meta.annotation.fsm` |
 | `@id` keyword | `storage.modifier.annotation.fsm` |
 | Stable ID string | `string.quoted.double.annotation.fsm` |
+| Float literal | `constant.numeric.float.fsm` |
 | Integer literal | `constant.numeric.integer.fsm` |
 | Boolean literal (`true`, `false`) | `constant.language.boolean.fsm` |
 | String literal | `string.quoted.double.fsm` |
@@ -320,7 +328,7 @@ naming conventions to ensure compatibility with VS Code themes.
 
     "arrow": {
       "patterns": [
-        { "name": "keyword.operator.history-arrow.fsm", "match": "~>" },
+        { "name": "keyword.operator.local-arrow.fsm", "match": "~>" },
         { "name": "keyword.operator.arrow.fsm",         "match": "->" }
       ]
     },
@@ -359,17 +367,17 @@ naming conventions to ensure compatibility with VS Code themes.
 
     "keywords-declaration": {
       "name": "keyword.declaration.fsm",
-      "match": "\\b(machine|state|composite|parallel|event|extern|context|pure|submachine|region)\\b"
+      "match": "\\b(machine|state|composite|parallel|events|event|extern|context|pure|submachine|region|feature|language)\\b"
     },
 
     "keywords-control": {
       "name": "keyword.control.fsm",
-      "match": "\\b(if|else|while|for|internal)\\b"
+      "match": "\\b(if|else|while|for|entry|exit|internal)\\b"
     },
 
     "keywords-operator": {
       "name": "keyword.operator.fsm",
-      "match": "\\b(on|after|every|raise|send|defer|to|priority|ms)\\b"
+      "match": "\\b(on|after|every|raise|send|defer|to|as|priority|ms)\\b"
     },
 
     "type-primitive": {
@@ -394,6 +402,7 @@ naming conventions to ensure compatibility with VS Code themes.
     "literals": {
       "patterns": [
         { "include": "#string" },
+        { "name": "constant.numeric.float.fsm",    "match": "\\b\\d+\\.\\d+\\b" },
         { "name": "constant.numeric.integer.fsm",  "match": "\\b[0-9]+\\b" },
         { "name": "constant.language.boolean.fsm", "match": "\\b(true|false)\\b" },
         {
@@ -492,9 +501,10 @@ in both dark and light themes.
 | `variable.language.ctx.fsm` | `ctx` keyword | Light blue (`#9cdcfe`) | Blue |
 | `variable.other.field.fsm` | Context/payload field | Light blue (`#9cdcfe`) | Blue |
 | `keyword.operator.arrow.fsm` | `->` arrow | White (`#d4d4d4`) | Dark gray |
-| `keyword.operator.history-arrow.fsm` | `~>` history arrow | Cyan | Teal |
+| `keyword.operator.local-arrow.fsm` | `~>` local arrow | Cyan | Teal |
 | `meta.guard.fsm` | Guard expression background | Subtle highlight | |
-| `constant.numeric.integer.fsm` | Numbers | Light green (`#b5cea8`) | Dark green |
+| `constant.numeric.float.fsm` | Float numbers | Light green (`#b5cea8`) | Dark green |
+| `constant.numeric.integer.fsm` | Integer numbers | Light green (`#b5cea8`) | Dark green |
 | `constant.language.boolean.fsm` | true/false | Blue | Dark blue |
 | `string.quoted.double.fsm` | String | Orange-brown (`#ce9178`) | Red-brown |
 | `comment.*` | Comments | Green (`#6a9955`) | Dark green |

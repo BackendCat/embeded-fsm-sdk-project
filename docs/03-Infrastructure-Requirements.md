@@ -389,7 +389,7 @@ The simulator MUST be a self-contained process (`fsm-sim`) that:
 
 ## 7.2 WebSocket Protocol
 
-The simulator MUST expose a JSON-RPC 2.0 API over WebSocket on a configurable port (default: 7400).
+The simulator MUST expose a JSON-RPC 2.0 API over WebSocket on a configurable port (default: 7842).
 
 ### 7.2.1 Required Methods
 
@@ -411,6 +411,323 @@ The simulator MUST expose a JSON-RPC 2.0 API over WebSocket on a configurable po
 | `sim.getTrace` | Retrieve the execution trace. |
 | `sim.replay` | Load and replay a trace. |
 | `sim.getSchema` | Return the protocol schema version. |
+
+### 7.2.1.1 Method Schemas (Normative)
+
+All methods use JSON-RPC 2.0. Parameters and results are defined using TypeScript-style interfaces.
+
+**`sim.init` — Load and initialize a machine**
+```typescript
+// Params
+interface SimInitParams {
+  ir: IrDocument;                    // Full IR JSON document
+  instanceId?: string;               // Optional custom instance ID (default: auto-generated)
+  initialContext?: Record<string, any>; // Override context field defaults
+}
+// Result
+interface SimInitResult {
+  instanceId: string;                // Assigned instance ID
+  configuration: { active: string[] }; // Initial active state IDs
+  context: Record<string, any>;      // Initial context values
+}
+```
+
+**`sim.step` — Execute one event dispatch cycle**
+```typescript
+// Params
+interface SimStepParams {
+  instanceId: string;
+}
+// Result
+interface SimStepResult {
+  stepped: boolean;                  // true if an event was available to process
+  event?: { name: string; payload?: Record<string, any> }; // Event that was processed
+  configuration: { active: string[] };
+  trace: TraceRecord[];              // Records generated during this step
+}
+```
+
+**`sim.run` — Execute until breakpoint, final state, or pause**
+```typescript
+// Params
+interface SimRunParams {
+  instanceId: string;
+  maxSteps?: number;                 // Safety limit (default: 10000)
+}
+// Result
+interface SimRunResult {
+  stoppedReason: "breakpoint" | "final_state" | "paused" | "max_steps";
+  stepsExecuted: number;
+  configuration: { active: string[] };
+}
+```
+
+**`sim.pause` — Pause execution**
+```typescript
+// Params
+interface SimPauseParams {
+  instanceId: string;
+}
+// Result
+interface SimPauseResult {
+  paused: true;
+  configuration: { active: string[] };
+}
+```
+
+**`sim.reset` — Reset to initial state**
+```typescript
+// Params
+interface SimResetParams {
+  instanceId: string;
+  context?: Record<string, any>;     // Optional context override on reset
+}
+// Result
+interface SimResetResult {
+  configuration: { active: string[] };
+  context: Record<string, any>;
+}
+```
+
+**`sim.inject` — Inject an event**
+```typescript
+// Params
+interface SimInjectParams {
+  instanceId: string;
+  event: { name: string; payload?: Record<string, any> };
+  position?: "front" | "back";       // Queue position (default: "back")
+}
+// Result
+interface SimInjectResult {
+  queued: true;
+  queueDepth: number;
+}
+```
+
+**`sim.getConfig` — Get active configuration**
+```typescript
+// Params
+interface SimGetConfigParams {
+  instanceId: string;
+}
+// Result
+interface SimGetConfigResult {
+  configuration: {
+    active: string[];                // Active state IDs (leaf states)
+    parent: string[];                // Active composite state IDs
+  };
+}
+```
+
+**`sim.getContext` — Get current context values**
+```typescript
+// Params
+interface SimGetContextParams {
+  instanceId: string;
+}
+// Result
+interface SimGetContextResult {
+  context: Record<string, any>;      // All context field name-value pairs
+}
+```
+
+**`sim.setContext` — Set a context field value**
+```typescript
+// Params
+interface SimSetContextParams {
+  instanceId: string;
+  field: string;                     // Context field name
+  value: any;                        // New value (must match field type)
+}
+// Result
+interface SimSetContextResult {
+  previousValue: any;
+  newValue: any;
+}
+```
+
+**`sim.getTimers` — Get active timers**
+```typescript
+// Params
+interface SimGetTimersParams {
+  instanceId: string;
+}
+// Result
+interface SimGetTimersResult {
+  timers: Array<{
+    id: string;                      // Timer stable ID
+    ownerState: string;              // State that owns this timer
+    type: "after" | "every";
+    durationMs: number;
+    remainingMs: number;
+    firedCount: number;              // 0 for "after", ≥0 for "every"
+  }>;
+}
+```
+
+**`sim.advanceClock` — Advance virtual clock**
+```typescript
+// Params
+interface SimAdvanceClockParams {
+  instanceId: string;
+  deltaMs: number;                   // Milliseconds to advance (must be > 0)
+}
+// Result
+interface SimAdvanceClockResult {
+  clockMs: number;                   // New virtual clock value
+  timersFired: number;               // Number of timers that fired
+  trace: TraceRecord[];              // All records from timer-triggered dispatches
+}
+```
+
+**`sim.setBreakpoint` — Set a breakpoint**
+```typescript
+// Params
+interface SimSetBreakpointParams {
+  instanceId: string;
+  breakpoint: {
+    type: "state_entry" | "state_exit" | "transition" | "guard_eval" | "timer_fire";
+    stateId?: string;                // For state_entry/state_exit
+    transitionId?: string;           // For transition
+    eventName?: string;              // For any type — filter by event
+  };
+}
+// Result
+interface SimSetBreakpointResult {
+  breakpointId: string;
+}
+```
+
+**`sim.clearBreakpoint` — Remove a breakpoint**
+```typescript
+// Params
+interface SimClearBreakpointParams {
+  instanceId: string;
+  breakpointId: string;
+}
+// Result
+interface SimClearBreakpointResult {
+  removed: true;
+}
+```
+
+**`sim.getTrace` — Get execution trace**
+```typescript
+// Params
+interface SimGetTraceParams {
+  instanceId: string;
+  fromIndex?: number;                // Start index (default: 0)
+  limit?: number;                    // Max records (default: all)
+}
+// Result
+interface SimGetTraceResult {
+  records: TraceRecord[];
+  totalCount: number;
+}
+
+interface TraceRecord {
+  index: number;
+  clockMs: number;
+  type: "init" | "dispatch" | "state_entry" | "state_exit" |
+        "transition" | "timer_fired" | "context_mutated" |
+        "event_deferred" | "event_released" | "completion" | "queue_overflow";
+  data: Record<string, any>;         // Type-specific fields
+}
+```
+
+**`sim.replay` — Load and replay a trace**
+```typescript
+// Params
+interface SimReplayParams {
+  instanceId: string;
+  trace: TraceRecord[];
+  speed?: number;                    // Replay speed multiplier (default: 1.0, 0 = instant)
+}
+// Result
+interface SimReplayResult {
+  replayed: number;                  // Number of records replayed
+  finalConfiguration: { active: string[] };
+}
+```
+
+**`sim.getSchema` — Return protocol schema version**
+```typescript
+// Params: none (empty object)
+// Result
+interface SimGetSchemaResult {
+  protocolVersion: string;           // e.g., "1.0.0"
+  methods: string[];                 // List of supported method names
+  notifications: string[];           // List of supported notification names
+}
+```
+
+### 7.2.1.2 Reconnection Protocol
+
+When the WebSocket connection is lost, the client follows this reconnection sequence:
+
+```
+Client                              Server
+  │                                    │
+  │  [connection lost]                 │
+  │                                    │
+  │  WebSocket connect (retry)         │
+  │ ──────────────────────────────────►│
+  │                                    │
+  │  sim.reconnect                     │
+  │    { lastKnownInstanceId: "X" }    │
+  │ ──────────────────────────────────►│
+  │                                    │
+  │  result: full state snapshot       │
+  │    { instanceId, configuration,    │
+  │      context, timers, traceIndex } │
+  │ ◄──────────────────────────────────│
+  │                                    │
+  │  [resume normal operation]         │
+  │                                    │
+```
+
+The `sim.reconnect` method:
+```typescript
+// Params
+interface SimReconnectParams {
+  lastKnownInstanceId: string;
+}
+// Result
+interface SimReconnectResult {
+  instanceId: string;
+  configuration: { active: string[] };
+  context: Record<string, any>;
+  timers: SimGetTimersResult["timers"];
+  traceIndex: number;                // Current trace position for incremental sync
+  clockMs: number;
+}
+```
+
+If the instance no longer exists (server restarted), the server responds with error code `-32002` ("instance not found"). The client MUST then re-initialize with `sim.init`.
+
+### 7.2.1.3 Virtual Clock Synchronization
+
+The virtual clock is the sole time source for all simulation. Normative rules:
+
+1. `sim.advanceClock(deltaMs)` advances the virtual clock by exactly `deltaMs` milliseconds.
+2. All `after` and `every` timers reference the virtual clock, NOT wall time.
+3. `sim.step` processes one event from the queue. If no event is queued but a timer would fire, `sim.step` advances the clock to the nearest timer expiry and fires it.
+4. `sim.run` repeatedly calls the equivalent of `sim.step` until a stop condition.
+5. Timer ordering: when multiple timers expire at the same virtual timestamp, they fire in declaration order (source order in the DSL).
+6. The clock MUST NOT advance during event processing (RTC step is instantaneous).
+
+```typescript
+// Explicit clock control
+interface SimSetClockParams {
+  instanceId: string;
+  clockMs: number;                   // Set absolute clock value (must be ≥ current)
+}
+interface SimSetClockResult {
+  previousClockMs: number;
+  newClockMs: number;
+  timersFired: number;
+}
+```
 
 ### 7.2.2 Required Notifications (Server → Client)
 
@@ -489,14 +806,14 @@ A trace MUST be sufficient for deterministic replay without access to the origin
 
 - The extension MUST launch `fsm-lsp` as a subprocess with `--stdio`.
 - The LSP client MUST support all capabilities listed in Section 3.2.
-- LSP restart MUST be available via command palette: `FSM-Lang: Restart Language Server`.
+- LSP restart MUST be available via command palette: `FSM Studio: Restart Language Server`.
 
 ## 8.4 Diagram Panel (WebView)
 
 The extension MUST provide a live state diagram WebView panel.
 
 Requirements:
-- Command: `FSM-Lang: Open Diagram` (also available as editor title button).
+- Command: `FSM Studio: Open Diagram` (also available as editor title button).
 - The panel renders the current file's state machine as an interactive diagram.
 - **Live update**: The diagram MUST update within 500ms of a source file change.
 - **Bidirectional navigation**: Clicking a state in the diagram MUST navigate to its
@@ -513,7 +830,7 @@ Requirements:
 The extension MUST provide an integrated simulator panel.
 
 Requirements:
-- Command: `FSM-Lang: Open Simulator`.
+- Command: `FSM Studio: Open Simulator`.
 - **Start/Stop/Reset controls**.
 - **Step button**: Execute one dispatch cycle.
 - **Event injection form**: Select event from dropdown, fill payload fields, inject.
@@ -531,14 +848,14 @@ The extension MUST register the following commands:
 
 | Command ID | Title |
 |---|---|
-| `fsm.openDiagram` | FSM-Lang: Open Diagram |
-| `fsm.openSimulator` | FSM-Lang: Open Simulator |
-| `fsm.generateCode` | FSM-Lang: Generate Code |
-| `fsm.compileToIR` | FSM-Lang: Compile to IR |
-| `fsm.formatDocument` | FSM-Lang: Format Document |
-| `fsm.restartServer` | FSM-Lang: Restart Language Server |
-| `fsm.showDiagnostics` | FSM-Lang: Show All Diagnostics |
-| `fsm.exportDiagram` | FSM-Lang: Export Diagram as SVG |
+| `fsm.openDiagram` | FSM Studio: Open Diagram |
+| `fsm.openSimulator` | FSM Studio: Open Simulator |
+| `fsm.generateCode` | FSM Studio: Generate Code |
+| `fsm.compileToIR` | FSM Studio: Compile to IR |
+| `fsm.formatDocument` | FSM Studio: Format Document |
+| `fsm.restartServer` | FSM Studio: Restart Language Server |
+| `fsm.showDiagnostics` | FSM Studio: Show All Diagnostics |
+| `fsm.exportDiagram` | FSM Studio: Export Diagram as SVG |
 
 ## 8.7 Code Snippets
 
@@ -555,14 +872,14 @@ The extension MUST provide snippets for:
 
 ## 8.8 Configuration
 
-The extension MUST expose settings under `fsm-lang.*`:
+The extension MUST expose settings under `fsmLang.*`:
 
-- `fsm-lang.lspPath`: Path to the `fsm-lsp` binary.
-- `fsm-lang.simulatorPath`: Path to the `fsm-sim` binary.
-- `fsm-lang.simulatorPort`: WebSocket port for simulator.
-- `fsm-lang.diagramLayout`: Layout algorithm (`hierarchical`, `dot`, `elk`).
-- `fsm-lang.generateOnSave`: Auto-generate code on save.
-- `fsm-lang.profile`: Default target profile.
+- `fsmLang.lspPath`: Path to the `fsm-lsp` binary.
+- `fsmLang.simulatorPath`: Path to the `fsm-sim` binary.
+- `fsmLang.simulatorPort`: WebSocket port for simulator.
+- `fsmLang.diagramLayout`: Layout algorithm (`hierarchical`, `dot`, `elk`).
+- `fsmLang.generateOnSave`: Auto-generate code on save.
+- `fsmLang.profile`: Default target profile.
 
 ## 8.9 Problems Integration
 

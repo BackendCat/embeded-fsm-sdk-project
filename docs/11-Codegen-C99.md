@@ -108,6 +108,7 @@ typedef struct {
 void Motor_init    (Motor_t *m);
 void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev);
 void Motor_post    (Motor_t *m, const Motor_Event_t *ev);
+bool Motor_dequeue (Motor_t *m, Motor_Event_t *out);
 void Motor_tick    (Motor_t *m, uint32_t elapsed_ms);
 
 #endif /* MOTOR_H */
@@ -272,6 +273,7 @@ void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev) {
 
 typedef bool (*Motor_GuardFn_t)(const Motor_t *, const Motor_Event_t *);
 typedef void (*Motor_ActionFn_t)(Motor_t *, const Motor_Event_t *);
+typedef void (*Motor_EntryExitFn_t)(Motor_t *);
 
 typedef struct {
     Motor_StateId_t  source;
@@ -294,15 +296,15 @@ static const Motor_TransRow_t Motor_trans_table[] = {
 #define MOTOR_TRANS_TABLE_SIZE  (sizeof(Motor_trans_table) / sizeof(Motor_trans_table[0]))
 
 /* Exit/entry function tables (indexed by StateId) */
-static const Motor_ActionFn_t Motor_exit_fns[MOTOR_STATE__COUNT] = {
-    [MOTOR_STATE_IDLE]    = (Motor_ActionFn_t)Motor_exit_Idle,
-    [MOTOR_STATE_RUNNING] = (Motor_ActionFn_t)Motor_exit_Running,
-    [MOTOR_STATE_ERROR]   = (Motor_ActionFn_t)Motor_exit_Error,
+static const Motor_EntryExitFn_t Motor_exit_fns[MOTOR_STATE__COUNT] = {
+    [MOTOR_STATE_IDLE]    = Motor_exit_Idle,
+    [MOTOR_STATE_RUNNING] = Motor_exit_Running,
+    [MOTOR_STATE_ERROR]   = Motor_exit_Error,
 };
-static const Motor_ActionFn_t Motor_entry_fns[MOTOR_STATE__COUNT] = {
-    [MOTOR_STATE_IDLE]    = (Motor_ActionFn_t)Motor_entry_Idle,
-    [MOTOR_STATE_RUNNING] = (Motor_ActionFn_t)Motor_entry_Running,
-    [MOTOR_STATE_ERROR]   = (Motor_ActionFn_t)Motor_entry_Error,
+static const Motor_EntryExitFn_t Motor_entry_fns[MOTOR_STATE__COUNT] = {
+    [MOTOR_STATE_IDLE]    = Motor_entry_Idle,
+    [MOTOR_STATE_RUNNING] = Motor_entry_Running,
+    [MOTOR_STATE_ERROR]   = Motor_entry_Error,
 };
 
 void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev) {
@@ -313,10 +315,10 @@ void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev) {
         if (row->guard && !row->guard(m, ev)) continue;
 
         /* Execute: exit → action → enter */
-        Motor_exit_fns[m->_state](m, ev);
+        Motor_exit_fns[m->_state](m);
         if (row->action) row->action(m, ev);
         m->_state = row->target;
-        Motor_entry_fns[m->_state](m, ev);
+        Motor_entry_fns[m->_state](m);
         return;
     }
     /* No transition matched — event discarded */
@@ -451,7 +453,7 @@ active child before calling exit actions:
 m->_history_Operational = m->_state;   /* record the leaving substate */
 ```
 
-On `~>` (history transition) entry:
+On history (`-> History`) entry:
 
 ```c
 Motor_StateId_t restore = m->_history_Operational;
@@ -459,7 +461,7 @@ if (restore == MOTOR_STATE_ROOT) {
     restore = MOTOR_STATE_RUNNING_NORMAL;   /* default */
 }
 m->_state = restore;
-Motor_entry_fns[restore](m, NULL);
+Motor_entry_fns[restore](m);
 ```
 
 ---
@@ -533,7 +535,7 @@ if any such symbol is referenced.
 All arrays are fixed-size:
 - Queue: `Motor_Event_t _queue[MOTOR_QUEUE_CAPACITY]`
 - State table: `static const Motor_TransRow_t Motor_trans_table[]` (`.rodata`)
-- Entry/exit function pointer tables: `static const Motor_ActionFn_t Motor_entry_fns[]` (`.rodata`)
+- Entry/exit function pointer tables: `static const Motor_EntryExitFn_t Motor_entry_fns[]` (`.rodata`)
 
 ---
 
@@ -564,9 +566,377 @@ static void Motor_action__t_idle_running_START(Motor_t *m, const Motor_Event_t *
 Inline while/for loops generate directly as C loops inside the action function.
 `FSM-W0200` is emitted at compile time (warning only; code is still generated).
 
+# 19. Choice Pseudo-State Codegen
+
+A `choice` pseudo-state generates a chain of `if/else if/else` evaluating guards in declaration order. The `[else]` branch maps to the final `else`.
+
+```c
+/* Choice pseudo-state: SpeedSelect */
+/* Guards evaluated in declaration order; first true branch taken */
+static void Motor_choice_SpeedSelect(Motor_t *m, const Motor_Event_t *ev) {
+    if (m->speed > 100u) {
+        /* [ctx.speed > 100] -> Fast */
+        m->_state = MOTOR_STATE_FAST;
+        Motor_entry_Fast(m);
+    } else if (m->speed > 0u) {
+        /* [ctx.speed > 0] -> Normal */
+        m->_state = MOTOR_STATE_NORMAL;
+        Motor_entry_Normal(m);
+    } else {
+        /* [else] -> Stopped */
+        m->_state = MOTOR_STATE_STOPPED;
+        Motor_entry_Stopped(m);
+    }
+}
+```
+
+The choice function is called from the dispatch path wherever a transition targets the choice pseudo-state. The `[else]` branch is mandatory (absence is `FSM-E0100`).
+
 ---
 
-# 19. Complete Example — Motor Machine
+# 20. Junction Pseudo-State Codegen
+
+A `junction` pseudo-state is semantically similar to `choice` but branches MUST be provably disjoint and exhaustive at compile time. When all guards are compile-time constants, the compiler MAY optimize to a single unconditional branch. When guards are not all static, the junction falls back to a choice-like runtime chain.
+
+**Static junction (all guards constant):**
+```c
+/* Junction: ModeSelect — all guards are constant, resolved at compile time */
+/* Only the matching branch is emitted */
+static void Motor_junction_ModeSelect(Motor_t *m, const Motor_Event_t *ev) {
+    /* Compile-time evaluation: MODE == 1, so only this branch is emitted */
+    m->_state = MOTOR_STATE_FAST_MODE;
+    Motor_entry_FastMode(m);
+}
+```
+
+**Dynamic junction (not all guards static — falls back to runtime chain):**
+```c
+/* Junction: TypeRoute — runtime evaluation (guards are not all constant) */
+static void Motor_junction_TypeRoute(Motor_t *m, const Motor_Event_t *ev) {
+    if (m->mode == MOTOR_MODE_A) {
+        m->_state = MOTOR_STATE_HANDLER_A;
+        Motor_entry_HandlerA(m);
+    } else if (m->mode == MOTOR_MODE_B) {
+        m->_state = MOTOR_STATE_HANDLER_B;
+        Motor_entry_HandlerB(m);
+    } else {
+        /* [else] -> DefaultHandler */
+        m->_state = MOTOR_STATE_DEFAULT_HANDLER;
+        Motor_entry_DefaultHandler(m);
+    }
+}
+```
+
+---
+
+# 21. Deep History Codegen
+
+Deep history stores the **leaf** state (not just the direct child) of a composite state. On deep history entry, the machine restores directly to that leaf, executing entry actions for all intermediate states from LCA down.
+
+```c
+typedef struct {
+    /* ... user context fields ... */
+    Motor_StateId_t _state;
+    Motor_StateId_t _deep_history_Operational;  /* stores the leaf state */
+} Motor_t;
+```
+
+**Recording deep history on exit:**
+```c
+/* Before exiting Operational composite state: record the active leaf */
+m->_deep_history_Operational = m->_state;  /* _state always holds the leaf */
+```
+
+**Restoring deep history on entry:**
+```c
+/* Transition -> DeepHistory of Operational */
+static void Motor_enter_deep_history_Operational(Motor_t *m) {
+    Motor_StateId_t restore = m->_deep_history_Operational;
+    if (restore == MOTOR_STATE_ROOT) {
+        /* No history recorded — use default */
+        restore = MOTOR_STATE_OPERATIONAL_NORMAL;
+    }
+
+    /* Enter all states from Operational down to the leaf */
+    /* The entry path is pre-computed as a static table */
+    static const Motor_StateId_t path_to_Normal[] = {
+        MOTOR_STATE_OPERATIONAL, MOTOR_STATE_OPERATIONAL_NORMAL
+    };
+    static const Motor_StateId_t path_to_Fast[] = {
+        MOTOR_STATE_OPERATIONAL, MOTOR_STATE_OPERATIONAL_FAST
+    };
+    static const Motor_StateId_t path_to_Fast_Boost[] = {
+        MOTOR_STATE_OPERATIONAL, MOTOR_STATE_OPERATIONAL_FAST,
+        MOTOR_STATE_OPERATIONAL_FAST_BOOST
+    };
+
+    const Motor_StateId_t *path = NULL;
+    uint8_t path_len = 0;
+
+    switch (restore) {
+    case MOTOR_STATE_OPERATIONAL_NORMAL:
+        path = path_to_Normal; path_len = 2; break;
+    case MOTOR_STATE_OPERATIONAL_FAST:
+        path = path_to_Fast; path_len = 2; break;
+    case MOTOR_STATE_OPERATIONAL_FAST_BOOST:
+        path = path_to_Fast_Boost; path_len = 3; break;
+    default:
+        FSM_ASSERT(0 && "Motor: invalid deep history state");
+        return;
+    }
+
+    for (uint8_t i = 0; i < path_len; i++) {
+        Motor_entry_fns[path[i]](m);
+    }
+    m->_state = restore;
+}
+```
+
+Contrast with **shallow history** (§14): shallow history stores only the direct child of the composite state, then expands that child's initial substates normally. Deep history skips initial expansion and restores the exact leaf.
+
+---
+
+# 22. Deferred Event Codegen
+
+Deferred events use a per-state bitmask and a circular buffer for re-queued events.
+
+**Defer mask:**
+```c
+/* Per-state defer bitmask — bit N = event ID N is deferred in this state */
+static const uint32_t Motor_defer_mask[MOTOR_STATE__COUNT] = {
+    [MOTOR_STATE_IDLE]       = 0x00000000u,   /* defers nothing */
+    [MOTOR_STATE_CONNECTING] = (1u << MOTOR_EVENT_DATA_RECEIVED),  /* defers DATA_RECEIVED */
+    [MOTOR_STATE_CONNECTED]  = 0x00000000u,
+};
+```
+
+**Deferred event queue:**
+```c
+/* Circular buffer for deferred events */
+typedef struct {
+    Motor_Event_t buffer[MOTOR_DEFER_QUEUE_CAPACITY];
+    uint8_t head;
+    uint8_t tail;
+    uint8_t count;
+} Motor_DeferQueue_t;
+
+static void Motor_defer_enqueue(Motor_DeferQueue_t *q, const Motor_Event_t *ev) {
+    FSM_ASSERT(q->count < MOTOR_DEFER_QUEUE_CAPACITY && "defer queue overflow");
+    q->buffer[q->tail] = *ev;
+    q->tail = (q->tail + 1u) & (MOTOR_DEFER_QUEUE_CAPACITY - 1u);
+    q->count++;
+}
+
+static bool Motor_defer_dequeue(Motor_DeferQueue_t *q, Motor_Event_t *out) {
+    if (q->count == 0u) return false;
+    *out = q->buffer[q->head];
+    q->head = (q->head + 1u) & (MOTOR_DEFER_QUEUE_CAPACITY - 1u);
+    q->count--;
+    return true;
+}
+```
+
+**Integration with dispatch loop:**
+```c
+void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev) {
+    /* Check if event is deferred in the current state */
+    if (Motor_defer_mask[m->_state] & (1u << ev->id)) {
+        Motor_defer_enqueue(&m->_defer_queue, ev);
+        return;  /* event deferred — not dispatched */
+    }
+
+    Motor_StateId_t prev_state = m->_state;
+    /* ... normal dispatch logic ... */
+
+    /* On state change: release deferred events if new state does not defer them */
+    if (m->_state != prev_state) {
+        Motor_release_deferred(m);
+    }
+}
+
+static void Motor_release_deferred(Motor_t *m) {
+    Motor_Event_t ev;
+    Motor_DeferQueue_t tmp = {0};  /* temporary queue for events still deferred */
+
+    while (Motor_defer_dequeue(&m->_defer_queue, &ev)) {
+        if (Motor_defer_mask[m->_state] & (1u << ev.id)) {
+            /* Still deferred in new state — keep in queue */
+            Motor_defer_enqueue(&tmp, &ev);
+        } else {
+            /* Released — prepend to external queue for processing */
+            Motor_queue_push_front(m, &ev);
+        }
+    }
+    m->_defer_queue = tmp;
+}
+```
+
+---
+
+# 23. Internal Transition Codegen
+
+Internal transitions do NOT call exit/entry actions. They are generated as a separate case in the dispatch that executes actions without a state change.
+
+```c
+void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev) {
+    switch (m->_state) {
+
+    case MOTOR_STATE_HB_ACTIVE:
+        switch (ev->id) {
+        case MOTOR_EVENT_HEARTBEAT_ACK:
+            /* Internal transition — no state change, no exit/entry */
+            Motor_action_onHbReceived(m, ev);
+            break;
+        case MOTOR_EVENT_HEARTBEAT_TIMEOUT:
+            /* External transition: HBActive -> HBFailed */
+            Motor_exit_HBActive(m);
+            m->_state = MOTOR_STATE_HB_FAILED;
+            Motor_entry_HBFailed(m);
+            break;
+        default:
+            break;
+        }
+        break;
+
+    /* ... other states ... */
+    }
+}
+```
+
+Key difference from external self-transition: an external self-transition (`on E -> SameState`) calls `exit_SameState()`, then `entry_SameState()`, restarting timers. An internal transition (`on E : action()`) does none of this.
+
+---
+
+# 24. Parallel State Encoding
+
+For machines with parallel regions, the context struct contains one `_state_regionN` field per region instead of a single `_state` field.
+
+**Struct definition:**
+```c
+typedef struct {
+    /* User context fields */
+    uint16_t speed;
+    bool running;
+
+    /* One state field per region */
+    Motor_StateId_t _state_DataPath;          /* Region: DataPath */
+    Motor_StateId_t _state_HeartbeatMonitor;  /* Region: HeartbeatMonitor */
+
+    /* Parent composite state (for LCA computation) */
+    Motor_StateId_t _state_parent;  /* e.g., MOTOR_STATE_CONNECTED */
+
+    /* ... timers, queue, etc. */
+} Motor_t;
+```
+
+**Dispatch loop — iterate all regions:**
+```c
+void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev) {
+    /* If we are inside the Connected parallel state, dispatch to all regions */
+    if (m->_state_parent == MOTOR_STATE_CONNECTED) {
+        /* Region 1: DataPath */
+        Motor_dispatch_region_DataPath(m, ev);
+        /* Region 2: HeartbeatMonitor */
+        Motor_dispatch_region_HeartbeatMonitor(m, ev);
+        return;
+    }
+
+    /* Non-parallel dispatch (outer states) */
+    switch (m->_state_parent) {
+    case MOTOR_STATE_DISCONNECTED:
+        /* ... */
+        break;
+    case MOTOR_STATE_CONNECTING:
+        /* ... */
+        break;
+    /* ... */
+    }
+}
+
+static void Motor_dispatch_region_DataPath(Motor_t *m, const Motor_Event_t *ev) {
+    switch (m->_state_DataPath) {
+    case MOTOR_STATE_IDLE_DATA:
+        switch (ev->id) {
+        case MOTOR_EVENT_DATA_RECEIVED:
+            Motor_exit_IdleData(m);
+            m->_state_DataPath = MOTOR_STATE_PROCESSING;
+            Motor_entry_Processing(m);
+            break;
+        /* ... */
+        }
+        break;
+    /* ... */
+    }
+}
+```
+
+---
+
+# 25. LCA (Least Common Ancestor) Lookup Table
+
+The LCA is pre-computed as a static lookup table indexed by `(source, target)`. This avoids runtime tree traversal.
+
+**Table generation algorithm:**
+```
+for each pair (S, T) in states × states:
+    lca_table[S][T] = compute_lca(S, T)    // using path_to_root algorithm from §5.2
+```
+
+**Generated code:**
+```c
+/* LCA lookup table: lca_table[source][target] = LCA state ID */
+static const Motor_StateId_t Motor_lca_table[MOTOR_STATE__COUNT][MOTOR_STATE__COUNT] = {
+    /*                   ROOT   IDLE   RUNNING  ERROR  OP_NORMAL  OP_FAST */
+    /* ROOT */        {  ROOT,  ROOT,  ROOT,    ROOT,  ROOT,      ROOT    },
+    /* IDLE */        {  ROOT,  IDLE,  ROOT,    ROOT,  ROOT,      ROOT    },
+    /* RUNNING */     {  ROOT,  ROOT,  RUNNING, ROOT,  ROOT,      ROOT    },
+    /* ERROR */       {  ROOT,  ROOT,  ROOT,    ERROR, ROOT,      ROOT    },
+    /* OP_NORMAL */   {  ROOT,  ROOT,  ROOT,    ROOT,  OP_NORMAL, OPERATIONAL },
+    /* OP_FAST */     {  ROOT,  ROOT,  ROOT,    ROOT,  OPERATIONAL, OP_FAST },
+};
+```
+
+**Lookup function:**
+```c
+static Motor_StateId_t Motor_lca(Motor_StateId_t source, Motor_StateId_t target) {
+    FSM_ASSERT(source < MOTOR_STATE__COUNT);
+    FSM_ASSERT(target < MOTOR_STATE__COUNT);
+    return Motor_lca_table[source][target];
+}
+```
+
+The LCA table is used in the dispatch function to determine which exit and entry actions to fire when transitioning between nested states. For flat machines (no composite states), the LCA is always ROOT and the table is trivial.
+
+---
+
+# 26. Fork Entry Sequence Codegen
+
+A fork pseudo-state enters multiple regions simultaneously. The generated code calls entry sequences for each target region in declaration order.
+
+```c
+/* Fork: StartAll -> {Sensors.Idle, Output.Off} */
+static void Motor_fork_StartAll(Motor_t *m) {
+    /* Enter parent parallel state if not already active */
+    if (m->_state_parent != MOTOR_STATE_MONITOR) {
+        m->_state_parent = MOTOR_STATE_MONITOR;
+        Motor_entry_Monitor(m);
+    }
+
+    /* Enter Region 1: Sensors -> Idle (declaration order) */
+    m->_state_DataPath = MOTOR_STATE_SENSORS_IDLE;
+    Motor_entry_SensorsIdle(m);
+
+    /* Enter Region 2: Output -> Off (declaration order) */
+    m->_state_HeartbeatMonitor = MOTOR_STATE_OUTPUT_OFF;
+    Motor_entry_OutputOff(m);
+}
+```
+
+Fork targets MUST be in different orthogonal regions of the same parallel state (`FSM-E0750` if not). Each target MUST be an initial state of its region (`FSM-E0302` if not).
+
+---
+
+# 27. Complete Example — Motor Machine
 
 Full 3-state machine (`Idle → Running → Error`) source and generated files are
 provided in the conformance test suite at:

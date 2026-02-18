@@ -66,7 +66,7 @@ Test ID format: `PARSE-POS-NNN` (positive) or `PARSE-NEG-NNN` (negative).
 **Input file content:**
 ```fsm
 machine Minimal {
-    initial -> S;
+    initial S
     state S { }
 }
 ```
@@ -84,11 +84,11 @@ machine Minimal {
 ```fsm
 machine WithContext {
     context {
-        speed: u16 = 0;
-        running: bool = false;
-        count: u32 = 100;
+        speed: u16 = 0
+        running: bool = false
+        count: u32 = 100
     }
-    initial -> Idle;
+    initial Idle
     state Idle { }
 }
 ```
@@ -103,16 +103,16 @@ machine WithContext {
 **Input file:**
 ```fsm
 machine WithEvents {
-    event START(speed: u16, direction: u8);
-    event STOP;
-    event FAULT(code: u8);
-    initial -> Idle;
+    event START(speed: u16, direction: u8)
+    event STOP
+    event FAULT(code: u8)
+    initial Idle
     state Idle {
-        on START -> Running;
-        on FAULT -> Error;
+        on START -> Running
+        on FAULT -> Error
     }
     state Running {
-        on STOP -> Idle;
+        on STOP -> Idle
     }
     state Error { }
 }
@@ -128,19 +128,19 @@ machine WithEvents {
 **Input file:**
 ```fsm
 machine WithExtern {
-    extern pure isValid(threshold: u16) -> bool;
-    extern pure checkRange(low: u8, high: u8) -> bool;
-    extern logEvent(code: u8);
-    extern notify;
-    initial -> Idle;
+    pure extern isValid(threshold: u16) : bool
+    pure extern checkRange(low: u8, high: u8) : bool
+    extern logEvent(code: u8)
+    extern notify
+    initial Idle
     state Idle {
-        on START [isValid(100)] -> Running;
+        on START [isValid(100)] -> Running
     }
     state Running {
-        on STOP -> Idle;
+        on STOP -> Idle
     }
-    event START;
-    event STOP;
+    event START
+    event STOP
 }
 ```
 **Expected exit code:** `0`
@@ -154,23 +154,23 @@ machine WithExtern {
 **Input file:**
 ```fsm
 machine WithEntryExit {
-    extern startTimer;
-    extern stopTimer;
-    extern logStart;
-    event GO;
-    event HALT;
-    initial -> Idle;
+    extern startTimer
+    extern stopTimer
+    extern logStart
+    event GO
+    event HALT
+    initial Idle
     state Idle {
         entry: { startTimer(); }
         exit:  { stopTimer(); }
-        on GO -> Running;
+        on GO -> Running
     }
     state Running {
         entry: {
             startTimer();
             logStart();
         }
-        on HALT -> Idle;
+        on HALT -> Idle
     }
 }
 ```
@@ -185,22 +185,22 @@ machine WithEntryExit {
 **Input file:**
 ```fsm
 machine WithComposite {
-    event SUSPEND;
-    event RESUME;
-    event RESET;
-    initial -> Operational;
+    event SUSPEND
+    event RESUME
+    event RESET
+    initial Operational
     composite Operational {
-        history shallow;
-        initial -> Active;
+        history shallow
+        initial Active
         state Active { }
         state Paused { }
     }
     state Suspended {
-        on RESUME -> Operational;
+        on RESUME -> Operational
     }
     state Operational {
-        on SUSPEND -> Suspended;
-        on RESET -> Operational;
+        on SUSPEND -> Suspended
+        on RESET -> Operational
     }
 }
 ```
@@ -215,26 +215,26 @@ machine WithComposite {
 **Input file:**
 ```fsm
 machine WithParallel {
-    event START;
-    event STOP;
-    initial -> Monitoring;
+    event START
+    event STOP
+    initial Monitoring
     parallel Monitoring {
         region Sensors {
-            initial -> Idle;
+            initial Idle
             state Idle {
-                on START -> Active;
+                on START -> Active
             }
             state Active {
-                on STOP -> Idle;
+                on STOP -> Idle
             }
         }
         region Output {
-            initial -> Off;
+            initial Off
             state Off {
-                on START -> On;
+                on START -> On
             }
             state On {
-                on STOP -> Off;
+                on STOP -> Off
             }
         }
     }
@@ -251,15 +251,15 @@ machine WithParallel {
 **Input file:**
 ```fsm
 machine WithTimers {
-    extern poll;
-    event DONE;
-    initial -> Waiting;
+    extern poll
+    event DONE
+    initial Waiting
     state Waiting {
-        after 5000ms -> Timeout;
+        after 5000ms -> Timeout
     }
     state Polling {
         every 100ms: { poll(); }
-        on DONE -> Done;
+        on DONE -> Done
     }
     state Timeout { }
     state Done { }
@@ -277,15 +277,15 @@ machine WithTimers {
 ```fsm
 machine WithChoice {
     context { speed: u16 = 0; }
-    event CHECK;
-    initial -> Idle;
+    event CHECK
+    initial Idle
     state Idle {
-        on CHECK -> SpeedSelect;
+        on CHECK -> SpeedSelect
     }
     choice SpeedSelect {
-        [ctx.speed > 100] -> Fast;
-        [ctx.speed > 0]   -> Normal;
-        [else]            -> Stopped;
+        [ctx.speed > 100] -> Fast
+        [ctx.speed > 0]   -> Normal
+        [else]            -> Stopped
     }
     state Fast { }
     state Normal { }
@@ -304,15 +304,15 @@ machine WithChoice {
 ```fsm
 machine WithActions {
     context {
-        speed: u16 = 0;
-        retries: u8 = 3;
-        i: u8 = 0;
+        speed: u16 = 0
+        retries: u8 = 3
+        i: u8 = 0
     }
-    extern clamp(v: u16) -> u16;
-    extern log;
-    event START(target: u16);
-    event STOP;
-    initial -> Idle;
+    extern clamp(v: u16) : u16
+    extern log
+    event START(target: u16)
+    event STOP
+    initial Idle
     state Idle {
         on START -> Running: {
             ctx.speed = clamp(event.target);
@@ -346,19 +346,19 @@ machine WithActions {
 /// The main motor controller machine.
 @id("motor-v1")
 machine AnnotatedMotor {
-    event START;
-    event STOP;
-    initial -> Idle;
+    event START
+    event STOP
+    initial Idle
 
     /// The idle waiting state. Entered on startup and after STOP.
     @id("motor-idle")
     state Idle {
         @id("t-idle-running")
-        on START -> Running;
+        on START -> Running
     }
 
     state Running {
-        on STOP -> Idle;
+        on STOP -> Idle
     }
 }
 ```
@@ -373,17 +373,17 @@ machine AnnotatedMotor {
 **Input file:**
 ```fsm
 machine WithDefer {
-    event PING;
-    event PONG;
-    event BUSY;
-    initial -> Idle;
+    event PING
+    event PONG
+    event BUSY
+    initial Idle
     state Idle {
-        on PING -> Processing;
+        on PING -> Processing
     }
     state Processing {
-        defer PONG;
-        defer BUSY;
-        on PING -> Done;
+        defer PONG
+        defer BUSY
+        on PING -> Done
     }
     state Done { }
 }
@@ -416,7 +416,7 @@ machine NoInitial {
 **Input file:**
 ```fsm
 machine DupState {
-    initial -> S;
+    initial S
     state S { }
     state S { }
 }
@@ -433,9 +433,9 @@ machine DupState {
 **Input file:**
 ```fsm
 machine DupEvent {
-    event GO;
-    event GO;
-    initial -> Idle;
+    event GO
+    event GO
+    initial Idle
     state Idle { on GO -> Done; }
     state Done { }
 }
@@ -453,10 +453,10 @@ machine DupEvent {
 ```fsm
 machine DupField {
     context {
-        speed: u16 = 0;
-        speed: u8 = 0;
+        speed: u16 = 0
+        speed: u8 = 0
     }
-    initial -> Idle;
+    initial Idle
     state Idle { }
 }
 ```
@@ -472,8 +472,8 @@ machine DupField {
 **Input file:**
 ```fsm
 machine MultiInitial {
-    initial -> S1;
-    initial -> S2;
+    initial S1
+    initial S2
     state S1 { }
     state S2 { }
 }
@@ -490,10 +490,10 @@ machine MultiInitial {
 **Input file:**
 ```fsm
 machine UndefinedTarget {
-    event GO;
-    initial -> Idle;
+    event GO
+    initial Idle
     state Idle {
-        on GO -> Nowhere;
+        on GO -> Nowhere
     }
 }
 ```
@@ -510,9 +510,9 @@ machine UndefinedTarget {
 **Input file:**
 ```fsm
 machine UndeclaredEvent {
-    initial -> Idle;
+    initial Idle
     state Idle {
-        on GHOST -> Done;
+        on GHOST -> Done
     }
     state Done { }
 }
@@ -529,10 +529,10 @@ machine UndeclaredEvent {
 **Input file:**
 ```fsm
 machine UndefinedField {
-    event GO;
-    initial -> Idle;
+    event GO
+    initial Idle
     state Idle {
-        on GO [ctx.phantom > 0] -> Done;
+        on GO [ctx.phantom > 0] -> Done
     }
     state Done { }
 }
@@ -549,11 +549,11 @@ machine UndefinedField {
 **Input file:**
 ```fsm
 machine Nondeterministic {
-    event GO;
-    initial -> Idle;
+    event GO
+    initial Idle
     state Idle {
-        on GO -> A;
-        on GO -> B;
+        on GO -> A
+        on GO -> B
     }
     state A { }
     state B { }
@@ -572,8 +572,8 @@ machine Nondeterministic {
 ```fsm
 machine TypeMismatch {
     context { running: bool = false; }
-    event GO;
-    initial -> Idle;
+    event GO
+    initial Idle
     state Idle {
         on GO -> Done: {
             ctx.running = 42;
@@ -600,7 +600,7 @@ These tests verify the exact human-readable output format (FSM-SPEC-CLI §4).
 error[FSM-E0100]: state `Nowhere` is not defined
   --> tests/conformance/parser/neg-006-undefined-state.fsm:5:14
    |
- 5 |         on GO -> Nowhere;
+ 5 |         on GO -> Nowhere
    |                  ^^^^^^^ undefined state
 ```
 **Pass:** output contains `error[FSM-E0100]`, a `-->` location line, and a `^` underline
@@ -638,14 +638,14 @@ machine Motor{context{speed:u16=0;running:bool=false;}event START(target_speed:u
 ```fsm
 machine Motor {
     context {
-        speed:   u16  = 0;
-        running: bool = false;
+        speed:   u16  = 0
+        running: bool = false
     }
 
-    event START(target_speed: u16);
-    event STOP;
+    event START(target_speed: u16)
+    event STOP
 
-    initial -> Idle;
+    initial Idle
 
     state Idle {
         entry: { startTimer(); }
@@ -655,13 +655,13 @@ machine Motor {
             logStart();
         }
 
-        after 5000ms -> Error;
+        after 5000ms -> Error
     }
 
     state Running {
         exit: { stopMotor(); }
 
-        on STOP -> Idle;
+        on STOP -> Idle
     }
 }
 ```
@@ -688,11 +688,11 @@ diff /tmp/fmt-idempotent.fsm tests/conformance/formatter/fmt-001-expected.fsm
 ```fsm
 machine Align {
     context {
-        x: u8 = 0;
-        longFieldName: u32 = 100;
-        y: bool = false;
+        x: u8 = 0
+        longFieldName: u32 = 100
+        y: bool = false
     }
-    initial -> S;
+    initial S
     state S { }
 }
 ```
@@ -701,12 +701,12 @@ machine Align {
 ```fsm
 machine Align {
     context {
-        x:             u8   = 0;
-        longFieldName: u32  = 100;
-        y:             bool = false;
+        x:             u8   = 0
+        longFieldName: u32  = 100
+        y:             bool = false
     }
 
-    initial -> S;
+    initial S
 
     state S { }
 }
@@ -722,16 +722,16 @@ machine Align {
 ```fsm
 machine Arrows {
     context { speed: u16 = 0; }
-    extern pure isSpeedValid(t: u16) -> bool;
-    event START;
-    event STOP;
-    event FAULT;
-    initial -> Idle;
+    pure extern isSpeedValid(t: u16) : bool
+    event START
+    event STOP
+    event FAULT
+    initial Idle
     state Idle {
         on START [ctx.speed > 0] -> Running: { logStart(); }
-        on START [isSpeedValid(ctx.speed)] -> Fast;
-        on STOP -> Idle;
-        on FAULT -> Error;
+        on START [isSpeedValid(ctx.speed)] -> Fast
+        on STOP -> Idle
+        on FAULT -> Error
     }
     state Running { on STOP -> Idle; }
     state Fast { on STOP -> Idle; }
@@ -743,30 +743,30 @@ machine Arrows {
 ```fsm
 machine Arrows {
     context {
-        speed: u16 = 0;
+        speed: u16 = 0
     }
 
-    extern pure isSpeedValid(t: u16) -> bool;
+    pure extern isSpeedValid(t: u16) : bool
 
-    event START;
-    event STOP;
-    event FAULT;
+    event START
+    event STOP
+    event FAULT
 
-    initial -> Idle;
+    initial Idle
 
     state Idle {
         on START [ctx.speed > 0]          -> Running: { logStart(); }
-        on START [isSpeedValid(ctx.speed)] -> Fast;
-        on STOP                            -> Idle;
-        on FAULT                           -> Error;
+        on START [isSpeedValid(ctx.speed)] -> Fast
+        on STOP                            -> Idle
+        on FAULT                           -> Error
     }
 
     state Running {
-        on STOP -> Idle;
+        on STOP -> Idle
     }
 
     state Fast {
-        on STOP -> Idle;
+        on STOP -> Idle
     }
 
     state Error { }
@@ -803,18 +803,18 @@ Test ID format: `CGEN-C-NNN`.
 ```fsm
 machine Motor {
     context {
-        speed:   u16  = 0;
-        running: bool = false;
+        speed:   u16  = 0
+        running: bool = false
     }
 
-    event START(target_speed: u16);
-    event STOP;
+    event START(target_speed: u16)
+    event STOP
 
-    extern pure isReady() -> bool;
-    extern startHardware(speed: u16);
-    extern stopHardware;
+    pure extern isReady() : bool
+    extern startHardware(speed: u16)
+    extern stopHardware
 
-    initial -> Idle;
+    initial Idle
 
     state Idle {
         on START [isReady()] -> Running: {
@@ -980,11 +980,11 @@ echo "EXIT: $?"
 **Input** (`tests/conformance/codegen-c/timer-machine.fsm`):
 ```fsm
 machine Watchdog {
-    event RESET;
-    initial -> Active;
+    event RESET
+    initial Active
     state Active {
-        after 5000ms -> Timeout;
-        on RESET -> Active;
+        after 5000ms -> Timeout
+        on RESET -> Active
     }
     state Timeout { }
 }
@@ -1349,7 +1349,7 @@ To be performed by a human tester before each major release.
 
 | # | Action | Expected | Auto? |
 |---|---|---|---|
-| C-1 | Open simulator with `Ctrl+Shift+S` | Simulator panel appears | Playwright |
+| C-1 | Open simulator with `Ctrl+Alt+S` | Simulator panel appears | Playwright |
 | C-2 | Click "Initialize" | Machine initializes; `Idle` state highlighted in diagram | Manual |
 | C-3 | Dispatch `START` with `target_speed = 100` | State changes to `Running`; context panel shows `speed: 100, running: true` | Manual |
 | C-4 | Advance virtual clock 5001ms | Timer fires if `after` timer is present; trace log shows entry | Manual |
@@ -1443,6 +1443,162 @@ tests/conformance/
     ├── motor-ir.json                   # Pre-compiled IR for simulator tests
     └── ws-client.py                    # Python WebSocket test client
 ```
+
+---
+
+# 15. Golden Test File Format (`.fsm.test`)
+
+Golden test files combine input, expected outputs, and expected diagnostics in a single
+self-contained file. This format allows an AI agent or CI runner to execute every test
+mechanically without requiring multiple files per test case.
+
+### 15.1 File Structure
+
+A `.fsm.test` file uses section delimiters to separate the input source, expected IR,
+expected diagnostics, and expected formatted output:
+
+```
+=== INPUT ===
+<FSM-Lang source code>
+
+=== EXPECTED_IR ===
+<Canonical IR JSON output (compact or pretty)>
+
+=== EXPECTED_DIAGNOSTICS ===
+<One diagnostic per line, format: CODE:LINE:COL:MESSAGE_SUBSTRING>
+
+=== EXPECTED_FORMATTED ===
+<Expected output of `fsm fmt` on the INPUT section>
+
+=== EXPECTED_CODEGEN_C99 ===
+<Expected generated C99 code (or key fragments)>
+
+=== EXPECTED_CODEGEN_CPP17 ===
+<Expected generated C++17 code (or key fragments)>
+
+=== META ===
+<Key-value metadata: id, tags, description, expected_exit_code>
+```
+
+### 15.2 Section Rules
+
+1. Each section starts with `=== SECTION_NAME ===` on its own line.
+2. Sections are optional — a test file need only include the sections relevant to its
+   test category.
+3. The `INPUT` section is REQUIRED — all other sections are optional.
+4. The `META` section, if present, MUST be last.
+5. Trailing whitespace in section content is significant for formatter tests.
+6. Empty sections (delimiter present but no content) are valid and mean "expect empty
+   output."
+
+### 15.3 META Section Keys
+
+```
+id: PARSE-POS-001
+tags: parser, positive, minimal
+description: Minimal valid machine with one state
+expected_exit_code: 0
+category: parser
+skip: false
+skip_reason: Requires feature X (not yet implemented)
+```
+
+| Key | Required | Description |
+|---|---|---|
+| `id` | Yes | Unique test identifier (matches MANIFEST.json) |
+| `tags` | No | Comma-separated tags for filtering |
+| `description` | No | Human-readable description |
+| `expected_exit_code` | Yes | Expected CLI exit code (0, 1, 2, 3, or 4) |
+| `category` | Yes | `parser` \| `validator` \| `semantic` \| `codegen-c` \| `codegen-cpp` \| `formatter` \| `simulator` |
+| `skip` | No | `true` to skip this test (default: `false`) |
+| `skip_reason` | No | Explanation for why the test is skipped |
+
+### 15.4 EXPECTED_DIAGNOSTICS Format
+
+Each line specifies one expected diagnostic:
+
+```
+FSM-E0100:5:14:not found
+FSM-W0200:12:5:Loop in action block
+```
+
+Format: `CODE:LINE:COL:MESSAGE_SUBSTRING`
+
+- `CODE` — the FSM diagnostic code (e.g., `FSM-E0100`)
+- `LINE` — 1-based line number in the INPUT section
+- `COL` — 1-based column number
+- `MESSAGE_SUBSTRING` — a substring that MUST appear in the diagnostic message
+
+A test passes if and only if:
+1. Every line in `EXPECTED_DIAGNOSTICS` matches a diagnostic emitted by the compiler.
+2. No unexpected ERROR-level diagnostics are emitted (unexpected warnings are tolerated).
+
+### 15.5 Complete Example
+
+```
+=== INPUT ===
+machine Motor {
+    context {
+        speed: u16 = 0
+    }
+    event START
+    initial Idle
+    state Idle {
+        on START -> Running
+    }
+}
+
+=== EXPECTED_DIAGNOSTICS ===
+FSM-E0100:8:22:Running
+
+=== EXPECTED_IR ===
+
+=== META ===
+id: PARSE-NEG-020
+tags: parser, negative, undefined-state
+description: Transition to undefined state 'Running'
+expected_exit_code: 1
+category: parser
+```
+
+### 15.6 Test Runner Integration
+
+The `fsm test` command discovers `.fsm.test` files in the test suite directory:
+
+```bash
+fsm test --suite tests/conformance/
+
+# Discovers:
+#   tests/conformance/parser/pos-001-minimal.fsm.test
+#   tests/conformance/parser/neg-020-undefined.fsm.test
+#   tests/conformance/formatter/fmt-001-canonical.fsm.test
+#   ...
+```
+
+For each `.fsm.test` file, the runner:
+1. Extracts the `INPUT` section and writes it to a temporary `.fsm` file.
+2. Runs `fsm check` on the temporary file and compares exit code to `expected_exit_code`.
+3. If `EXPECTED_DIAGNOSTICS` is present, verifies all expected diagnostics appear.
+4. If `EXPECTED_FORMATTED` is present, runs `fsm fmt` and compares output exactly.
+5. If `EXPECTED_IR` is present, runs `fsm ir` and compares JSON structurally
+   (order-insensitive for object keys, order-sensitive for arrays).
+6. If `EXPECTED_CODEGEN_C99` is present, runs `fsm generate --target c99` and verifies
+   the generated code contains all expected fragments.
+7. Reports PASS/FAIL per section, with unified diff on failure.
+
+### 15.7 Updating Golden Files
+
+```bash
+# Regenerate all golden outputs (IR, formatted, codegen) from current compiler:
+fsm test --suite tests/conformance/ --update-golden
+
+# Regenerate only formatter goldens:
+fsm test --suite tests/conformance/ --update-golden --category formatter
+```
+
+The `--update-golden` flag overwrites the `EXPECTED_FORMATTED`, `EXPECTED_IR`, and
+`EXPECTED_CODEGEN_*` sections in-place. `EXPECTED_DIAGNOSTICS` is NEVER auto-updated
+(it must be maintained manually).
 
 ---
 

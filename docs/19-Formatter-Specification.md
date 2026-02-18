@@ -71,16 +71,16 @@ machine Motor
 ```fsm
 machine Motor {
     context {
-        speed:   u16 = 0;
-        running: bool = false;
+        speed:   u16 = 0
+        running: bool = false
     }
 
-    event START(target_speed: u16);
-    event STOP;
+    event START(target_speed: u16)
+    event STOP
 
-    extern pure isSpeedValid(threshold: u16) -> bool;
+    pure extern isSpeedValid(threshold: u16) : bool
 
-    initial -> Idle;
+    initial Idle
 
     state Idle { }
     state Running { }
@@ -93,7 +93,7 @@ machine Motor {
   1. `context { }` block (if present)
   2. `event` declarations (if present)
   3. `extern` declarations (if present)
-  4. `initial ->` declaration
+  4. `initial` declaration
   5. State declarations (in source order — formatter does NOT reorder states)
   6. `submachine` declarations (if present)
 - One blank line between each section (context block, events group, externs group, initial, states).
@@ -106,9 +106,9 @@ machine Motor {
 
 ```fsm
 context {
-    speed:   u16  = 0;
-    running: bool = false;
-    mode:    u8   = 0;
+    speed:   u16  = 0
+    running: bool = false
+    mode:    u8   = 0
 }
 ```
 
@@ -146,9 +146,9 @@ for each field:
 # 6. Event Declarations
 
 ```fsm
-event START(target_speed: u16);
-event STOP;
-event FAULT(code: u8, severity: u8);
+event START(target_speed: u16)
+event STOP
+event FAULT(code: u8, severity: u8)
 ```
 
 **Rules:**
@@ -163,14 +163,14 @@ event FAULT(code: u8, severity: u8);
 # 7. Extern Declarations
 
 ```fsm
-extern pure isSpeedValid(threshold: u16) -> bool;
-extern logEvent(code: u8);
+pure extern isSpeedValid(threshold: u16) : bool
+extern logEvent(code: u8)
 ```
 
 **Rules:**
 - Each `extern` on one line.
-- `pure` keyword before `extern` function name if present: `extern pure NAME`.
-- Return type: `-> Type` with spaces around `->`.
+- `pure` keyword before `extern` keyword if present: `pure extern NAME`.
+- Return type: `: Type` with spaces around `:`.
 - No alignment between extern declarations.
 - No blank line between consecutive externs.
 
@@ -187,10 +187,10 @@ state Idle {
     exit: { stopTimer(); }
 
     on START [isSpeedValid(ctx.speed)] -> Running: { logStart(); }
-    on START -> Error;
+    on START -> Error
 
-    after 5000ms -> Timeout;
-    defer PAUSE;
+    after 5000ms -> Timeout
+    defer PAUSE
 }
 ```
 
@@ -265,10 +265,10 @@ exit:  { stopTimer(); }
 # 10. Transitions
 
 ```fsm
-on START                          -> Running;
+on START                          -> Running
 on START [ctx.speed > 0]          -> Running: { logStart(); }
-on START [isSpeedValid(ctx.speed)] -> Fast;
-on STOP                           -> Idle;
+on START [isSpeedValid(ctx.speed)] -> Fast
+on STOP                           -> Idle
 ```
 
 **Rules:**
@@ -285,8 +285,8 @@ on STOP                           -> Idle;
 **Alignment example:**
 ```fsm
 on START [ctx.speed > 0]          -> Running: { logStart(); }
-on START [isSpeedValid(ctx.speed)] -> Fast;
-on STOP                            -> Idle;
+on START [isSpeedValid(ctx.speed)] -> Fast
+on STOP                            -> Idle
 ```
 
 - The longest prefix is `on START [isSpeedValid(ctx.speed)]` (32 chars).
@@ -299,7 +299,7 @@ internal on PING: { updateTimestamp(); }
 
 **Priority clause** (inline after transition):
 ```fsm
-on START [ctx.speed > 0] -> Running priority 50;
+on START [ctx.speed > 0] -> Running priority 50
 ```
 `priority` keyword + space + number, at the end of the line before `;`.
 
@@ -308,8 +308,8 @@ on START [ctx.speed > 0] -> Running priority 50;
 # 11. Timer Declarations
 
 ```fsm
-after  5000ms -> Timeout;
-every  100ms  -> Update;
+after  5000ms -> Timeout
+every  100ms  -> Update
 every  500ms: { poll(); }
 ```
 
@@ -326,8 +326,8 @@ every  500ms: { poll(); }
 
 ```fsm
 composite Operational {
-    initial -> Normal;
-    history shallow;
+    initial Normal
+    history shallow
 
     state Normal { }
     state Degraded { }
@@ -335,12 +335,12 @@ composite Operational {
 
 parallel Monitor {
     region Sensors {
-        initial -> Idle;
+        initial Idle
         state Idle { }
     }
 
     region Output {
-        initial -> Idle;
+        initial Idle
         state Idle { }
     }
 }
@@ -348,9 +348,9 @@ parallel Monitor {
 
 **Rules:**
 - `composite NAME {` / `parallel NAME {` on one line.
-- `initial ->` before any `state` declarations.
-- `history shallow;` / `history deep;` on its own line, before states.
-- `history shallow default -> StateName;` on its own line.
+- `initial StateName` before any `state` declarations.
+- `history shallow` / `history deep` on its own line, before states.
+- `history shallow default -> StateName` on its own line.
 - **Blank line between regions** in a parallel state.
 - Each `region NAME {` / `}` follows the same indent rules as state bodies.
 
@@ -358,37 +358,119 @@ parallel Monitor {
 
 # 13. Pseudo-State Declarations
 
-**Choice:**
+## 13.1 Choice Pseudo-State
+
 ```fsm
 choice SpeedSelect {
-    [ctx.speed > 100] -> Fast;
-    [ctx.speed > 0]   -> Normal;
-    [else]            -> Idle;
+    [ctx.speed > 100] -> Fast
+    [ctx.speed > 0]   -> Normal
+    [else]            -> Idle
 }
 ```
-- Align `->` across branches.
-- `[else]` MUST be last.
 
-**Fork/Join:**
-```fsm
-fork StartAll -> Monitor.Sensors, Monitor.Output;
-join AllDone from Monitor.Sensors, Monitor.Output -> Done;
-```
-- Comma-space separated lists.
+**Rules:**
+- `choice NAME {` on one line (opening brace on same line as `choice`).
+- Each branch on its own line, indented by one level (4-space indent at default `indent-size`).
+- Guards are left-aligned at the indent level.
+- `->` arrows aligned vertically within the choice block (pad guards to the widest guard + 1 space).
+- `[else]` branch MUST be last.
+- Closing `}` at the same indent level as the `choice` keyword.
+- If a branch has an action block: `[guard] -> Target: { action(); }` — colon immediately
+  after target, space, then action block (same rules as transition actions in §10).
 
-**Stable ID annotation:**
+**Example with actions:**
 ```fsm
-@id("state-idle")
-state Idle { }
+choice SpeedSelect {
+    [ctx.speed > 100] -> Fast:   { logFast(); }
+    [ctx.speed > 0]   -> Normal: { logNormal(); }
+    [else]            -> Idle
+}
 ```
-- `@id(...)` on its own line, immediately before the declaration it annotates.
 
-**Doc comment:**
+## 13.2 Junction Pseudo-State
+
+Formatting rules are identical to `choice` (§13.1). The only difference is the keyword.
+
 ```fsm
-/// The idle state. Entered on startup.
-state Idle { }
+junction RouteSelect {
+    [ctx.mode == 1] -> ModeA
+    [ctx.mode == 2] -> ModeB
+    [else]          -> Default
+}
 ```
-- `///` doc comment immediately before its annotated declaration, no blank line between.
+
+**Rules:**
+- `junction NAME {` on one line (opening brace on same line).
+- Each branch on its own line with 4-space indent.
+- Guards left-aligned at the indent level.
+- `->` arrows aligned vertically within the junction block.
+- `[else]` branch MUST be last.
+- Closing `}` at the same indent level as the `junction` keyword.
+
+## 13.3 Fork Pseudo-State
+
+```fsm
+fork StartAll -> { Monitor.Sensors, Monitor.Output }
+```
+
+**Rules:**
+- `fork NAME -> { Target1, Target2 }` on a single line if the total line length is <= 80 characters.
+- Targets separated by `, ` (comma + space) inside `{ }`.
+- Space after `{` and before `}`.
+- If the line exceeds 80 characters, targets wrap to separate lines with 4-space indent:
+  ```fsm
+  fork ActivateAllRegions -> {
+      Monitor.Sensors,
+      Monitor.Output,
+      Controller.Primary,
+      Controller.Secondary
+  }
+  ```
+- In the multi-line form, each target on its own line with a trailing comma (except the last target).
+- Closing `}` at the same indent level as the `fork` keyword.
+
+## 13.4 Join Pseudo-State
+
+Formatting rules are identical to `fork` (§13.3), with the addition of the `-> Target` suffix.
+
+```fsm
+join AllDone { Monitor.Sensors, Monitor.Output } -> Done
+```
+
+**Rules:**
+- `join NAME { Source1, Source2 } -> Target` on a single line if <= 80 characters.
+- Sources separated by `, ` (comma + space) inside `{ }`.
+- Space after `{` and before `}`.
+- `-> Target` follows immediately after `}` with spaces around `->`.
+- If the line exceeds 80 characters, sources wrap to separate lines with 4-space indent:
+  ```fsm
+  join AllRegionsDone {
+      Monitor.Sensors,
+      Monitor.Output,
+      Controller.Primary,
+      Controller.Secondary
+  } -> Completed
+  ```
+- In the multi-line form, `} -> Target` on its own line at the base indent level.
+
+## 13.5 Stable ID and Doc Comment on Pseudo-States
+
+Pseudo-states follow the same annotation ordering as all other declarations (see §15):
+`@id(...)` first, then `/// doc comment`, then the declaration.
+
+```fsm
+@id("ps-speed-select")
+/// Routes to the appropriate speed state.
+choice SpeedSelect {
+    [ctx.speed > 100] -> Fast
+    [ctx.speed > 0]   -> Normal
+    [else]            -> Idle
+}
+
+@id("ps-start-fork")
+/// Activates all parallel regions simultaneously.
+fork StartAll -> { Monitor.Sensors, Monitor.Output }
+```
 
 ---
 
@@ -427,7 +509,7 @@ state Idle { }
 /// The idle waiting state.
 state Idle {
     @id("t-idle-to-running")
-    on START -> Running;
+    on START -> Running
 }
 ```
 
@@ -450,14 +532,14 @@ Output (canonical):
 ```fsm
 machine Motor {
     context {
-        speed:   u16  = 0;
-        running: bool = false;
+        speed:   u16  = 0
+        running: bool = false
     }
 
-    event START(target_speed: u16);
-    event STOP;
+    event START(target_speed: u16)
+    event STOP
 
-    initial -> Idle;
+    initial Idle
 
     state Idle {
         entry: { startTimer(); }
@@ -467,13 +549,13 @@ machine Motor {
             logStart();
         }
 
-        after 5000ms -> Error;
+        after 5000ms -> Error
     }
 
     state Running {
         exit: { stopMotor(); }
 
-        on STOP -> Idle;
+        on STOP -> Idle
     }
 }
 ```

@@ -38,7 +38,7 @@ The project has no runtime dependencies on any OS or standard library beyond wha
 | VS Code extension | TypeScript | ≥ 5.3 | Uses `vscode-languageclient` for LSP; `esbuild` for bundling |
 | Diagram rendering | `@elklayout/core` + custom SVG | latest stable | ELK hierarchical layout; SVG rendered in VS Code WebviewPanel |
 | Extension packaging | `@vscode/vsce` | latest stable | Produces `.vsix` for marketplace publish |
-| Web IDE | TypeScript + WASM | — | CodeMirror 6 editor; same WASM package as above |
+| Web IDE | TypeScript + WASM | — | Monaco Editor; same WASM package as above |
 | Testing (Rust) | `cargo test` + `insta` | latest stable | `insta` for snapshot/golden-file tests |
 | Testing (conformance) | Custom Rust harness | — | Reads `MANIFEST.json`; described in FSM-SPEC-TEST |
 | CI | GitHub Actions | — | `rust-toolchain.toml` pins Rust version; matrix: linux, macos, windows |
@@ -75,9 +75,9 @@ sm-sdk/
 │   │   ├── syntaxes/        # fsm-lang.tmLanguage.json
 │   │   ├── snippets/        # fsm-lang.json
 │   │   └── bin/             # Bundled fsm binaries (5 platforms)
-│   └── web/                 # Web IDE (TypeScript + WASM)
+│   └── web-ide/             # Web IDE (TypeScript + WASM)
 │       ├── src/
-│       │   ├── editor.ts    # CodeMirror 6 integration
+│       │   ├── editor.ts    # Monaco Editor integration
 │       │   ├── compiler.ts  # WASM bridge
 │       │   └── diagram.ts   # ELK + SVG diagram
 │       └── public/
@@ -141,7 +141,7 @@ cargo test --workspace
 cargo build --release -p fsm-cli
 
 # Build WASM package
-wasm-pack build crates/fsm-wasm --target bundler --out-dir ../../editors/web/pkg
+wasm-pack build crates/fsm-wasm --target web --out-dir ../../editors/web-ide/public
 
 # Install VS Code extension dependencies
 cd editors/vscode && npm install

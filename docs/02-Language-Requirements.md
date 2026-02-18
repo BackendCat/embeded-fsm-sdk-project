@@ -274,7 +274,7 @@ External transition from S to T with LCA L:
 
 - Bounded, statically allocated FIFO.
 - Capacity: compile-time configurable.
-- Overflow policy: `drop-oldest`, `drop-newest`, `assert`, `error`.
+- Overflow policy: `drop_oldest`, `drop_newest`, `assert`, `error`.
 - Drain semantics: process one event per dispatch call (run-to-completion per event).
 
 ### 5.3 Deferred Events
@@ -472,7 +472,7 @@ Profiles are named capability sets for code generation targets.
 
 | Key | Type | Description |
 |---|---|---|
-| `strategy` | `switch-based` \| `table-driven` | Code gen strategy. |
+| `strategy` | `switch_based` \| `table_driven` | Code gen strategy. |
 | `queue_capacity` | integer | Event queue depth. |
 | `overflow` | overflow policy | Queue overflow behaviour. |
 | `allow_float` | boolean | Whether `f32`/`f64` types are permitted. |
@@ -502,7 +502,7 @@ Every diagnostic MUST carry: stable code, severity, file, line, column, span, me
 | `FSM-E0101` | Equal-priority transitions with non-disjoint guards. |
 | `FSM-E0102` | Transition crosses region boundary illegally. |
 | `FSM-E0103` | LCA computation failure (disconnected graph). |
-| `FSM-E0104` | Local transition (`~>`) target is not a descendant. |
+| `FSM-E0110` | Local transition (`~>`) target is not a descendant. |
 | `FSM-E0105` | Internal transition has an explicit target. |
 | `FSM-E0106` | Circular submachine reference. |
 | `FSM-E0107` | Fork/join structure mismatch. |
