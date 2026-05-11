@@ -15,3 +15,9 @@ description = "FSM Studio C99 code generator — IR → deterministic, no-heap C
 # emitter-side warnings (e.g. memory-budget overruns) via Diagnostic.
 fsm-diagnostics = { workspace = true }
 fsm-ir = { path = "../fsm-ir" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+tempfile = "3"
