@@ -14,7 +14,10 @@ path = "src/main.rs"
 
 [dependencies]
 # Aggregates the v1.0 pipeline. Deferred crates (codegen-cpp, lsp, wasm)
-# are intentionally absent here; they land in v1.1+.
+# are intentionally absent here; they land in v1.1+. The CLI renders
+# diagnostics through miette, so it pulls in fsm-diagnostics with the
+# `miette` feature explicitly enabled.
+fsm-diagnostics = { workspace = true, features = ["miette"] }
 fsm-lexer = { path = "../fsm-lexer" }
 fsm-parser = { path = "../fsm-parser" }
 fsm-analyzer = { path = "../fsm-analyzer" }

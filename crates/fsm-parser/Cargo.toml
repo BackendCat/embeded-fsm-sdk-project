@@ -9,5 +9,8 @@ repository.workspace = true
 description = "FSM Studio parser — recursive-descent over rowan CST + typed AST"
 
 [dependencies]
+# Parser emits Diagnostic values on syntax errors, so it depends directly on
+# fsm-diagnostics rather than re-exporting through fsm-lexer (Doc 00 §7.1).
+fsm-diagnostics = { workspace = true }
 fsm-lexer = { path = "../fsm-lexer" }
 rowan = { workspace = true }

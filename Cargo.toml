@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/fsm-diagnostics",
     "crates/fsm-lexer",
     "crates/fsm-parser",
     "crates/fsm-analyzer",
@@ -34,6 +35,11 @@ miette = { version = "7", features = ["fancy"] }
 rowan = "0.15"
 anyhow = "1.0"
 thiserror = "1.0"
+
+# Internal foundation crate — zero workspace deps; owns Span, SourceLocation,
+# Severity, DiagnosticCode, Diagnostic. Every pipeline crate consumes this
+# crate instead of redefining diagnostic types locally (Doc 00 §7.1).
+fsm-diagnostics = { path = "crates/fsm-diagnostics", version = "0.1.0" }
 
 # Dev-only dependency for snapshot tests.
 insta = "1.34"

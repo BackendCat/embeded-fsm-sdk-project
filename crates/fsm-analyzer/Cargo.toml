@@ -9,5 +9,7 @@ repository.workspace = true
 description = "FSM Studio semantic analyzer — symbol table, type check, determinism"
 
 [dependencies]
+# Analyzer emits Diagnostic values for every semantic / determinism check.
+fsm-diagnostics = { workspace = true }
 fsm-parser = { path = "../fsm-parser" }
 fsm-ir = { path = "../fsm-ir" }

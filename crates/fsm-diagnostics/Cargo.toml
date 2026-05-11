@@ -1,0 +1,29 @@
+[package]
+name = "fsm-diagnostics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "FSM Studio diagnostics foundation — Span, Severity, DiagnosticCode, Diagnostic"
+
+# Foundation crate: zero workspace deps by design (Doc 00 §7.1). Every other
+# crate that needs Span / SourceLocation / DiagnosticCode / Diagnostic depends
+# on this crate. Optional external integrations are gated behind features.
+[dependencies]
+serde = { workspace = true, optional = true }
+miette = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[features]
+default = []
+# Derive `Serialize` / `Deserialize` on the public types so JSON IR consumers
+# (fsm-ir, fsm-cli `--json`) can round-trip diagnostic data.
+serde = ["dep:serde"]
+# Implement `miette::Diagnostic` on `Diagnostic` so upstream crates get
+# Rust-style source snippets via `?` and `miette::Result`.
+miette = ["dep:miette", "dep:thiserror"]

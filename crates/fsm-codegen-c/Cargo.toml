@@ -9,6 +9,9 @@ repository.workspace = true
 description = "FSM Studio C99 code generator — IR → deterministic, no-heap C"
 
 [dependencies]
-# STRICT: codegen sees fsm-ir ONLY. Importing fsm-parser or fsm-analyzer
-# here violates the dependency rule in Doc 23 §4 and Doc 20 §11.5.
+# STRICT: codegen sees fsm-ir and the diagnostics foundation ONLY. Importing
+# fsm-parser or fsm-analyzer here violates the dependency rule in Doc 23 §4
+# / Doc 20 §11.5. fsm-diagnostics is permitted because codegen may surface
+# emitter-side warnings (e.g. memory-budget overruns) via Diagnostic.
+fsm-diagnostics = { workspace = true }
 fsm-ir = { path = "../fsm-ir" }

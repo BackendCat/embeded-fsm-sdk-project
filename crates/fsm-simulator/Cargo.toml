@@ -11,5 +11,6 @@ description = "FSM Studio interpreter — pure-Rust RTC step engine over IR"
 [dependencies]
 # v1.0 ships the interpreter only. The WebSocket / JSON-RPC daemon
 # (Doc 20 §8.4) is deferred — tokio and tungstenite are not added yet.
+fsm-diagnostics = { workspace = true }
 fsm-ir = { path = "../fsm-ir" }
 fsm-analyzer = { path = "../fsm-analyzer" }

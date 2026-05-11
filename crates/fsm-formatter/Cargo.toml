@@ -10,6 +10,8 @@ description = "FSM Studio canonical formatter — CST in, formatted .fsm text ou
 
 [dependencies]
 # Formatter walks the CST only. By design, it does NOT depend on the
-# analyzer or IR (Doc 23 §4 / Doc 20 §11.5).
+# analyzer or IR (Doc 23 §4 / Doc 20 §11.5). It still surfaces parse-time
+# Diagnostic values from the CST builder, hence fsm-diagnostics.
+fsm-diagnostics = { workspace = true }
 fsm-lexer = { path = "../fsm-lexer" }
 fsm-parser = { path = "../fsm-parser" }
