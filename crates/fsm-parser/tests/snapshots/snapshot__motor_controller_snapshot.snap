@@ -1,0 +1,321 @@
+---
+source: crates/fsm-parser/tests/snapshot.rs
+expression: dump
+---
+FILE
+  LANGUAGE_DECL
+    KwLanguage "language"
+    Ident "fsm"
+    LANGUAGE_VERSION
+      FloatLiteral "2.0"
+  FEATURE_DECL
+    KwFeature "feature"
+    Ident "hsm"
+  FEATURE_DECL
+    KwFeature "feature"
+    Ident "timers"
+  CONST_DECL
+    KwConst "const"
+    Ident "STARTUP_MS"
+    Eq "="
+    CONST_EXPR
+      EXPR_LITERAL
+        IntLiteral "250"
+  CONST_DECL
+    KwConst "const"
+    Ident "MAX_RPM"
+    Eq "="
+    CONST_EXPR
+      EXPR_LITERAL
+        IntLiteral "5000"
+  ENUM_DECL
+    KwEnum "enum"
+    Ident "Mode"
+    LBrace "{"
+    ENUM_VARIANT
+      Ident "OFF"
+      Eq "="
+      IntLiteral "0"
+    Comma ","
+    ENUM_VARIANT
+      Ident "LOW"
+      Eq "="
+      IntLiteral "1"
+    Comma ","
+    ENUM_VARIANT
+      Ident "HIGH"
+      Eq "="
+      IntLiteral "2"
+    RBrace "}"
+  EXTERN_DECL
+    KwPure "pure"
+    KwExtern "extern"
+    Ident "at_target_rpm"
+    LParen "("
+    PARAM_LIST
+      PARAM
+        Ident "ctx"
+    RParen ")"
+    Colon ":"
+    TYPE_REF
+      KwBool "bool"
+  EXTERN_DECL
+    KwExtern "extern"
+    Ident "set_pwm"
+    LParen "("
+    PARAM_LIST
+      PARAM
+        TYPE_REF
+          KwU16 "u16"
+        Ident "pwm"
+    RParen ")"
+  EXTERN_DECL
+    KwExtern "extern"
+    Ident "emergency_stop"
+    LParen "("
+    RParen ")"
+  STABLE_ID_ANNOT
+    StableId "@id"
+    LParen "("
+    StringLiteral "\"m-motor\""
+    RParen ")"
+  MACHINE_DECL
+    KwExport "export"
+    KwMachine "machine"
+    Ident "Motor"
+    LBrace "{"
+    CONTEXT_BLOCK
+      KwContext "context"
+      LBrace "{"
+      FIELD_DECL
+        Ident "rpm"
+        Colon ":"
+        TYPE_REF
+          KwU16 "u16"
+        Eq "="
+        CONST_EXPR
+          EXPR_LITERAL
+            IntLiteral "0"
+      FIELD_DECL
+        Ident "mode"
+        Colon ":"
+        TYPE_REF
+          Ident "Mode"
+      FIELD_DECL
+        Ident "retry"
+        Colon ":"
+        TYPE_REF
+          KwU8 "u8"
+        Eq "="
+        CONST_EXPR
+          EXPR_LITERAL
+            IntLiteral "0"
+      RBrace "}"
+    EVENTS_BLOCK
+      Ident "events"
+      LBrace "{"
+      EVENT_DECL
+        Ident "START"
+      EVENT_DECL
+        Ident "STOP"
+      EVENT_DECL
+        Ident "FAULT"
+        PAYLOAD_LIST
+          LParen "("
+          PAYLOAD_FIELD
+            Ident "code"
+            Colon ":"
+            TYPE_REF
+              KwU8 "u8"
+          RParen ")"
+      RBrace "}"
+    QUEUE_BLOCK
+      Ident "queue"
+      LBrace "{"
+      CONFIG_ENTRY
+        Ident "capacity"
+        Eq "="
+        IntLiteral "16"
+      CONFIG_ENTRY
+        Ident "overflow"
+        Eq "="
+        Ident "drop_oldest"
+      RBrace "}"
+    INITIAL_DECL
+      KwInitial "initial"
+      Ident "Idle"
+    STABLE_ID_ANNOT
+      StableId "@id"
+      LParen "("
+      StringLiteral "\"s-idle\""
+      RParen ")"
+    STATE_DECL
+      KwState "state"
+      Ident "Idle"
+      LBrace "{"
+      ENTRY_DECL
+        Ident "entry"
+        Colon ":"
+        ACTION_BLOCK
+          STMT_CALL
+            EXPR_CALL
+              EXPR_NAME_REF
+                Ident "set_pwm"
+              ARG_LIST
+                LParen "("
+                EXPR_LITERAL
+                  IntLiteral "0"
+                RParen ")"
+      TRANSITION_DECL
+        KwOn "on"
+        Ident "START"
+        Arrow "->"
+        Ident "Spinning"
+      RBrace "}"
+    STABLE_ID_ANNOT
+      StableId "@id"
+      LParen "("
+      StringLiteral "\"s-spinning\""
+      RParen ")"
+    STATE_DECL
+      KwState "state"
+      Ident "Spinning"
+      LBrace "{"
+      INITIAL_DECL
+        KwInitial "initial"
+        Ident "Ramping"
+      STABLE_ID_ANNOT
+        StableId "@id"
+        LParen "("
+        StringLiteral "\"s-ramping\""
+        RParen ")"
+      STATE_DECL
+        KwState "state"
+        Ident "Ramping"
+        LBrace "{"
+        ENTRY_DECL
+          Ident "entry"
+          Colon ":"
+          ACTION_BLOCK
+            STMT_CALL
+              EXPR_CALL
+                EXPR_NAME_REF
+                  Ident "set_pwm"
+                ARG_LIST
+                  LParen "("
+                  EXPR_LITERAL
+                    IntLiteral "100"
+                  RParen ")"
+        AFTER_DECL
+          KwAfter "after"
+          CONST_EXPR
+            EXPR_NAME_REF
+              Ident "STARTUP_MS"
+          KwMs "ms"
+          Arrow "->"
+          Ident "Running"
+        COMPLETION_DECL
+          KwDone "done"
+          GUARD_CLAUSE
+            LBracket "["
+            EXPR_CALL
+              EXPR_NAME_REF
+                Ident "at_target_rpm"
+              ARG_LIST
+                LParen "("
+                RParen ")"
+            RBracket "]"
+          Arrow "->"
+          Ident "Running"
+        RBrace "}"
+      STABLE_ID_ANNOT
+        StableId "@id"
+        LParen "("
+        StringLiteral "\"s-running\""
+        RParen ")"
+      STATE_DECL
+        KwState "state"
+        Ident "Running"
+        LBrace "{"
+        LOCAL_DECL
+          KwOn "on"
+          Ident "FAULT"
+          GUARD_CLAUSE
+            LBracket "["
+            EXPR_BINARY
+              EXPR_FIELD_REF
+                EXPR_NAME_REF
+                  Ident "ctx"
+                Dot "."
+                Ident "retry"
+              Lt "<"
+              EXPR_LITERAL
+                IntLiteral "3"
+            RBracket "]"
+          HistoryArrow "~>"
+          Ident "Ramping"
+          Colon ":"
+          ACTION_BLOCK
+            STMT_ASSIGN
+              EXPR_FIELD_REF
+                EXPR_NAME_REF
+                  Ident "ctx"
+                Dot "."
+                Ident "retry"
+              Eq "="
+              EXPR_BINARY
+                EXPR_FIELD_REF
+                  EXPR_NAME_REF
+                    Ident "ctx"
+                  Dot "."
+                  Ident "retry"
+                Plus "+"
+                EXPR_LITERAL
+                  IntLiteral "1"
+        TRANSITION_DECL
+          KwOn "on"
+          Ident "FAULT"
+          GUARD_CLAUSE
+            LBracket "["
+            EXPR_BINARY
+              EXPR_FIELD_REF
+                EXPR_NAME_REF
+                  Ident "ctx"
+                Dot "."
+                Ident "retry"
+              Ge ">="
+              EXPR_LITERAL
+                IntLiteral "3"
+            RBracket "]"
+          Arrow "->"
+          Ident "Idle"
+          Colon ":"
+          ACTION_BLOCK
+            STMT_CALL
+              EXPR_CALL
+                EXPR_NAME_REF
+                  Ident "emergency_stop"
+                ARG_LIST
+                  LParen "("
+                  RParen ")"
+        TRANSITION_DECL
+          KwOn "on"
+          Ident "STOP"
+          Arrow "->"
+          Ident "Idle"
+        RBrace "}"
+      RBrace "}"
+    TARGET_BLOCK
+      KwTarget "target"
+      Ident "C99"
+      LBrace "{"
+      CONFIG_ENTRY
+        Ident "strategy"
+        Eq "="
+        Ident "switch_based"
+      CONFIG_ENTRY
+        Ident "allow_float"
+        Eq "="
+        KwFalse "false"
+      RBrace "}"
+    RBrace "}"

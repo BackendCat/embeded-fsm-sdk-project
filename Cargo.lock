@@ -348,7 +348,9 @@ version = "0.1.0"
 dependencies = [
  "fsm-diagnostics",
  "fsm-lexer",
+ "insta",
  "rowan",
+ "thiserror",
 ]
 
 [[package]]

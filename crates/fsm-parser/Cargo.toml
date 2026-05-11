@@ -11,6 +11,11 @@ description = "FSM Studio parser — recursive-descent over rowan CST + typed AS
 [dependencies]
 # Parser emits Diagnostic values on syntax errors, so it depends directly on
 # fsm-diagnostics rather than re-exporting through fsm-lexer (Doc 00 §7.1).
+# `serde` feature off — parser only constructs Diagnostics, never serializes.
 fsm-diagnostics = { workspace = true }
 fsm-lexer = { path = "../fsm-lexer" }
 rowan = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
