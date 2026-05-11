@@ -16,3 +16,11 @@ description = "FSM Studio canonical IR — pure data types + serde JSON serializ
 fsm-diagnostics = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# Used only by tests/schema_validation.rs to validate that the JSON Schema
+# under `schema/ir/1.0.0/model.json` accepts representative IR documents
+# and rejects malformed ones. Pinned per task brief.
+jsonschema = { version = "0.17", default-features = false }
+serde_json = { workspace = true }

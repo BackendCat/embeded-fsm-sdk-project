@@ -1,35 +1,25 @@
 //! `fsm-ir` — canonical Intermediate Representation for FSM Studio.
 //!
-//! Per Doc 20 §6, this crate is pure data: structs, enums, builder, visitor.
-//! No business logic. Codegen and the simulator consume this IR. The only
-//! foundation types imported are `Span` and `SourceLocation` from
-//! `fsm-diagnostics` (Doc 00 §7.1; previously sourced from `fsm-parser`).
+//! Per Doc 20 §6, this crate is pure data: structs, enums, JSON I/O, and a
+//! tree-walking visitor. No business logic. Codegen and the simulator
+//! consume this IR. Foundation types — `Span`, `SourceLocation`,
+//! `Diagnostic`, `Severity`, `DiagnosticCode` — are re-exported from
+//! [`fsm_diagnostics`] (Doc 00 §7.1) so downstream crates have one import.
 //!
-//! This file is a Phase 0 scaffold — no real IR types yet, but the
-//! re-exports below are stable: downstream crates may already write
-//! `use fsm_ir::{Span, SourceLocation};`.
+//! Wire format is documented in `docs/09-Canonical-IR-Schema.md` and the
+//! companion JSON Schema at `schema/ir/1.0.0/model.json`. Reconciler
+//! additions (`const`, `import`, `feature`, `queue`, `target`, `cast`,
+//! `enum_variant`, `kind` on transitions) come from `docs/00-Decisions-
+//! And-Reconciliation.md` §7.4.
 
-pub use fsm_diagnostics::{SourceLocation, Span};
+#![forbid(unsafe_code)]
 
-/// Placeholder stub so the crate compiles before real implementation lands.
-pub fn placeholder() -> &'static str {
-    "TODO"
-}
+pub use fsm_diagnostics::{Diagnostic, DiagnosticCode, Severity, SourceLocation, Span};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod json;
+pub mod model;
+pub mod visitor;
 
-    #[test]
-    fn smoke() {
-        assert_eq!(placeholder(), "TODO");
-    }
-
-    #[test]
-    fn reexports_span_from_diagnostics() {
-        // Compile-time check that the re-export path is stable.
-        let s = Span::new(0, 4);
-        let loc = SourceLocation::new("file.fsm", s, 1, 1);
-        assert_eq!(loc.span, s);
-    }
-}
+pub use json::{from_json, from_reader, to_json, to_writer, IrJsonError};
+pub use model::*;
+pub use visitor::{walk_ir, walk_machine, walk_region, walk_state, IrVisitor};

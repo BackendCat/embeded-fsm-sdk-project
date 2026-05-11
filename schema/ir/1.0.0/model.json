@@ -2,7 +2,949 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://schema.fsm-studio.org/ir/1.0.0/model.json",
   "title": "FSM Studio Canonical IR Schema v1.0.0",
+  "description": "Canonical JSON shape of the FSM-Lang IR. Wire form is normative per Doc 09 (§§2–17) plus the reconciler additions in Doc 00 §7.4: const declarations, file-scope imports, feature flags, queue config, target config, cast expressions, float literals, enum-variant literals, and the new TransitionKind discriminator on transitions.",
   "type": "object",
-  "properties": {},
-  "required": []
+  "required": ["irVersion", "sourceHash", "sourceFiles", "machines", "diagnostics"],
+  "additionalProperties": false,
+  "properties": {
+    "irVersion": {
+      "type": "string",
+      "description": "Semantic version of this IR schema. Consumers MUST reject documents whose major component differs from theirs (Doc 09 §17). Pattern enforces MAJOR.MINOR.PATCH.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "sourceHash": {
+      "type": "string",
+      "description": "sha256: prefix + hex of concatenated source files (Doc 09 §2)."
+    },
+    "sourceFiles": {
+      "type": "array",
+      "description": "Absolute or workspace-relative paths of source files (Doc 09 §2).",
+      "items": { "type": "string" }
+    },
+    "machines": {
+      "type": "array",
+      "description": "All machine declarations from the source files. May be empty.",
+      "items": { "$ref": "#/$defs/MachineObject" }
+    },
+    "diagnostics": {
+      "type": "array",
+      "description": "All diagnostics emitted during compilation. May be empty.",
+      "items": { "$ref": "#/$defs/DiagnosticObject" }
+    }
+  },
+  "$defs": {
+
+    "Span": {
+      "title": "Span",
+      "description": "Byte-offset range [start, end) inside a single source file.",
+      "type": "object",
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "type": "integer", "minimum": 0 },
+        "end":   { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "SourceLocation": {
+      "title": "SourceLocation",
+      "description": "Span enriched with file path + pre-computed 1-based line/column (Doc 09 §15).",
+      "type": "object",
+      "required": ["file", "span", "line", "column"],
+      "properties": {
+        "file":   { "type": "string" },
+        "span":   { "$ref": "#/$defs/Span" },
+        "line":   { "type": "integer", "minimum": 0 },
+        "column": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "DiagnosticObject": {
+      "title": "DiagnosticObject",
+      "description": "Diagnostic embedded in the IR (Doc 09 §14). Shape comes from fsm-diagnostics so the code catalogue has one source of truth.",
+      "type": "object",
+      "required": ["code", "severity", "message", "span"],
+      "properties": {
+        "code":    { "type": "string" },
+        "severity": { "type": "string", "enum": ["error", "warning", "info", "hint"] },
+        "message": { "type": "string" },
+        "span":    { "$ref": "#/$defs/Span" },
+        "related": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["message", "span"],
+            "properties": {
+              "message": { "type": "string" },
+              "span":    { "$ref": "#/$defs/Span" }
+            }
+          }
+        }
+      }
+    },
+
+    "Type": {
+      "title": "Type",
+      "description": "Type reference discriminated on `kind`. Covers DSL primitives plus the bounded `array` shape added per the task brief.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "name"],
+          "properties": {
+            "kind": { "const": "primitive" },
+            "name": {
+              "type": "string",
+              "description": "One of `bool`, `u8`..`u64`, `i8`..`i64`, `f32`, `f64`, `string`."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "enumId"],
+          "properties": {
+            "kind":   { "const": "enum" },
+            "enumId": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "cType"],
+          "properties": {
+            "kind":  { "const": "opaque" },
+            "cType": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "element", "size"],
+          "properties": {
+            "kind":    { "const": "array" },
+            "element": { "$ref": "#/$defs/Type" },
+            "size":    { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+
+    "Literal": {
+      "title": "Literal",
+      "description": "Literal value tagged on `literalKind` so the parent expression's `kind: literal` discriminator stays unambiguous (Doc 09 §9 + Doc 00 §7.4 items 6, 7).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["literalKind", "value"],
+          "properties": {
+            "literalKind": { "const": "int" },
+            "value":       { "type": "integer" },
+            "loc":         { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["literalKind", "value"],
+          "properties": {
+            "literalKind": { "const": "float" },
+            "value":       { "type": "number" },
+            "loc":         { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["literalKind", "value"],
+          "properties": {
+            "literalKind": { "const": "bool" },
+            "value":       { "type": "boolean" },
+            "loc":         { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["literalKind", "value"],
+          "properties": {
+            "literalKind": { "const": "string" },
+            "value":       { "type": "string" },
+            "loc":         { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["literalKind", "enumName", "variantName"],
+          "properties": {
+            "literalKind": { "const": "enum_variant" },
+            "enumName":    { "type": "string" },
+            "variantName": { "type": "string" },
+            "loc":         { "$ref": "#/$defs/SourceLocation" }
+          }
+        }
+      ]
+    },
+
+    "FieldRef": {
+      "title": "FieldRef",
+      "description": "Reference to a context or payload field (Doc 09 §9).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "field"],
+          "properties": {
+            "kind":  { "const": "ctx" },
+            "field": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "field"],
+          "properties": {
+            "kind":  { "const": "payload" },
+            "field": { "type": "string" }
+          }
+        }
+      ]
+    },
+
+    "GuardOperand": {
+      "title": "GuardOperand",
+      "description": "RHS of a field comparison: literal or another field reference (Doc 04 §8.5).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "literal" }
+          },
+          "allOf": [{ "$ref": "#/$defs/Literal" }]
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "field_ref" }
+          }
+        }
+      ]
+    },
+
+    "GuardExpr": {
+      "title": "GuardExpr",
+      "description": "Guard expression AST discriminated on `kind` (Doc 09 §7).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "lhs", "op", "rhs"],
+          "properties": {
+            "kind": { "const": "field_cmp" },
+            "lhs":  { "$ref": "#/$defs/FieldRef" },
+            "op":   { "type": "string", "enum": ["==", "!=", "<", ">", "<=", ">="] },
+            "rhs":  { "$ref": "#/$defs/GuardOperand" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "callee", "args"],
+          "properties": {
+            "kind":   { "const": "extern_call" },
+            "callee": { "type": "string" },
+            "args":   { "type": "array", "items": { "$ref": "#/$defs/Expr" } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "operand"],
+          "properties": {
+            "kind":    { "const": "not" },
+            "operand": { "$ref": "#/$defs/GuardExpr" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "left", "right"],
+          "properties": {
+            "kind":  { "const": "and" },
+            "left":  { "$ref": "#/$defs/GuardExpr" },
+            "right": { "$ref": "#/$defs/GuardExpr" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "left", "right"],
+          "properties": {
+            "kind":  { "const": "or" },
+            "left":  { "$ref": "#/$defs/GuardExpr" },
+            "right": { "$ref": "#/$defs/GuardExpr" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "else" }
+          }
+        }
+      ]
+    },
+
+    "Expr": {
+      "title": "Expr",
+      "description": "Action-block expression AST (Doc 09 §9 + Doc 00 §7.4 cast variant).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "ref"],
+          "properties": {
+            "kind": { "const": "field_ref" },
+            "ref":  { "$ref": "#/$defs/FieldRef" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "literal" }
+          },
+          "allOf": [{ "$ref": "#/$defs/Literal" }]
+        },
+        {
+          "type": "object",
+          "required": ["kind", "callee", "args"],
+          "properties": {
+            "kind":   { "const": "call" },
+            "callee": { "type": "string" },
+            "args":   { "type": "array", "items": { "$ref": "#/$defs/Expr" } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "op", "operand"],
+          "properties": {
+            "kind":    { "const": "unary" },
+            "op":      { "type": "string", "enum": ["!", "-", "~"] },
+            "operand": { "$ref": "#/$defs/Expr" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "op", "left", "right"],
+          "properties": {
+            "kind":  { "const": "binary" },
+            "op":    { "type": "string", "enum": ["+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "&&", "||", "==", "!=", "<", ">", "<=", ">="] },
+            "left":  { "$ref": "#/$defs/Expr" },
+            "right": { "$ref": "#/$defs/Expr" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "operand", "targetType"],
+          "properties": {
+            "kind":       { "const": "cast" },
+            "operand":    { "$ref": "#/$defs/Expr" },
+            "targetType": { "$ref": "#/$defs/Type" },
+            "loc":        { "$ref": "#/$defs/SourceLocation" }
+          }
+        }
+      ]
+    },
+
+    "Statement": {
+      "title": "Statement",
+      "description": "Action-block statement discriminated on `kind` (Doc 09 §8).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "target", "value"],
+          "properties": {
+            "kind":   { "const": "assign" },
+            "target": { "$ref": "#/$defs/FieldRef" },
+            "value":  { "$ref": "#/$defs/Expr" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "condition", "then", "else"],
+          "properties": {
+            "kind":      { "const": "if" },
+            "condition": { "$ref": "#/$defs/Expr" },
+            "then":      { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+            "else":      { "type": "array", "items": { "$ref": "#/$defs/Statement" } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "condition", "body"],
+          "properties": {
+            "kind":      { "const": "while" },
+            "condition": { "$ref": "#/$defs/Expr" },
+            "body":      { "type": "array", "items": { "$ref": "#/$defs/Statement" } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "init", "condition", "update", "body"],
+          "properties": {
+            "kind":      { "const": "for" },
+            "init":      { "$ref": "#/$defs/Statement" },
+            "condition": { "$ref": "#/$defs/Expr" },
+            "update":    { "$ref": "#/$defs/Statement" },
+            "body":      { "type": "array", "items": { "$ref": "#/$defs/Statement" } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "callee", "args"],
+          "properties": {
+            "kind":   { "const": "call" },
+            "callee": { "type": "string" },
+            "args":   { "type": "array", "items": { "$ref": "#/$defs/Expr" } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "eventId", "args"],
+          "properties": {
+            "kind":    { "const": "raise" },
+            "eventId": { "type": "string" },
+            "args":    { "type": "array", "items": { "$ref": "#/$defs/Expr" } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "eventId", "args", "machineId"],
+          "properties": {
+            "kind":      { "const": "send" },
+            "eventId":   { "type": "string" },
+            "args":      { "type": "array", "items": { "$ref": "#/$defs/Expr" } },
+            "machineId": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "eventId"],
+          "properties": {
+            "kind":    { "const": "defer" },
+            "eventId": { "type": "string" }
+          }
+        }
+      ]
+    },
+
+    "Trigger": {
+      "title": "Trigger",
+      "description": "Transition trigger (Doc 09 §6 TriggerObject).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "eventId"],
+          "properties": {
+            "kind":            { "const": "event" },
+            "eventId":         { "type": "string" },
+            "payloadBinding": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "durationMs"],
+          "properties": {
+            "kind":       { "const": "after" },
+            "durationMs": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "periodMs"],
+          "properties": {
+            "kind":     { "const": "every" },
+            "periodMs": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "from"],
+          "properties": {
+            "kind": { "const": "completion" },
+            "from": { "type": "string" }
+          }
+        }
+      ]
+    },
+
+    "TransitionObject": {
+      "title": "TransitionObject",
+      "description": "Transition between states (Doc 09 §6 + Doc 00 §7.4 item 8 new `kind` discriminator).",
+      "type": "object",
+      "required": ["id", "stableId", "source", "target", "actions", "priority", "kind", "loc"],
+      "properties": {
+        "id":       { "type": "string" },
+        "stableId": { "type": "string" },
+        "source":   { "type": "string" },
+        "target":   { "type": "string" },
+        "trigger":  {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/Trigger" }
+          ]
+        },
+        "guard": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/GuardExpr" }
+          ]
+        },
+        "actions":  { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+        "priority": { "type": "integer", "minimum": 0 },
+        "kind": {
+          "type": "string",
+          "enum": ["external", "local", "internal", "completion"],
+          "description": "Doc 00 §7.4 item 8 — new required discriminator."
+        },
+        "internal": {
+          "type": "boolean",
+          "description": "Deprecated alias retained one cycle (B-06). Consumers MUST treat `kind === \"internal\"` as authoritative."
+        },
+        "loc": { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "TimerObject": {
+      "title": "TimerObject",
+      "description": "Timer declaration (Doc 09 §13). Duration always resolved to milliseconds at IR emission time.",
+      "type": "object",
+      "required": ["id", "stableId", "kind", "durationMs", "ownerStateId", "actions", "loc"],
+      "properties": {
+        "id":           { "type": "string" },
+        "stableId":     { "type": "string" },
+        "kind":         { "type": "string", "enum": ["after", "every", "every_internal"] },
+        "durationMs":   { "type": "integer", "minimum": 0 },
+        "ownerStateId": { "type": "string" },
+        "target":       { "type": "string" },
+        "actions":      { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+        "loc":          { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "DeferDecl": {
+      "title": "DeferDecl",
+      "type": "object",
+      "required": ["eventId", "loc"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "loc":     { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "ChoiceBranch": {
+      "title": "ChoiceBranch",
+      "description": "Branch of a choice or junction pseudo-state (Doc 09 §4.6, §4.7).",
+      "type": "object",
+      "required": ["guard", "target", "actions", "loc"],
+      "properties": {
+        "guard":   { "$ref": "#/$defs/GuardExpr" },
+        "target":  { "type": "string" },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+        "loc":     { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "HistoryObject": {
+      "title": "HistoryObject",
+      "description": "History pseudo-state. `defaultTarget` is REQUIRED per Doc 00 B-14.",
+      "type": "object",
+      "required": ["id", "stableId", "historyKind", "defaultTarget", "loc"],
+      "properties": {
+        "id":            { "type": "string" },
+        "stableId":      { "type": "string" },
+        "historyKind":   { "type": "string", "enum": ["shallow", "deep"] },
+        "defaultTarget": { "type": "string" },
+        "loc":           { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "StateNode": {
+      "title": "StateNode",
+      "description": "State or pseudo-state, discriminated on `kind` (Doc 09 §4).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "id", "stableId", "name", "entry", "exit", "transitions", "timers", "defers", "loc"],
+          "properties": {
+            "kind":        { "const": "simple" },
+            "id":          { "type": "string" },
+            "stableId":    { "type": "string" },
+            "name":        { "type": "string" },
+            "entry":       { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+            "exit":        { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+            "transitions": { "type": "array", "items": { "$ref": "#/$defs/TransitionObject" } },
+            "timers":      { "type": "array", "items": { "$ref": "#/$defs/TimerObject" } },
+            "defers":      { "type": "array", "items": { "$ref": "#/$defs/DeferDecl" } },
+            "loc":         { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "stableId", "name", "entry", "exit", "transitions", "timers", "defers", "regions", "loc"],
+          "properties": {
+            "kind":        { "const": "composite" },
+            "id":          { "type": "string" },
+            "stableId":    { "type": "string" },
+            "name":        { "type": "string" },
+            "entry":       { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+            "exit":        { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+            "transitions": { "type": "array", "items": { "$ref": "#/$defs/TransitionObject" } },
+            "timers":      { "type": "array", "items": { "$ref": "#/$defs/TimerObject" } },
+            "defers":      { "type": "array", "items": { "$ref": "#/$defs/DeferDecl" } },
+            "regions": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "description": "Composite state MUST contain exactly one region (Doc 09 §4.2).",
+              "items": { "$ref": "#/$defs/RegionObject" }
+            },
+            "history": {
+              "oneOf": [
+                { "type": "null" },
+                { "$ref": "#/$defs/HistoryObject" }
+              ]
+            },
+            "loc": { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "stableId", "name", "entry", "exit", "transitions", "timers", "defers", "regions", "loc"],
+          "properties": {
+            "kind":        { "const": "parallel" },
+            "id":          { "type": "string" },
+            "stableId":    { "type": "string" },
+            "name":        { "type": "string" },
+            "entry":       { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+            "exit":        { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+            "transitions": { "type": "array", "items": { "$ref": "#/$defs/TransitionObject" } },
+            "timers":      { "type": "array", "items": { "$ref": "#/$defs/TimerObject" } },
+            "defers":      { "type": "array", "items": { "$ref": "#/$defs/DeferDecl" } },
+            "regions": {
+              "type": "array",
+              "minItems": 2,
+              "description": "Parallel state MUST contain ≥ 2 regions (Doc 09 §4.3).",
+              "items": { "$ref": "#/$defs/RegionObject" }
+            },
+            "loc": { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "target", "loc"],
+          "properties": {
+            "kind":   { "const": "initial" },
+            "id":     { "type": "string" },
+            "target": { "type": "string" },
+            "loc":    { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "stableId", "loc"],
+          "properties": {
+            "kind":     { "const": "final" },
+            "id":       { "type": "string" },
+            "stableId": { "type": "string" },
+            "loc":      { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "stableId", "branches", "loc"],
+          "properties": {
+            "kind":     { "const": "choice" },
+            "id":       { "type": "string" },
+            "stableId": { "type": "string" },
+            "branches": { "type": "array", "items": { "$ref": "#/$defs/ChoiceBranch" } },
+            "loc":      { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "stableId", "branches", "loc"],
+          "properties": {
+            "kind":     { "const": "junction" },
+            "id":       { "type": "string" },
+            "stableId": { "type": "string" },
+            "branches": { "type": "array", "items": { "$ref": "#/$defs/ChoiceBranch" } },
+            "loc":      { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "stableId", "historyKind", "defaultTarget", "loc"],
+          "properties": {
+            "kind":          { "const": "history" },
+            "id":            { "type": "string" },
+            "stableId":      { "type": "string" },
+            "historyKind":   { "type": "string", "enum": ["shallow", "deep"] },
+            "defaultTarget": { "type": "string" },
+            "loc":           { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "stableId", "targets", "loc"],
+          "properties": {
+            "kind":     { "const": "fork" },
+            "id":       { "type": "string" },
+            "stableId": { "type": "string" },
+            "targets":  { "type": "array", "items": { "type": "string" } },
+            "loc":      { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "stableId", "sources", "target", "actions", "loc"],
+          "properties": {
+            "kind":     { "const": "join" },
+            "id":       { "type": "string" },
+            "stableId": { "type": "string" },
+            "sources":  { "type": "array", "items": { "type": "string" } },
+            "target":   { "type": "string" },
+            "actions":  { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
+            "loc":      { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "stableId", "name", "submachineId", "entryPoints", "exitPoints", "transitions", "loc"],
+          "properties": {
+            "kind":         { "const": "submachine_ref" },
+            "id":           { "type": "string" },
+            "stableId":     { "type": "string" },
+            "name":         { "type": "string" },
+            "submachineId": { "type": "string" },
+            "entryPoints":  {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": { "type": "string" }
+              }
+            },
+            "exitPoints": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": { "type": "string" }
+              }
+            },
+            "transitions": { "type": "array", "items": { "$ref": "#/$defs/TransitionObject" } },
+            "loc":         { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "name", "loc"],
+          "properties": {
+            "kind": { "const": "entry_point" },
+            "id":   { "type": "string" },
+            "name": { "type": "string" },
+            "loc":  { "$ref": "#/$defs/SourceLocation" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "name", "loc"],
+          "properties": {
+            "kind": { "const": "exit_point" },
+            "id":   { "type": "string" },
+            "name": { "type": "string" },
+            "loc":  { "$ref": "#/$defs/SourceLocation" }
+          }
+        }
+      ]
+    },
+
+    "RegionObject": {
+      "title": "RegionObject",
+      "description": "Region — a unit of independent execution inside a parallel state (Doc 09 §5).",
+      "type": "object",
+      "required": ["id", "name", "initial", "states", "priority", "loc"],
+      "properties": {
+        "id":       { "type": "string" },
+        "stableId": { "type": "string" },
+        "name":     { "type": "string" },
+        "initial":  { "type": "string" },
+        "states":   { "type": "array", "items": { "$ref": "#/$defs/StateNode" } },
+        "priority": { "type": "integer", "minimum": 0 },
+        "loc":      { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "Param": {
+      "title": "Param",
+      "description": "Event payload field or extern parameter (Doc 09 §11, §12).",
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "$ref": "#/$defs/Type" },
+        "id":   { "type": "string" },
+        "loc":  { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "EventObject": {
+      "title": "EventObject",
+      "type": "object",
+      "required": ["id", "stableId", "name", "payload", "loc"],
+      "properties": {
+        "id":       { "type": "string" },
+        "stableId": { "type": "string" },
+        "name":     { "type": "string" },
+        "payload":  { "type": "array", "items": { "$ref": "#/$defs/Param" } },
+        "loc":      { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "ExternObject": {
+      "title": "ExternObject",
+      "type": "object",
+      "required": ["id", "stableId", "name", "pure", "params", "loc"],
+      "properties": {
+        "id":         { "type": "string" },
+        "stableId":   { "type": "string" },
+        "name":       { "type": "string" },
+        "pure":       { "type": "boolean" },
+        "params":     { "type": "array", "items": { "$ref": "#/$defs/Param" } },
+        "returnType": { "$ref": "#/$defs/Type" },
+        "loc":        { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "ContextField": {
+      "title": "ContextField",
+      "type": "object",
+      "required": ["id", "name", "type", "loc"],
+      "properties": {
+        "id":      { "type": "string" },
+        "name":    { "type": "string" },
+        "type":    { "$ref": "#/$defs/Type" },
+        "default": { "$ref": "#/$defs/Literal" },
+        "loc":     { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "ContextSchema": {
+      "title": "ContextSchema",
+      "description": "Context fields envelope (Doc 09 §10).",
+      "type": "object",
+      "required": ["fields"],
+      "properties": {
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/ContextField" } }
+      }
+    },
+
+    "ConstDecl": {
+      "title": "ConstDecl",
+      "description": "Compile-time constant (Doc 00 §7.4 item 1).",
+      "type": "object",
+      "required": ["id", "stableId", "name", "type", "value", "loc"],
+      "properties": {
+        "id":       { "type": "string" },
+        "stableId": { "type": "string" },
+        "name":     { "type": "string" },
+        "type":     { "$ref": "#/$defs/Type" },
+        "value":    { "$ref": "#/$defs/Literal" },
+        "loc":      { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "ImportDecl": {
+      "title": "ImportDecl",
+      "description": "File-scope import declaration (Doc 00 §7.4 item 2).",
+      "type": "object",
+      "required": ["path", "loc"],
+      "properties": {
+        "path":          { "type": "string" },
+        "alias":         { "type": "string" },
+        "namedImports": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "loc": { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "FeatureDecl": {
+      "title": "FeatureDecl",
+      "description": "Feature flag declaration (Doc 04 §2.2).",
+      "type": "object",
+      "required": ["name", "loc"],
+      "properties": {
+        "name": { "type": "string" },
+        "loc":  { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "QueueConfig": {
+      "title": "QueueConfig",
+      "description": "Runtime queue configuration (Doc 00 §7.4 item 3).",
+      "type": "object",
+      "required": ["capacity", "overflowPolicy", "loc"],
+      "properties": {
+        "capacity":       { "type": "integer", "minimum": 0 },
+        "overflowPolicy": { "type": "string", "enum": ["assert", "drop_oldest", "drop_newest", "error"] },
+        "loc":            { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "TargetConfig": {
+      "title": "TargetConfig",
+      "description": "Codegen target config (Doc 00 §7.4 item 4).",
+      "type": "object",
+      "required": ["name", "profile", "options", "loc"],
+      "properties": {
+        "name":    { "type": "string" },
+        "profile": { "type": "string", "description": "Free-form so third-party targets need no schema bump." },
+        "options": {
+          "type": "array",
+          "description": "Order-preserving (key, value) list. Values restricted to int / bool / identifier per Doc 04 §4.4.",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": [
+              { "type": "string" },
+              {
+                "oneOf": [
+                  { "type": "integer" },
+                  { "type": "boolean" },
+                  { "type": "string" }
+                ]
+              }
+            ]
+          }
+        },
+        "loc": { "$ref": "#/$defs/SourceLocation" }
+      }
+    },
+
+    "MachineObject": {
+      "title": "MachineObject",
+      "description": "Machine declaration (Doc 09 §3 + Doc 00 §7.4 additions).",
+      "type": "object",
+      "required": ["id", "stableId", "name", "context", "events", "externs", "root", "submachines", "consts", "imports", "features", "queue", "targets", "loc"],
+      "properties": {
+        "id":          { "type": "string" },
+        "stableId":    { "type": "string" },
+        "name":        { "type": "string" },
+        "context":     { "$ref": "#/$defs/ContextSchema" },
+        "events":      { "type": "array", "items": { "$ref": "#/$defs/EventObject" } },
+        "externs":     { "type": "array", "items": { "$ref": "#/$defs/ExternObject" } },
+        "root":        { "$ref": "#/$defs/RegionObject" },
+        "submachines": { "type": "array", "items": { "$ref": "#/$defs/MachineObject" } },
+        "consts":      { "type": "array", "items": { "$ref": "#/$defs/ConstDecl" } },
+        "imports":     { "type": "array", "items": { "$ref": "#/$defs/ImportDecl" } },
+        "features":    { "type": "array", "items": { "$ref": "#/$defs/FeatureDecl" } },
+        "queue":       { "$ref": "#/$defs/QueueConfig" },
+        "targets":     { "type": "array", "items": { "$ref": "#/$defs/TargetConfig" } },
+        "loc":         { "$ref": "#/$defs/SourceLocation" }
+      }
+    }
+  }
 }
