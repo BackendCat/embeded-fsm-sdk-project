@@ -12,3 +12,7 @@ description = "FSM Studio tokenizer — zero-copy, no_std-friendly lexer over .f
 # Only foundation crate allowed here per Doc 23 §4 + Doc 00 §7.1:
 # fsm-diagnostics owns the `Span` type the lexer emits with every token.
 fsm-diagnostics = { workspace = true }
+
+[dev-dependencies]
+# Snapshot tests over representative .fsm sources — Doc 20 §3, Doc 24.
+insta = { workspace = true }
