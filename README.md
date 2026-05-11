@@ -89,3 +89,13 @@ FSM-Lang source files use the `.fsm` extension.
 ## License
 
 MIT
+
+## Project Status
+
+v1.0 in active development.
+
+- **Phase 0 scaffolded:** 2026-05-11
+- **Scope:** full UML semantics → C99 codegen → CLI tool only
+- **Deferred to v1.1+:** C++17 codegen, LSP, VS Code extension, Web IDE
+- **Normative TL decisions:** see `docs/00-Decisions-And-Reconciliation.md`
+- **Developer entry:** see `docs/23-Developer-Onboarding.md`

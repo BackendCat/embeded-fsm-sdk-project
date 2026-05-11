@@ -1,0 +1,28 @@
+[package]
+name = "fsm-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "FSM Studio command-line interface — the `fsm` binary"
+
+[[bin]]
+name = "fsm"
+path = "src/main.rs"
+
+[dependencies]
+# Aggregates the v1.0 pipeline. Deferred crates (codegen-cpp, lsp, wasm)
+# are intentionally absent here; they land in v1.1+.
+fsm-lexer = { path = "../fsm-lexer" }
+fsm-parser = { path = "../fsm-parser" }
+fsm-analyzer = { path = "../fsm-analyzer" }
+fsm-ir = { path = "../fsm-ir" }
+fsm-codegen-c = { path = "../fsm-codegen-c" }
+fsm-simulator = { path = "../fsm-simulator" }
+fsm-formatter = { path = "../fsm-formatter" }
+
+clap = { workspace = true }
+miette = { workspace = true }
+anyhow = { workspace = true }

@@ -1,0 +1,12 @@
+[package]
+name = "fsm-lexer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "FSM Studio tokenizer — zero-copy, no_std-friendly lexer over .fsm source"
+
+[dependencies]
+# No workspace deps by design — see Doc 23 §4.

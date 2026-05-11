@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/fsm-lexer",
+    "crates/fsm-parser",
+    "crates/fsm-analyzer",
+    "crates/fsm-ir",
+    "crates/fsm-codegen-c",
+    "crates/fsm-simulator",
+    "crates/fsm-formatter",
+    "crates/fsm-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+authors = ["FSM Studio Contributors"]
+repository = "https://github.com/BackendCat/embeded-fsm-sdk-project"
+
+# Shared dependencies — versions pinned per Doc 23 §2.
+# Crates opt in by writing `dep = { workspace = true }` in their own Cargo.toml.
+#
+# Intentionally NOT included for v1.0:
+#   - tower-lsp  (LSP deferred to v1.1+)
+#   - tokio      (no WebSocket simulator server in v1.0)
+#   - wasm-bindgen (WASM deferred to v1.1+)
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+miette = { version = "7", features = ["fancy"] }
+rowan = "0.15"
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Dev-only dependency for snapshot tests.
+insta = "1.34"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

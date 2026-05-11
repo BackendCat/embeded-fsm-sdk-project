@@ -1,0 +1,16 @@
+[package]
+name = "fsm-ir"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "FSM Studio canonical IR — pure data types + serde JSON serialization"
+
+[dependencies]
+# Per Doc 23 §4 / Doc 20 §11.5: fsm-ir depends on fsm-parser ONLY for
+# Span / SourceLocation. No other parser types may be imported here.
+fsm-parser = { path = "../fsm-parser" }
+serde = { workspace = true }
+serde_json = { workspace = true }

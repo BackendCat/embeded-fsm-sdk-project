@@ -1,0 +1,14 @@
+# fsm.toml — dogfood configuration for the FSM Studio workspace itself.
+#
+# The full schema (all sections, all keys, merge semantics, env overrides) is
+# specified in `docs/18-CLI-Specification.md` §6 and §6.1. This file uses only
+# the minimum required keys for Phase 0. The CLI is stubbed in v1.0, so this
+# config currently has no observable effect — it is here to dogfood discovery,
+# parsing, and round-trip once the real `fsm` binary lands in Phase 1.
+
+[project]
+name = "fsm-studio"
+version = "0.1.0"
+
+[targets.c99]
+output_dir = "generated/"

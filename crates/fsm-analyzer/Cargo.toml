@@ -1,0 +1,13 @@
+[package]
+name = "fsm-analyzer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "FSM Studio semantic analyzer — symbol table, type check, determinism"
+
+[dependencies]
+fsm-parser = { path = "../fsm-parser" }
+fsm-ir = { path = "../fsm-ir" }

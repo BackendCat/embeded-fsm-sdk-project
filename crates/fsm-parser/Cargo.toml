@@ -1,0 +1,13 @@
+[package]
+name = "fsm-parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "FSM Studio parser — recursive-descent over rowan CST + typed AST"
+
+[dependencies]
+fsm-lexer = { path = "../fsm-lexer" }
+rowan = { workspace = true }
