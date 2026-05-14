@@ -42,6 +42,11 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
 /* Codegen strategy tag — informational, used by debuggers / linters. */
 #define {prefix}_CODEGEN_STRATEGY   {strategy}
 
+/* Maximum number of simultaneously active leaves. 1 for flat / hierarchical
+ * machines; >1 when parallel regions are present. Sized at codegen time
+ * from a static analysis of the IR (Doc 00 §7.8 / Doc 08 §2.3). */
+#define {prefix}_MAX_PARALLEL_REGIONS  {regions}u
+
 /* Timer counter type. Must be large enough to hold the largest declared
  * timer duration in milliseconds. uint32_t handles up to ~49.7 days. */
 #define {prefix}_TIMER_TYPE         uint32_t
@@ -57,6 +62,7 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
         qcap = ctx.config.queue_capacity,
         overflow_macro = overflow.macro_name(),
         strategy = strategy,
+        regions = ctx.layout.max_parallel_regions,
     );
 
     EmittedFile {

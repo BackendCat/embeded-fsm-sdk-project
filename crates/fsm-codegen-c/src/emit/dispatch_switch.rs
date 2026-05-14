@@ -1,18 +1,15 @@
-//! Switch-based dispatch — Doc 11 §8, Doc 00 §7.8 (B-10).
+//! Switch-based dispatch — Doc 11 §8, Doc 00 §7.8 (B-10 + B-11).
 //!
 //! Pattern:
 //!  - Emit `Motor_parent_table[]: static const M_StateId_t[]`.
 //!  - Emit per-state helper `Motor_try_transitions_in_state` returning
 //!    `bool` (true if a transition fired).
-//!  - Emit the outer `Motor_dispatch` that walks leaf-to-root using the
-//!    parent table.
+//!  - Emit the outer `Motor_dispatch` that, per active region, walks
+//!    leaf-to-root using the parent table (collect-then-execute over
+//!    `_active[]`).
 
-use fsm_ir::{StateNode, TransitionKind, TransitionObject};
+use fsm_ir::{StateNode, TransitionObject};
 
-use crate::expr::emit_guard;
-use crate::state_index::{StateRecordKind, ROOT_SENTINEL};
-
-use super::entry_exit::{entry_path, exit_path};
 use super::MachineEmitCtx;
 
 /// Emit the parent table + per-state helpers + outer dispatch loop.
@@ -147,55 +144,16 @@ fn emit_one_case(t: &TransitionObject, ctx: &MachineEmitCtx<'_>, out: &mut Strin
     let payload_prefix = trigger_event_payload_prefix(ctx, &trigger_id);
 
     out.push_str(&format!("        case {}: {{\n", event_c));
-    // Guard.
-    if let Some(g) = &t.guard {
-        let cond = emit_guard(g, "m->context", &payload_prefix);
-        out.push_str(&format!("            if (!{}) break;\n", cond));
-    }
-    // Exit sequence. Final states have no user-supplied exit action (matches
-    // `impl_header.rs` which skips them when emitting prototypes).
-    for exit_idx in exit_path(t, ctx.index, ctx.parents) {
-        let rec = ctx.index.get(exit_idx);
-        if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
-            out.push_str(&format!(
-                "            {prefix}_exit_{name}(m);\n",
-                prefix = ctx.type_prefix(),
-                name = rec.c_name,
-            ));
-        }
-    }
-    // Inline action statements. Routed through stmt emitter (machine_prefix
-    // governs `raise`/`send` lowering).
-    let stmt_ctx = crate::stmt::StmtContext {
-        machine_prefix: ctx.type_prefix(),
-        ctx_prefix: "m->context",
-        payload_prefix: &payload_prefix,
-    };
-    out.push_str(&crate::stmt::emit_stmts(&t.actions, &stmt_ctx, 12));
-    // Update state to target (if not internal).
-    if !matches!(t.kind, TransitionKind::Internal) {
-        let target_idx = ctx.index.must_lookup(&t.target);
-        let target_rec = ctx.index.get(target_idx);
-        out.push_str(&format!(
-            "            m->_state = {macro}_STATE_{name};\n",
-            macro = ctx.macro_prefix(),
-            name = target_rec.c_name,
-        ));
-    }
-    // Entry sequence. Final states have no user-supplied entry action.
-    for entry_idx in entry_path(t, ctx.index, ctx.parents) {
-        let rec = ctx.index.get(entry_idx);
-        if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
-            out.push_str(&format!(
-                "            {prefix}_entry_{name}(m);\n",
-                prefix = ctx.type_prefix(),
-                name = rec.c_name,
-            ));
-        }
-    }
+    super::transition::emit_transition_body(
+        t,
+        ctx,
+        &payload_prefix,
+        /*indent_spaces=*/ 12,
+        /*on_guard_fail=*/ "break;",
+        out,
+    );
     out.push_str("            return true;\n");
     out.push_str("        }\n");
-    let _ = ROOT_SENTINEL;
 }
 
 fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
@@ -203,24 +161,50 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
     let macro_prefix = ctx.macro_prefix();
     format!(
         r#"void {prefix}_dispatch({prefix}_t *m, const {prefix}_Event_t *ev) {{
-    /* B-10: walk from the active leaf up through ancestors via parent_table.
-     * First state that fires a transition wins (innermost beats outermost). */
-    if (ev->id < {macro}_EVENT__COUNT && ({prefix}_defer_mask[m->_state] & (1u << ev->id))) {{
-        /* Deferred — store and return without processing. v1.0 simplifies
-         * the defer queue to a single slot per state; multi-slot defer is
-         * tracked under follow-up work. */
-        return;
-    }}
-    {prefix}_StateId_t s = m->_state;
-    while (1) {{
-        if ({prefix}_try_transitions_in_state(m, s, ev)) {{
-            {prefix}_handle_completion(m);
-            return;
+    /* B-10 + B-11: per-region ancestor walk. For each active leaf in
+     * `_active[]`, walk leaf-to-root via parent_table; the first ancestor
+     * with a matching transition fires it. Regions iterate independently,
+     * so a single event can drive every region in a parallel state in the
+     * same RTC step. */
+    if (ev->id < {macro}_EVENT__COUNT) {{
+        for (uint8_t r = 0; r < m->_active_count; r++) {{
+            if ({prefix}_defer_mask[m->_active[r]] & (1u << ev->id)) {{
+                /* Deferred — store and return without processing. v1.0
+                 * simplifies the defer queue to a single slot per state;
+                 * multi-slot defer is tracked under follow-up work. */
+                return;
+            }}
         }}
-        if (s == {macro}_STATE_ROOT) break;
-        s = {prefix}_parent_table[s];
     }}
-    /* No ancestor handled the event — discard per Doc 08 §3.1. */
+    bool fired_any = false;
+    bool fired_in_region[{macro}_MAX_PARALLEL_REGIONS] = {{ false }};
+    /* Snapshot active region count up front so transition side effects
+     * that change `_active_count` (e.g. cross-out-of-parallel) do not
+     * shrink the iteration mid-walk. Doc 08 §4.1: process innermost
+     * leaves first (slots 1..N are nested below slot 0), so iterate
+     * from high to low. */
+    uint8_t initial_active = m->_active_count;
+    for (int8_t r = (int8_t)initial_active - 1; r >= 0; r--) {{
+        /* Slot may have been cleared by a sibling-region transition
+         * (cross-out-of-parallel). */
+        if ((uint8_t)r >= m->_active_count) continue;
+        /* Skip slots whose region already fired in this RTC step. */
+        if (fired_in_region[r]) continue;
+        {prefix}_StateId_t s = m->_active[r];
+        while (1) {{
+            if ({prefix}_try_transitions_in_state(m, s, ev)) {{
+                fired_any = true;
+                fired_in_region[r] = true;
+                break;
+            }}
+            if (s == {macro}_STATE_ROOT) break;
+            s = {prefix}_parent_table[s];
+        }}
+    }}
+    if (fired_any) {{
+        {prefix}_handle_completion(m);
+    }}
+    /* Otherwise: no ancestor handled the event — discard per Doc 08 §3.1. */
 }}
 "#,
         prefix = prefix,

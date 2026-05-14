@@ -40,7 +40,10 @@ pub fn emit_handle_completion(ctx: &MachineEmitCtx<'_>) -> String {
         prefix = prefix,
         macro = macro_prefix,
     ));
-    s.push_str("    switch (m->_state) {\n");
+    // Iterate every active slot; for each, check whether the leaf is a
+    // final state, and trigger the appropriate completion behaviour.
+    s.push_str("    for (uint8_t r = 0; r < m->_active_count; r++) {\n");
+    s.push_str("        switch (m->_active[r]) {\n");
     let mut any_final = false;
     for rec in &ctx.index.records {
         if rec.kind != StateRecordKind::Final {
@@ -50,7 +53,7 @@ pub fn emit_handle_completion(ctx: &MachineEmitCtx<'_>) -> String {
         let parent_idx = rec.parent;
         let parent_rec = ctx.index.get(parent_idx);
         s.push_str(&format!(
-            "    case {macro}_STATE_{name}:\n",
+            "        case {macro}_STATE_{name}:\n",
             macro = ctx.macro_prefix(),
             name = rec.c_name,
         ));
@@ -58,46 +61,43 @@ pub fn emit_handle_completion(ctx: &MachineEmitCtx<'_>) -> String {
             StateRecordKind::Composite => {
                 // Composite parent — fire completion for the parent.
                 s.push_str(&format!(
-                    "        /* Composite parent {} fires immediately */\n",
+                    "            /* Composite parent {} fires immediately */\n",
                     parent_rec.dsl_name
-                ));
-                s.push_str(&format!(
-                    "        {prefix}_dispatch(m, &comp);\n",
-                    prefix = prefix,
-                ));
-            }
-            StateRecordKind::Parallel => {
-                // Parallel — placeholder: check all regions. v1.0 codegen
-                // for full parallel completion requires the analyzer's
-                // per-region final summary; emit a TODO that the
-                // collect-then-execute table dispatcher handles separately.
-                s.push_str(&format!(
-                    "        if ({prefix}_all_regions_final(m, {macro}_STATE_{parent})) {{\n",
-                    prefix = prefix,
-                    macro = ctx.macro_prefix(),
-                    parent = parent_rec.c_name,
                 ));
                 s.push_str(&format!(
                     "            {prefix}_dispatch(m, &comp);\n",
                     prefix = prefix,
                 ));
-                s.push_str("        }\n");
+            }
+            StateRecordKind::Parallel => {
+                s.push_str(&format!(
+                    "            if ({prefix}_all_regions_final(m, {macro}_STATE_{parent})) {{\n",
+                    prefix = prefix,
+                    macro = ctx.macro_prefix(),
+                    parent = parent_rec.c_name,
+                ));
+                s.push_str(&format!(
+                    "                {prefix}_dispatch(m, &comp);\n",
+                    prefix = prefix,
+                ));
+                s.push_str("            }\n");
             }
             _ => {
-                // Root region final — top-level completion. Just dispatch.
+                // Root region final — top-level completion.
                 s.push_str(&format!(
-                    "        {prefix}_dispatch(m, &comp);\n",
+                    "            {prefix}_dispatch(m, &comp);\n",
                     prefix = prefix,
                 ));
             }
         }
-        s.push_str("        break;\n");
+        s.push_str("            break;\n");
     }
     if !any_final {
-        s.push_str("    default: (void)comp; break;\n");
+        s.push_str("        default: (void)comp; break;\n");
     } else {
-        s.push_str("    default: break;\n");
+        s.push_str("        default: break;\n");
     }
+    s.push_str("        }\n");
     s.push_str("    }\n");
     s.push_str("    m->_completion_depth--;\n");
     s.push_str("}\n");
@@ -116,10 +116,10 @@ pub fn emit_all_regions_final_helper(ctx: &MachineEmitCtx<'_>) -> String {
         prefix = prefix,
     ));
     s.push_str("    (void)m; (void)parallel_state;\n");
-    // Collect parallel states; for each region the codegen would emit a
-    // check against per-region state slots. v1.0 placeholder: assume false
-    // (no parallel completion) unless the machine actually has parallel
-    // states.
+    // Collect parallel states; for each region the codegen emits a check
+    // against the assigned `_active[]` slot. Non-parallel machines still
+    // get the helper (so callers can link unconditionally) but with a
+    // trivial `return false;` body.
     let any_parallel = ctx
         .index
         .records
@@ -136,9 +136,6 @@ pub fn emit_all_regions_final_helper(ctx: &MachineEmitCtx<'_>) -> String {
         if rec.kind != StateRecordKind::Parallel {
             continue;
         }
-        // Find this parallel state's regions in the source IR. The state
-        // index doesn't directly carry region membership, but we can walk
-        // the machine root to look up the right Parallel node.
         let parallel_id = &rec.ir_id;
         if let Some(parallel_node) = find_parallel(ctx.machine, parallel_id) {
             s.push_str(&format!(
@@ -147,9 +144,9 @@ pub fn emit_all_regions_final_helper(ctx: &MachineEmitCtx<'_>) -> String {
                 name = rec.c_name,
                 dsl = rec.dsl_name,
             ));
-            // Check each region's slot for a final state.
-            for (region_idx, region) in parallel_node.regions.iter().enumerate() {
-                // Identify the final state(s) in this region by index.
+            // For each region, check whether the leaf state assigned to
+            // that region's slot is a final state.
+            for region in &parallel_node.regions {
                 let finals: Vec<String> = region
                     .states
                     .iter()
@@ -159,22 +156,33 @@ pub fn emit_all_regions_final_helper(ctx: &MachineEmitCtx<'_>) -> String {
                     })
                     .collect();
                 if finals.is_empty() {
-                    // Region has no Final state — completion can never fire.
-                    s.push_str(&format!(
-                        "        /* region {ri} has no Final state — completion cannot fire */\n",
-                        ri = region_idx,
-                    ));
-                    s.push_str("        return false;\n");
+                    s.push_str("        return false; /* region has no Final state */\n");
                     continue;
                 }
+                // Resolve the slot for this region — every state in the
+                // region shares the same slot, so any non-pseudo state
+                // suffices.
+                let slot = region
+                    .states
+                    .iter()
+                    .filter_map(|sn| match sn {
+                        fsm_ir::StateNode::Simple(s) => Some(&s.id),
+                        fsm_ir::StateNode::Final(f) => Some(&f.id),
+                        fsm_ir::StateNode::Composite(c) => Some(&c.id),
+                        fsm_ir::StateNode::Parallel(p) => Some(&p.id),
+                        _ => None,
+                    })
+                    .find_map(|sid| ctx.index.lookup(sid))
+                    .map(|idx| ctx.layout.slot(idx))
+                    .unwrap_or(0);
                 let conds: Vec<String> = finals
                     .iter()
                     .map(|fid| {
                         let final_idx = ctx.index.must_lookup(fid);
                         let final_rec = ctx.index.get(final_idx);
                         format!(
-                            "m->_state_region_{ri} == {macro}_STATE_{name}",
-                            ri = region_idx,
+                            "m->_active[{slot}] == {macro}_STATE_{name}",
+                            slot = slot,
                             macro = ctx.macro_prefix(),
                             name = final_rec.c_name,
                         )
@@ -187,8 +195,6 @@ pub fn emit_all_regions_final_helper(ctx: &MachineEmitCtx<'_>) -> String {
             }
             s.push_str("        return true;\n");
         }
-        // Silence unused warning if there's no matching node (shouldn't
-        // happen — analyzer-validated).
         let _ = parallel_idx;
     }
     s.push_str("    default: return false;\n");

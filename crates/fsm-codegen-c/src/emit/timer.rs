@@ -93,8 +93,10 @@ pub fn emit_advance_clock(ctx: &MachineEmitCtx<'_>) -> String {
     s.push_str("    (void)fsm_hal_clock_now_ms();\n");
     for timer in &timers {
         let owner = ctx.index.get(timer.owner_state);
+        let slot = ctx.layout.slot(timer.owner_state);
         s.push_str(&format!(
-            "    if (m->_state == {macro}_STATE_{name} && m->_timer_{tname}_remaining_ms > 0) {{\n",
+            "    if (m->_active[{slot}] == {macro}_STATE_{name} && m->_timer_{tname}_remaining_ms > 0) {{\n",
+            slot = slot,
             macro = ctx.macro_prefix(),
             name = owner.c_name,
             tname = timer.field_name,

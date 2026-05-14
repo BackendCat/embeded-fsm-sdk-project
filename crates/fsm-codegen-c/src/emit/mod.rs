@@ -29,6 +29,7 @@ pub mod license;
 pub mod queue;
 pub mod source;
 pub mod timer;
+pub mod transition;
 
 /// Bundle of generated files. Extensible Vec form per Doc 00 §5.6 NIT.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -100,12 +101,14 @@ pub fn emit(ir: &Ir, config: &CodegenConfig) -> Result<EmittedFiles, EmitError> 
 
         let index = crate::state_index::build_state_index(machine);
         let parents = crate::parent_table::build_parent_table(&index);
+        let layout = crate::region_layout::build_region_layout(machine, &index);
         let resolved_strategy = config.strategy.resolve(index.count());
 
         let ctx = MachineEmitCtx {
             machine,
             index: &index,
             parents: &parents,
+            layout: &layout,
             config,
             strategy: resolved_strategy,
         };
@@ -125,6 +128,7 @@ pub struct MachineEmitCtx<'a> {
     pub machine: &'a fsm_ir::MachineObject,
     pub index: &'a crate::state_index::StateIndex,
     pub parents: &'a crate::parent_table::ParentTable,
+    pub layout: &'a crate::region_layout::RegionLayout,
     pub config: &'a CodegenConfig,
     pub strategy: crate::config::DispatchStrategy,
 }

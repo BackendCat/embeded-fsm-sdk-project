@@ -29,21 +29,20 @@ fn all_regions_final_helper_emitted() {
 fn helper_checks_each_region_slot() {
     let out = emit(&common::parallel_motor_ir(), &CodegenConfig::default()).unwrap();
     let c = out.find("Motor.c").unwrap().content.as_str();
-    // Each region must contribute a check against its own slot.
+    // P0-2 fix: the helper reads each region's `_active[]` slot. With
+    // region 0 sharing slot 0 and region 1 taking slot 1, both slots
+    // must be referenced.
     assert!(
-        c.contains("_state_region_0"),
-        "region 0 slot missing from helper"
-    );
-    assert!(
-        c.contains("_state_region_1"),
-        "region 1 slot missing from helper"
+        c.contains("m->_active[0]") && c.contains("m->_active[1]"),
+        "Per-region `_active[]` slot checks missing from B-08 helper. Generated:\n{}",
+        c
     );
     // The Final state(s) for each region must appear in the conditions.
     // Common test fixture (`parallel_motor_ir`) names the per-region final
     // states `AFinal` / `BFinal` — derived from `FinalState.name` since the
     // codegen now respects per-DSL `final NAME` declarations.
     assert!(
-        c.contains("MOTOR_STATE_AFINAL") || c.contains("MOTOR_STATE_BFINAL"),
+        c.contains("MOTOR_STATE_AFINAL") && c.contains("MOTOR_STATE_BFINAL"),
         "Final state IDs missing from B-08 region check"
     );
 }
@@ -63,10 +62,45 @@ fn handle_completion_uses_helper_for_parallel_parent() {
 }
 
 #[test]
-fn machine_struct_carries_one_state_slot_per_region() {
+fn machine_struct_carries_active_leaf_array() {
     let out = emit(&common::parallel_motor_ir(), &CodegenConfig::default()).unwrap();
     let h = out.find("Motor.h").unwrap().content.as_str();
-    // Doc 11 §24: parallel machines need one _state_regionN per region.
-    assert!(h.contains("_state_region_0"));
-    assert!(h.contains("_state_region_1"));
+    let conf = out.find("Motor_conf.h").unwrap().content.as_str();
+    // P0-2 fix: the struct now carries a uniform `_active[]` array sized
+    // by `MOTOR_MAX_PARALLEL_REGIONS`, plus a `_active_count` counter.
+    assert!(
+        h.contains("_active[MOTOR_MAX_PARALLEL_REGIONS]"),
+        "machine struct missing `_active[]` array. Header:\n{}",
+        h
+    );
+    assert!(
+        h.contains("uint8_t _active_count"),
+        "machine struct missing `_active_count`. Header:\n{}",
+        h
+    );
+    // For two-region parallel `Monitor`, max regions is 2.
+    assert!(
+        conf.contains("#define MOTOR_MAX_PARALLEL_REGIONS  2u"),
+        "Motor_conf.h missing MAX_PARALLEL_REGIONS == 2 for parallel-Motor fixture. Conf:\n{}",
+        conf
+    );
+}
+
+#[test]
+fn machine_struct_does_not_emit_legacy_state_region_slots() {
+    // P0-2 fix: the codegen no longer emits the unused
+    // `_state_region_N` declarations / reads.
+    let out = emit(&common::parallel_motor_ir(), &CodegenConfig::default()).unwrap();
+    let h = out.find("Motor.h").unwrap().content.as_str();
+    let c = out.find("Motor.c").unwrap().content.as_str();
+    assert!(
+        !h.contains("_state_region_"),
+        "header still emits legacy `_state_region_N`:\n{}",
+        h
+    );
+    assert!(
+        !c.contains("_state_region_"),
+        "source still reads legacy `_state_region_N`:\n{}",
+        c
+    );
 }
