@@ -208,11 +208,15 @@ fn golden_simulator_runs_motor() {
     let ir = result.ir.expect("ir produced");
 
     let mut interp = Interpreter::new(&ir).expect("build interpreter");
-    // The analyzer's v1.0 lowering does not yet emit guard expressions on
-    // transitions, so the `[can_start]` annotation in motor.fsm has no
-    // effect on the lowered IR — every transition fires unconditionally.
-    // Once guard lowering ships, register `ex-Motor-can_start` via
-    // `interp.externs_mut().register(...)` to drive deterministic outcomes.
+    // Post P0-1 lowering: `[can_start]` is a real `GuardExpr::ExternCall`
+    // and the simulator consults it. Stub the extern to return `true` so
+    // the deterministic Idle → Running → Faulted → Idle flow still holds.
+    // Unregistered guard-context externs default to `Bool(false)` per
+    // `ExternRegistry::invoke`, which would pin the machine in Idle.
+    interp
+        .externs_mut()
+        .register("can_start", |_args| fsm_simulator::Value::Bool(true));
+
     let records = interp
         .init(InitOptions {
             machine_name: "Motor".into(),

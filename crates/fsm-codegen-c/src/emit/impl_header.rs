@@ -13,6 +13,8 @@ use crate::state_index::StateRecordKind;
 
 use super::license::header_block;
 use super::{EmittedFile, FileRole, MachineEmitCtx};
+use crate::expr::{c_type_str, primitive_to_c};
+use fsm_ir::Type;
 
 pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
     let prefix = ctx.type_prefix();
@@ -33,6 +35,13 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
     // Guard externs — declared at the top so callers can grep for them. The
     // analyzer enforces `pure` on guard externs, but the C contract just
     // needs the signature.
+    //
+    // Two parallel forms are emitted: the historical `<Prefix>_guard_<name>`
+    // wrapper (kept for older user code that targets it directly) and the
+    // bare-name form (`bool can_start(void);`) the action-block / guard
+    // emitters use after P0-1 lowering. The bare form mirrors the DSL
+    // declaration verbatim so user-authored extern bodies link with no
+    // glue layer.
     body.push_str("/* ── Guards (pure — no side effects, MUST NOT mutate context) ─────── */\n");
     for ext in &ctx.machine.externs {
         if !ext.pure {
@@ -43,6 +52,7 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
             prefix = prefix,
             name = ext.name,
         ));
+        body.push_str(&emit_bare_extern_decl(ext));
     }
 
     body.push_str("\n/* ── Entry actions ────────────────────────────────────────────────── */\n");
@@ -81,6 +91,7 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
             prefix = prefix,
             name = ext.name,
         ));
+        body.push_str(&emit_bare_extern_decl(ext));
     }
 
     body.push_str("\n#ifdef __cplusplus\n}\n#endif\n\n");
@@ -91,4 +102,41 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
         role: FileRole::ImplHeader,
         content: format!("{}\n{}", header, body),
     }
+}
+
+/// Emit a bare-name extern prototype matching the DSL declaration. Pure
+/// externs return `bool` by default; non-pure externs return `void` unless
+/// the DSL specifies otherwise. Parameter names are preserved from the IR
+/// when available so the generated header reads like the source.
+fn emit_bare_extern_decl(ext: &fsm_ir::ExternObject) -> String {
+    let return_ty = match &ext.return_type {
+        Some(t) => c_type_str(t),
+        None => {
+            if ext.pure {
+                "bool".to_string()
+            } else {
+                "void".to_string()
+            }
+        }
+    };
+    let params = if ext.params.is_empty() {
+        "void".to_string()
+    } else {
+        ext.params
+            .iter()
+            .map(|p| {
+                let c_ty = match &p.ty {
+                    Type::Primitive { name } => primitive_to_c(name).to_string(),
+                    other => c_type_str(other),
+                };
+                if p.name.is_empty() {
+                    c_ty
+                } else {
+                    format!("{} {}", c_ty, p.name)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!("{} {}({});\n", return_ty, ext.name, params)
 }

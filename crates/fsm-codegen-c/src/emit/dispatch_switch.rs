@@ -139,10 +139,17 @@ fn emit_one_case(t: &TransitionObject, ctx: &MachineEmitCtx<'_>, out: &mut Strin
         ctx.event_c_enum(&trigger_id)
     };
 
+    // Resolve the event-specific payload root. The payload union is keyed
+    // by event name (`ev->__payload.FAULT`), so `payload.code` in the DSL
+    // must lower to `ev->__payload.FAULT.code` inside FAULT's case body.
+    // Falling back to the bare union root keeps the code shape sane for
+    // events without a declared payload.
+    let payload_prefix = trigger_event_payload_prefix(ctx, &trigger_id);
+
     out.push_str(&format!("        case {}: {{\n", event_c));
     // Guard.
     if let Some(g) = &t.guard {
-        let cond = emit_guard(g, "m->context", "ev->__payload");
+        let cond = emit_guard(g, "m->context", &payload_prefix);
         out.push_str(&format!("            if (!{}) break;\n", cond));
     }
     // Exit sequence. Final states have no user-supplied exit action (matches
@@ -162,7 +169,7 @@ fn emit_one_case(t: &TransitionObject, ctx: &MachineEmitCtx<'_>, out: &mut Strin
     let stmt_ctx = crate::stmt::StmtContext {
         machine_prefix: ctx.type_prefix(),
         ctx_prefix: "m->context",
-        payload_prefix: "ev->__payload",
+        payload_prefix: &payload_prefix,
     };
     out.push_str(&crate::stmt::emit_stmts(&t.actions, &stmt_ctx, 12));
     // Update state to target (if not internal).
@@ -219,4 +226,22 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
         prefix = prefix,
         macro = macro_prefix,
     )
+}
+
+/// Build the per-transition payload prefix. Each event with a non-empty
+/// payload schema gets its own member inside the `__payload` union (see
+/// `header.rs::emit_payload_structs`), so `payload.X` must address through
+/// that member. When the event has no payload schema, fall back to the
+/// bare union root — the codegen still emits the dereference but the user
+/// guard/action shouldn't reference it.
+fn trigger_event_payload_prefix(ctx: &MachineEmitCtx<'_>, trigger_id: &str) -> String {
+    let event = ctx
+        .machine
+        .events
+        .iter()
+        .find(|e| e.id == trigger_id || e.stable_id == trigger_id);
+    match event {
+        Some(ev) if !ev.payload.is_empty() => format!("ev->__payload.{}", ev.name),
+        _ => "ev->__payload".to_string(),
+    }
 }
