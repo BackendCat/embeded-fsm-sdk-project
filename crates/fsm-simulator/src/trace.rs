@@ -149,6 +149,16 @@ pub struct InitTrace {
     /// Machine name to load. Defaults to the first machine in the IR.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine_name: Option<String>,
+    /// Static return values for extern functions, keyed by extern name. Each
+    /// is registered as a constant-returning handler on the simulator's
+    /// `ExternRegistry` before `init`. Without this, guard externs default to
+    /// `false` and value externs to `0` per `ExternRegistry::invoke`, which
+    /// pins guard-protected transitions to their false branch. This lets
+    /// trace authors pin `[can_start] -> Running` and similar to a known
+    /// outcome without writing Rust code. `BTreeMap` so the on-disk JSON
+    /// orders names deterministically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extern_returns: Option<BTreeMap<String, Value>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -209,6 +219,13 @@ pub fn write_trace_yaml(t: &TraceFile) -> Result<String, TraceParseError> {
 /// records and a diff verdict against `trace.expected`.
 pub fn execute_trace(ir: &Ir, trace: &TraceFile) -> Result<TraceResult, ExecError> {
     let mut interp = Interpreter::new(ir)?;
+    if let Some(map) = &trace.init.extern_returns {
+        let reg = interp.externs_mut();
+        for (name, value) in map {
+            let v = value.clone();
+            reg.register(name, move |_args| v.clone());
+        }
+    }
     let machine_name = trace
         .init
         .machine_name

@@ -1,20 +1,23 @@
 //! End-to-end golden test exercising the full `parse → analyze → codegen →
 //! gcc -Werror` pipeline **through the actual `fsm` binary**.
 //!
-//! When gcc is on PATH, success here means MVP gate **G3 + G4** is met
-//! (Doc 23 §9): the v1.0 CLI emits source files that a strict compiler
-//! accepts without warnings. The matching pure-Rust test lives in
-//! `fsm-codegen-c/tests/gcc_compile.rs`; this one is the integration check
-//! that the CLI itself does not regress the contract.
+//! Success means MVP gate **G3 + G4** is met (Doc 23 §9): the v1.0 CLI emits
+//! source files that a strict compiler accepts without warnings. The matching
+//! pure-Rust test lives in `fsm-codegen-c/tests/gcc_compile.rs`; this one is
+//! the integration check that the CLI itself does not regress the contract.
 //!
-//! When gcc is not on PATH the test prints a skip notice and exits OK so
-//! CI on minimal runners still passes.
+//! Per P1-3 the gcc gate is now hard-required by default. Setting
+//! `FSM_SKIP_GCC_TESTS=1` opts out explicitly; a missing `gcc` binary with
+//! the env var unset is a panic, not a silent skip — see `common::should_skip_gcc`.
 //!
 //! [`golden_simulator_runs_motor`] also covers MVP gate **G6** (simulator
 //! trace match): the same Motor fixture is driven through `parse + analyze
 //! + fsm_simulator::Interpreter` and asserted to flow Idle → Running → Idle
 //! → Faulted on the canonical event sequence. This proves the
 //! analyzer↔simulator IR contract is honoured end-to-end.
+
+#[path = "common/mod.rs"]
+mod common;
 
 use std::fs;
 use std::path::Path;
@@ -26,14 +29,6 @@ use fsm_parser::parse;
 use fsm_simulator::{InitOptions, Interpreter};
 
 const VALID_FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/motor.fsm");
-
-fn gcc_available() -> bool {
-    StdCommand::new("gcc")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
 
 /// Tiny host HAL + extern stubs sufficient to link the generated Motor.c.
 /// The generated `Motor_impl.h` declares only entry/exit hooks for the
@@ -75,8 +70,7 @@ void Motor_exit_FAULTED(Motor_t *m)  { (void)m; }
 
 #[test]
 fn cli_generated_motor_compiles_with_gcc_werror() {
-    if !gcc_available() {
-        eprintln!("[golden_end_to_end] gcc not on PATH — skipping; cargo test still passes");
+    if common::should_skip_gcc("cli_generated_motor_compiles_with_gcc_werror") {
         return;
     }
 
@@ -136,8 +130,7 @@ fn cli_generated_motor_compiles_with_gcc_werror() {
 
 #[test]
 fn cli_generated_hal_compiles_standalone() {
-    if !gcc_available() {
-        eprintln!("[golden_end_to_end] gcc not on PATH — skipping");
+    if common::should_skip_gcc("cli_generated_hal_compiles_standalone") {
         return;
     }
 

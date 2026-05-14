@@ -4,14 +4,23 @@ Formal embedded-first DSL and toolchain for deterministic hierarchical finite st
 
 ## What is this?
 
-A production-grade platform for industrial FSM development:
+A production-grade platform for industrial FSM development.
 
-- **FSM-Lang** — a formal text DSL with EBNF grammar and normative execution semantics
-- **Compiler** — parser, semantic validator, static analyzer, IR emitter
-- **Code generator** — deterministic C99 output, switch-based and table-driven strategies
-- **Simulator** — WebSocket-based, virtual clock, deterministic replay
-- **VS Code extension** — syntax highlighting, LSP, live diagram panel, simulator panel
-- **Web IDE** — browser-based editor, diagram, and simulator
+### What v1.0 ships
+
+- **FSM-Lang DSL** — formal text grammar for hierarchical state machines (parser + analyzer + IR emitter)
+- **C99 code generator** — deterministic, heap-free output safe for embedded targets
+- **In-process simulator** — virtual-clock interpreter for trace-based testing
+- **Canonical formatter** — `fsm fmt` for idempotent `.fsm` source layout
+- **CLI** — `fsm check`, `fsm generate`, `fsm fmt`, `fsm test`, `fsm parse`
+
+### Roadmap (post-v1.0)
+
+- Simulator WebSocket protocol + JSON-RPC server (Doc 13)
+- VS Code extension — syntax highlighting, LSP, live diagram panel, simulator panel (Doc 22)
+- Web IDE — browser-based editor, diagram, and simulator (Doc 05)
+- C++17 code generator (Doc 12)
+- LSP server (Doc 14)
 
 ## Getting Started
 

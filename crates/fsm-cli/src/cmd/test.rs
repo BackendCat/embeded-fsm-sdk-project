@@ -76,13 +76,39 @@ fn run_traces(args: &TestArgs) -> ExitCode {
 
     let mut passed = 0usize;
     let mut failed = 0usize;
+    let mut skipped = 0usize;
     for trace_path in &traces {
         match run_single_trace(trace_path) {
-            Ok(()) => {
+            Ok(TraceOutcome::Verified) => {
                 if !args.failing_only {
                     println!("pass: {}", trace_path.display());
                 }
                 passed += 1;
+            }
+            Ok(TraceOutcome::EmptyExpected) => {
+                // A trace that ships without an `expected` block can't verify
+                // anything — under the new behavior it's a hard fail by
+                // default. `--allow-empty-expected` opts back into the legacy
+                // capture-mode pass so trace authors can iterate.
+                if args.allow_empty_expected {
+                    if !args.failing_only {
+                        println!(
+                            "skip: {} (no expected block; --allow-empty-expected)",
+                            trace_path.display()
+                        );
+                    }
+                    skipped += 1;
+                } else {
+                    println!(
+                        "fail: {}\n      \
+                         trace has no `expected` block; nothing to verify. \
+                         Re-run with `--allow-empty-expected` only if you are \
+                         iterating on step sequences and have not yet recorded \
+                         the expected output.",
+                        trace_path.display()
+                    );
+                    failed += 1;
+                }
             }
             Err(why) => {
                 println!("fail: {}\n      {}", trace_path.display(), why);
@@ -91,12 +117,18 @@ fn run_traces(args: &TestArgs) -> ExitCode {
         }
     }
 
-    println!(
-        "\nfsm test: {} passed, {} failed (of {} total)",
-        passed,
-        failed,
-        passed + failed
-    );
+    let total = passed + failed + skipped;
+    if skipped > 0 {
+        println!(
+            "\nfsm test: {} passed, {} failed, {} skipped (of {} total)",
+            passed, failed, skipped, total
+        );
+    } else {
+        println!(
+            "\nfsm test: {} passed, {} failed (of {} total)",
+            passed, failed, total
+        );
+    }
 
     if failed > 0 {
         ExitCode::from(1)
@@ -133,9 +165,21 @@ fn collect_traces(root: &Path) -> std::io::Result<Vec<PathBuf>> {
     Ok(out)
 }
 
-/// Execute one trace file. Returns `Ok(())` on full match, `Err(reason)` on
-/// any failure — read/parse/analyse/execute/mismatch.
-fn run_single_trace(trace_path: &Path) -> Result<(), String> {
+/// Outcome of running one trace through the in-process simulator. `Verified`
+/// means the actual records matched the trace's `expected` list (or no
+/// `expected` was provided in opt-in mode — see [`TestArgs::allow_empty_expected`]).
+/// `EmptyExpected` is surfaced separately so the caller can either treat the
+/// trace as a skipped-by-design (legacy) or a hard fail (current default).
+enum TraceOutcome {
+    Verified,
+    EmptyExpected,
+}
+
+/// Execute one trace file. Returns `Ok(Verified)` on full match,
+/// `Ok(EmptyExpected)` when the trace lacks an `expected` block (caller
+/// decides whether that's a fail or a skip), or `Err(reason)` on any other
+/// failure — read/parse/analyse/execute/mismatch.
+fn run_single_trace(trace_path: &Path) -> Result<TraceOutcome, String> {
     let trace_raw =
         std::fs::read_to_string(trace_path).map_err(|e| format!("read trace: {}", e))?;
     let trace = parse_trace_yaml(&trace_raw).map_err(|e| format!("parse trace: {}", e))?;
@@ -178,12 +222,67 @@ fn run_single_trace(trace_path: &Path) -> Result<(), String> {
     };
     let outcome = execute_trace(&ir, &trace).map_err(|e| format!("simulator: {}", e))?;
     if !outcome.matches_expected {
-        return Err(match outcome.first_mismatch {
-            Some(idx) => format!("trace mismatch at step #{}", idx),
-            None => "trace mismatch (length differs)".into(),
-        });
+        return Err(format_trace_mismatch(&outcome, &trace.expected));
     }
-    Ok(())
+    // An empty `expected` list means the caller wants to know but should not
+    // be treated as a real verification — surface that distinction.
+    if trace.expected.is_empty() {
+        return Ok(TraceOutcome::EmptyExpected);
+    }
+    Ok(TraceOutcome::Verified)
+}
+
+/// Render a human-readable diff between `actual` and `expected` records for
+/// the failure path. Includes the index of the first mismatching record plus
+/// a single-record summary on each side so the diff is actionable without
+/// dumping the whole trace.
+fn format_trace_mismatch(
+    outcome: &fsm_simulator::TraceResult,
+    expected: &[fsm_simulator::StepRecord],
+) -> String {
+    let idx = match outcome.first_mismatch {
+        Some(i) => i,
+        None => {
+            return format!(
+                "trace mismatch (length differs): actual={}, expected={}",
+                outcome.actual.len(),
+                expected.len()
+            );
+        }
+    };
+    let actual_snippet = outcome
+        .actual
+        .get(idx)
+        .map(format_record_summary)
+        .unwrap_or_else(|| "(no actual record at this index)".into());
+    let expected_snippet = expected
+        .get(idx)
+        .map(format_record_summary)
+        .unwrap_or_else(|| "(no expected record at this index)".into());
+    format!(
+        "trace mismatch at step #{}\n        expected: {}\n        actual:   {}",
+        idx, expected_snippet, actual_snippet,
+    )
+}
+
+fn format_record_summary(rec: &fsm_simulator::StepRecord) -> String {
+    let kind: &str = match rec.kind {
+        fsm_simulator::StepKind::Init => "init",
+        fsm_simulator::StepKind::Dispatched => "dispatched",
+        fsm_simulator::StepKind::Raised => "raised",
+        fsm_simulator::StepKind::TimerFired => "timer_fired",
+        fsm_simulator::StepKind::Completion => "completion",
+        fsm_simulator::StepKind::Discarded => "discarded",
+    };
+    let evt = rec
+        .event_received
+        .as_ref()
+        .map(|e| e.name.as_str())
+        .unwrap_or("-");
+    format!(
+        "kind={} event={} config_after={:?}",
+        kind, evt, rec.config_after
+    )
 }
 
 fn infer_src_path(trace_path: &Path) -> PathBuf {

@@ -2,41 +2,27 @@
 //! `examples/vending-machine/vending-machine.fsm` example (which uses
 //! two parallel regions), then gcc-compile and drive the binary to
 //! exercise both regions independently. Validates P0-2 + P0-3 from
-//! `docs/AUDIT_2026_05_14.md`.
+//! `docs/AUDIT_2026_05_14.md` and contributes to the P1-3 expansion of
+//! gcc-gate coverage from Motor-only to all three shipped examples.
+
+#[path = "common/mod.rs"]
+mod common;
 
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 
 use assert_cmd::Command as Assert;
 
-fn gcc_available() -> bool {
-    Command::new("gcc")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-fn workspace_root() -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // crates/fsm-cli/ → repo root.
-    p.pop();
-    p.pop();
-    p
-}
-
 #[test]
 fn vending_machine_compiles_and_drives_both_regions() {
-    if !gcc_available() {
-        eprintln!("[vending_machine_gcc] gcc not on PATH — skipping");
+    if common::should_skip_gcc("vending_machine_gcc") {
         return;
     }
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let out_dir = tmp.path();
 
-    let src = workspace_root().join("examples/vending-machine/vending-machine.fsm");
+    let src = common::workspace_root().join("examples/vending-machine/vending-machine.fsm");
     assert!(src.is_file(), "fixture missing at {}", src.display());
 
     Assert::cargo_bin("fsm")

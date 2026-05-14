@@ -1,6 +1,6 @@
 {
   "machineFile": "vending-machine.fsm",
-  "description": "Drive both regions to their final states and confirm the outer Operational composite is exited via RESET to Done.",
+  "description": "Drive both parallel regions to their final states and confirm the outer Operational composite is exited via RESET to Done.",
   "init": { "machineName": "VendingMachine" },
   "steps": [
     { "action": "dispatch", "event": "COIN", "payload": { "value": { "type": "u16", "value": 100 } } },
@@ -9,5 +9,115 @@
     { "action": "dispatch", "event": "DISPENSE" },
     { "action": "dispatch", "event": "DISPENSE" },
     { "action": "dispatch", "event": "RESET" }
+  ],
+  "expected": [
+    {
+      "traceId": 0,
+      "kind": "init",
+      "virtualClockMs": 0,
+      "enteredStates": [
+        "s-VendingMachine-Operational",
+        "s-VendingMachine-Idle",
+        "s-VendingMachine-Browsing"
+      ],
+      "configBefore": [],
+      "configAfter": ["s-VendingMachine-Idle", "s-VendingMachine-Browsing"]
+    },
+    {
+      "traceId": 1,
+      "kind": "dispatched",
+      "virtualClockMs": 0,
+      "eventReceived": {
+        "name": "COIN",
+        "stableId": "M:VendingMachine:event:COIN",
+        "payload": { "value": { "type": "u16", "value": 100 } }
+      },
+      "transitionTaken": {
+        "stableId": "M:VendingMachine:transition:t-VendingMachine-1",
+        "source": "s-VendingMachine-Idle",
+        "target": "s-VendingMachine-CoinInserted"
+      },
+      "exitedStates": ["s-VendingMachine-Idle"],
+      "enteredStates": ["s-VendingMachine-CoinInserted"],
+      "configBefore": ["s-VendingMachine-Idle", "s-VendingMachine-Browsing"],
+      "configAfter": ["s-VendingMachine-Browsing", "s-VendingMachine-CoinInserted"]
+    },
+    {
+      "traceId": 2,
+      "kind": "dispatched",
+      "virtualClockMs": 0,
+      "eventReceived": {
+        "name": "COIN",
+        "stableId": "M:VendingMachine:event:COIN",
+        "payload": { "value": { "type": "u16", "value": 100 } }
+      },
+      "transitionTaken": {
+        "stableId": "M:VendingMachine:transition:t-VendingMachine-2",
+        "source": "s-VendingMachine-CoinInserted",
+        "target": "s-VendingMachine-CoinInserted"
+      },
+      "exitedStates": ["s-VendingMachine-CoinInserted"],
+      "enteredStates": ["s-VendingMachine-CoinInserted"],
+      "configBefore": ["s-VendingMachine-Browsing", "s-VendingMachine-CoinInserted"],
+      "configAfter": ["s-VendingMachine-Browsing", "s-VendingMachine-CoinInserted"]
+    },
+    {
+      "traceId": 3,
+      "kind": "dispatched",
+      "virtualClockMs": 0,
+      "eventReceived": { "name": "SELECT", "stableId": "M:VendingMachine:event:SELECT" },
+      "transitionTaken": {
+        "stableId": "M:VendingMachine:transition:t-VendingMachine-5",
+        "source": "s-VendingMachine-Browsing",
+        "target": "s-VendingMachine-Selected"
+      },
+      "exitedStates": ["s-VendingMachine-Browsing"],
+      "enteredStates": ["s-VendingMachine-Selected"],
+      "configBefore": ["s-VendingMachine-Browsing", "s-VendingMachine-CoinInserted"],
+      "configAfter": ["s-VendingMachine-CoinInserted", "s-VendingMachine-Selected"]
+    },
+    {
+      "traceId": 4,
+      "kind": "dispatched",
+      "virtualClockMs": 0,
+      "eventReceived": { "name": "DISPENSE", "stableId": "M:VendingMachine:event:DISPENSE" },
+      "transitionTaken": {
+        "stableId": "M:VendingMachine:transition:t-VendingMachine-3",
+        "source": "s-VendingMachine-CoinInserted",
+        "target": "s-VendingMachine-ChangeAvailable"
+      },
+      "exitedStates": ["s-VendingMachine-CoinInserted", "s-VendingMachine-Selected"],
+      "enteredStates": ["s-VendingMachine-ChangeAvailable", "s-VendingMachine-Dispensing"],
+      "actionsExecuted": ["dispense_item"],
+      "configBefore": ["s-VendingMachine-CoinInserted", "s-VendingMachine-Selected"],
+      "configAfter": ["s-VendingMachine-ChangeAvailable", "s-VendingMachine-Dispensing"]
+    },
+    {
+      "traceId": 5,
+      "kind": "dispatched",
+      "virtualClockMs": 0,
+      "eventReceived": { "name": "DISPENSE", "stableId": "M:VendingMachine:event:DISPENSE" },
+      "configBefore": ["s-VendingMachine-ChangeAvailable", "s-VendingMachine-Dispensing"],
+      "configAfter": ["s-VendingMachine-ChangeAvailable", "s-VendingMachine-Dispensing"]
+    },
+    {
+      "traceId": 6,
+      "kind": "dispatched",
+      "virtualClockMs": 0,
+      "eventReceived": { "name": "RESET", "stableId": "M:VendingMachine:event:RESET" },
+      "transitionTaken": {
+        "stableId": "M:VendingMachine:transition:t-VendingMachine-0",
+        "source": "s-VendingMachine-Operational",
+        "target": "s-VendingMachine-Done"
+      },
+      "exitedStates": [
+        "s-VendingMachine-Dispensing",
+        "s-VendingMachine-ChangeAvailable",
+        "s-VendingMachine-Operational"
+      ],
+      "enteredStates": ["s-VendingMachine-Done"],
+      "configBefore": ["s-VendingMachine-ChangeAvailable", "s-VendingMachine-Dispensing"],
+      "configAfter": ["s-VendingMachine-Done"]
+    }
   ]
 }

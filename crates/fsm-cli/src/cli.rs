@@ -128,6 +128,12 @@ pub struct TestArgs {
     /// Print only failing tests.
     #[arg(long)]
     pub failing_only: bool,
+    /// Treat traces lacking an `expected` block as passes instead of fails.
+    /// Intended for partial-development workflows where authors are iterating
+    /// on step sequences before recording the expected output. CI must NOT
+    /// pass this flag — every shipped trace must declare its expected output.
+    #[arg(long)]
+    pub allow_empty_expected: bool,
 }
 
 #[derive(Args, Debug)]

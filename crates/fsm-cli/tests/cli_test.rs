@@ -7,9 +7,8 @@ use assert_cmd::Command;
 #[test]
 fn runner_discovers_and_executes_trace_files() {
     // Lay out a self-contained test suite: one .fsm + one .trace pointing
-    // at it. The trace contains no `expected` records, so the simulator
-    // executes through init without producing a mismatch — the runner
-    // should report `pass:`.
+    // at it. The trace carries an `expected` block so the runner verifies
+    // the simulator's actual output and reports `pass:`.
     //
     // (Before the analyzer↔simulator Initial-pseudo-state contract was
     // fixed the simulator returned `"root initial is not Initial"` here
@@ -43,7 +42,17 @@ machine Simple {
         suite.join("simple.trace"),
         r#"{
   "init": {},
-  "steps": []
+  "steps": [],
+  "expected": [
+    {
+      "traceId": 0,
+      "kind": "init",
+      "virtualClockMs": 0,
+      "enteredStates": ["s-Simple-A"],
+      "configBefore": [],
+      "configAfter": ["s-Simple-A"]
+    }
+  ]
 }
 "#,
     )
