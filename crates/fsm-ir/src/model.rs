@@ -344,6 +344,12 @@ pub struct InitialPseudo {
 pub struct FinalState {
     pub id: String,
     pub stable_id: String,
+    /// DSL-level name (`final PaymentFinal` → `"PaymentFinal"`). Used by
+    /// codegen to derive the C enum / helper-function suffix; defaults to
+    /// the empty string for historical fixtures that pre-date the field
+    /// (consumers fall back to deriving a suffix from `id`).
+    #[serde(default)]
+    pub name: String,
     pub loc: SourceLocation,
 }
 

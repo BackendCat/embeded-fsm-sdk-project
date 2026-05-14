@@ -7,6 +7,7 @@
 use fsm_ir::{StateNode, TransitionKind, TransitionObject};
 
 use crate::expr::emit_guard;
+use crate::state_index::StateRecordKind;
 
 use super::entry_exit::{entry_path, exit_path};
 use super::MachineEmitCtx;
@@ -238,7 +239,7 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
             }
             for ex in exit_path(t, ctx.index, ctx.parents) {
                 let rec = ctx.index.get(ex);
-                if rec.kind.is_active_at_rest() {
+                if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
                     s.push_str(&format!(
                         "        {prefix}_exit_{name}(m);\n",
                         prefix = ctx.type_prefix(),
@@ -263,7 +264,7 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
             }
             for en in entry_path(t, ctx.index, ctx.parents) {
                 let rec = ctx.index.get(en);
-                if rec.kind.is_active_at_rest() {
+                if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
                     s.push_str(&format!(
                         "        {prefix}_entry_{name}(m);\n",
                         prefix = ctx.type_prefix(),

@@ -1,0 +1,11 @@
+language fsm 2.0
+
+machine M {
+    events { E }
+    context { speed: u16 = 0 }
+    initial S
+
+    state S {
+        on E [ctx.unknown == 1] -> S
+    }
+}

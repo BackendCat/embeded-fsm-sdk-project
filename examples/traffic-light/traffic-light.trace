@@ -1,0 +1,13 @@
+{
+  "machineFile": "traffic-light.fsm",
+  "description": "Auto cycle Red -> GreenAccelerating -> Green -> Yellow -> Red, then OVERRIDE -> Manual, then RESUME via shallow_history back to Auto.",
+  "init": { "machineName": "TrafficLight" },
+  "steps": [
+    { "action": "advance_clock", "deltaMs": 2001 },
+    { "action": "advance_clock", "deltaMs": 2001 },
+    { "action": "advance_clock", "deltaMs": 30001 },
+    { "action": "advance_clock", "deltaMs": 5001 },
+    { "action": "dispatch", "event": "OVERRIDE" },
+    { "action": "dispatch", "event": "RESUME" }
+  ]
+}

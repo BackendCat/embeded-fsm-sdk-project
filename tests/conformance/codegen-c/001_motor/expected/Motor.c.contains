@@ -1,0 +1,3 @@
+void Motor_init(Motor_t *m)
+void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev)
+Motor_StateId_t Motor_current_state(const Motor_t *m)

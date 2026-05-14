@@ -1,0 +1,12 @@
+language fsm 2.0
+
+machine M {
+    events { E }
+    context { x: u16 = 0 }
+    initial S
+
+    state S {
+        on E [ctx.x > 5]  -> S
+        on E [ctx.x > 10] -> S
+    }
+}

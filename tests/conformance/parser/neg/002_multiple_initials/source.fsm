@@ -1,0 +1,9 @@
+language fsm 2.0
+
+machine M {
+    initial A
+    initial B
+
+    state A { }
+    state B { }
+}

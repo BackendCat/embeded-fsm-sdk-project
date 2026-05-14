@@ -1,0 +1,9 @@
+{
+  "exitCode": 1,
+  "expectedDiagnostics": [
+    {
+      "code": "FSM-E0300",
+      "messageContains": "nondeterministic"
+    }
+  ]
+}

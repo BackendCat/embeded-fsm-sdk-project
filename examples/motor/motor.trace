@@ -1,0 +1,15 @@
+{
+  "machineFile": "motor.fsm",
+  "description": "Walk every state and every transition in Motor: Idle → Running → Idle → Running → Faulted (timer) → Idle → Running → Faulted (FAULT event) → Idle.",
+  "init": { "machineName": "Motor" },
+  "steps": [
+    { "action": "dispatch", "event": "START" },
+    { "action": "dispatch", "event": "STOP" },
+    { "action": "dispatch", "event": "START" },
+    { "action": "advance_clock", "deltaMs": 5001 },
+    { "action": "dispatch", "event": "RESET" },
+    { "action": "dispatch", "event": "START" },
+    { "action": "dispatch", "event": "FAULT", "payload": { "code": { "type": "u8", "value": 7 } } },
+    { "action": "dispatch", "event": "RESET" }
+  ]
+}

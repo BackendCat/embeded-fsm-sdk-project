@@ -1,0 +1,44 @@
+language fsm 2.0
+
+feature parallel
+
+machine ParallelCompletion {
+    events {
+        A_DONE
+        B_DONE
+    }
+
+    initial Working
+
+    state Working {
+        region A {
+            initial A1
+
+            state A1 {
+                on A_DONE -> A2
+            }
+
+            state A2 {
+                done -> AFinal
+            }
+
+            final AFinal
+        }
+
+        region B {
+            initial B1
+
+            state B1 {
+                on B_DONE -> B2
+            }
+
+            state B2 {
+                done -> BFinal
+            }
+
+            final BFinal
+        }
+    }
+
+    state Done { }
+}

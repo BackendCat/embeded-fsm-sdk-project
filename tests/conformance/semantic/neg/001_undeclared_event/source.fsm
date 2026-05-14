@@ -1,0 +1,9 @@
+language fsm 2.0
+
+machine M {
+    initial S
+
+    state S {
+        on PHANTOM -> S
+    }
+}

@@ -1,0 +1,24 @@
+language fsm 2.0
+
+pure extern is_ready(ctx) : bool
+
+machine Simple {
+    context {
+        count: u16 = 0
+    }
+
+    events {
+        START
+        STOP
+    }
+
+    initial Idle
+
+    state Idle {
+        on START [is_ready] -> Running : ctx.count = ctx.count + 1
+    }
+
+    state Running {
+        on STOP -> Idle
+    }
+}

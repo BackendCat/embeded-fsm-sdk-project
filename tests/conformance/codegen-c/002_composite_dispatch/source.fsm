@@ -1,0 +1,26 @@
+language fsm 2.0
+
+feature hsm
+
+machine Composite {
+    events {
+        TICK
+        RESET
+    }
+
+    initial Outer
+
+    state Outer {
+        initial Inner
+
+        on RESET -> Done
+
+        state Inner {
+            on TICK -> Inner2
+        }
+
+        state Inner2 { }
+    }
+
+    state Done { }
+}

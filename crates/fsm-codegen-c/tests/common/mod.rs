@@ -307,6 +307,7 @@ pub fn parallel_motor_ir() -> Ir {
     let region_a_done = StateNode::Final(FinalState {
         id: "s-a-final".into(),
         stable_id: "Motor:state:A.Final".into(),
+        name: "AFinal".into(),
         loc: loc(),
     });
     let region_a_active = StateNode::Simple(SimpleState {
@@ -335,6 +336,7 @@ pub fn parallel_motor_ir() -> Ir {
     let region_b_done = StateNode::Final(FinalState {
         id: "s-b-final".into(),
         stable_id: "Motor:state:B.Final".into(),
+        name: "BFinal".into(),
         loc: loc(),
     });
     let region_b_active = StateNode::Simple(SimpleState {

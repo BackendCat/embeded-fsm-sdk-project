@@ -10,7 +10,7 @@
 use fsm_ir::{StateNode, TransitionKind, TransitionObject};
 
 use crate::expr::emit_guard;
-use crate::state_index::ROOT_SENTINEL;
+use crate::state_index::{StateRecordKind, ROOT_SENTINEL};
 
 use super::entry_exit::{entry_path, exit_path};
 use super::MachineEmitCtx;
@@ -145,10 +145,11 @@ fn emit_one_case(t: &TransitionObject, ctx: &MachineEmitCtx<'_>, out: &mut Strin
         let cond = emit_guard(g, "m->context", "ev->__payload");
         out.push_str(&format!("            if (!{}) break;\n", cond));
     }
-    // Exit sequence.
+    // Exit sequence. Final states have no user-supplied exit action (matches
+    // `impl_header.rs` which skips them when emitting prototypes).
     for exit_idx in exit_path(t, ctx.index, ctx.parents) {
         let rec = ctx.index.get(exit_idx);
-        if rec.kind.is_active_at_rest() {
+        if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
             out.push_str(&format!(
                 "            {prefix}_exit_{name}(m);\n",
                 prefix = ctx.type_prefix(),
@@ -174,10 +175,10 @@ fn emit_one_case(t: &TransitionObject, ctx: &MachineEmitCtx<'_>, out: &mut Strin
             name = target_rec.c_name,
         ));
     }
-    // Entry sequence.
+    // Entry sequence. Final states have no user-supplied entry action.
     for entry_idx in entry_path(t, ctx.index, ctx.parents) {
         let rec = ctx.index.get(entry_idx);
-        if rec.kind.is_active_at_rest() {
+        if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
             out.push_str(&format!(
                 "            {prefix}_entry_{name}(m);\n",
                 prefix = ctx.type_prefix(),

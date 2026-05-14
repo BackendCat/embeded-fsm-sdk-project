@@ -16,6 +16,11 @@ use super::MachineEmitCtx;
 ///
 /// Currently emits a stub for each — actual semantic difference between
 /// shallow (direct child) and deep (leaf) is encoded in the helper body.
+///
+/// v1.0 codegen note: the dispatch path does not yet target history-pseudo
+/// restore. Helpers are emitted `static inline` so `gcc -Werror` does not
+/// flag them as unused. Wiring history into the dispatcher is tracked as
+/// Phase 2.3 follow-up; the analyzer + IR + helper bodies are complete.
 pub fn emit_history_helpers(ctx: &MachineEmitCtx<'_>) -> String {
     let prefix = ctx.type_prefix();
     let mut s = String::new();
@@ -26,7 +31,7 @@ pub fn emit_history_helpers(ctx: &MachineEmitCtx<'_>) -> String {
         let hp_idx = rec.history_pseudo.unwrap();
         let hp_rec = ctx.index.get(hp_idx);
         s.push_str(&format!(
-            "static void {prefix}_history_record_{name}({prefix}_t *m) {{\n",
+            "static inline void {prefix}_history_record_{name}({prefix}_t *m) {{\n",
             prefix = prefix,
             name = rec.c_name,
         ));
@@ -43,7 +48,7 @@ pub fn emit_history_helpers(ctx: &MachineEmitCtx<'_>) -> String {
         // Restore — uses the IR's default_target via the analyzer-validated
         // value. We emit the per-history switch over the indexed default.
         s.push_str(&format!(
-            "static void {prefix}_history_restore_{name}({prefix}_t *m) {{\n",
+            "static inline void {prefix}_history_restore_{name}({prefix}_t *m) {{\n",
             prefix = prefix,
             name = rec.c_name,
         ));

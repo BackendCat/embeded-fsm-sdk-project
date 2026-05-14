@@ -1,0 +1,13 @@
+{
+  "machineFile": "vending-machine.fsm",
+  "description": "Drive both regions to their final states and confirm the outer Operational composite is exited via RESET to Done.",
+  "init": { "machineName": "VendingMachine" },
+  "steps": [
+    { "action": "dispatch", "event": "COIN", "payload": { "value": { "type": "u16", "value": 100 } } },
+    { "action": "dispatch", "event": "COIN", "payload": { "value": { "type": "u16", "value": 100 } } },
+    { "action": "dispatch", "event": "SELECT" },
+    { "action": "dispatch", "event": "DISPENSE" },
+    { "action": "dispatch", "event": "DISPENSE" },
+    { "action": "dispatch", "event": "RESET" }
+  ]
+}

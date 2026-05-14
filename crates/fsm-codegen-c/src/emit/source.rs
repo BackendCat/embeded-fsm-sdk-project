@@ -99,11 +99,15 @@ fn emit_init(ctx: &MachineEmitCtx<'_>) -> String {
             macro = macro_prefix,
             name = start_rec.c_name,
         ));
-        s.push_str(&format!(
-            "    {prefix}_entry_{name}(m);\n",
-            prefix = prefix,
-            name = start_rec.c_name,
-        ));
+        // Final states have no user-supplied entry action (matches
+        // `impl_header.rs` and the dispatch emitters).
+        if start_rec.kind != StateRecordKind::Final {
+            s.push_str(&format!(
+                "    {prefix}_entry_{name}(m);\n",
+                prefix = prefix,
+                name = start_rec.c_name,
+            ));
+        }
     }
     // Start any timers owned by the initial state (best-effort — full
     // start-on-entry happens through the user's entry handler if needed).

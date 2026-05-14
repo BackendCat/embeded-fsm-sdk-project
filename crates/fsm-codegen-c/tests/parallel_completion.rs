@@ -39,8 +39,11 @@ fn helper_checks_each_region_slot() {
         "region 1 slot missing from helper"
     );
     // The Final state(s) for each region must appear in the conditions.
+    // Common test fixture (`parallel_motor_ir`) names the per-region final
+    // states `AFinal` / `BFinal` — derived from `FinalState.name` since the
+    // codegen now respects per-DSL `final NAME` declarations.
     assert!(
-        c.contains("MOTOR_STATE_FINAL"),
+        c.contains("MOTOR_STATE_AFINAL") || c.contains("MOTOR_STATE_BFINAL"),
         "Final state IDs missing from B-08 region check"
     );
 }

@@ -1,0 +1,11 @@
+language fsm 2.0
+
+machine M {
+    events { E }
+    state A {
+        on E -> B
+    }
+    state B {
+        on E -> A
+    }
+}

@@ -1,0 +1,13 @@
+language fsm 2.0
+
+feature history
+
+machine M {
+    initial Outer
+
+    state Outer {
+        initial Inner
+        state Inner { }
+        shallow_history H { }
+    }
+}

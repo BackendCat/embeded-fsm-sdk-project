@@ -266,10 +266,23 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
             });
         }
         StateNode::Final(f) => {
+            // Prefer the DSL name (`final PaymentFinal` -> `PaymentFinal`).
+            // Older fixtures that pre-date `FinalState.name` fall back to a
+            // generic `Final` identifier, which is still unique-ified by
+            // `IndexBuilder::push` (suffix `_N` on collision).
+            let base = if f.name.is_empty() {
+                "Final"
+            } else {
+                f.name.as_str()
+            };
             b.push(StateRecord {
-                c_name: c_ident("Final"),
+                c_name: c_ident(base),
                 ir_id: f.id.clone(),
-                dsl_name: "<final>".into(),
+                dsl_name: if f.name.is_empty() {
+                    "<final>".into()
+                } else {
+                    f.name.clone()
+                },
                 parent,
                 kind: StateRecordKind::Final,
                 initial_child: None,

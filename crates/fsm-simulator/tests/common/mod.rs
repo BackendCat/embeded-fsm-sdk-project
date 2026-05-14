@@ -83,6 +83,7 @@ pub fn final_state(id: &str) -> StateNode {
     StateNode::Final(FinalState {
         id: id.to_string(),
         stable_id: id.to_string(),
+        name: String::new(),
         loc: loc(),
     })
 }

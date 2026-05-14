@@ -1,0 +1,15 @@
+language fsm 2.0
+
+machine M {
+    context {
+        x: u8 = 1
+    }
+
+    initial S
+
+    state S {
+        done [ctx.x == 1] -> Final
+    }
+
+    state Final { }
+}

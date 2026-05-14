@@ -1,0 +1,42 @@
+language fsm 2.0
+
+feature hsm
+feature history
+feature timers
+
+machine TrafficLight {
+    events {
+        OVERRIDE
+        RESUME
+    }
+
+    initial Auto
+
+    state Auto {
+        initial Red
+
+        shallow_history HAuto { initial Red }
+
+        on OVERRIDE -> Manual
+
+        state Red {
+            after 2000 ms -> GreenAccelerating
+        }
+
+        state GreenAccelerating {
+            after 2000 ms -> Green
+        }
+
+        state Green {
+            after 30000 ms -> Yellow
+        }
+
+        state Yellow {
+            after 5000 ms -> Red
+        }
+    }
+
+    state Manual {
+        on RESUME -> HAuto
+    }
+}

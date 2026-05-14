@@ -1,0 +1,9 @@
+{
+  "exitCode": 1,
+  "expectedDiagnostics": [
+    {
+      "code": "FSM-E0101",
+      "messageContains": "unknown event"
+    }
+  ]
+}

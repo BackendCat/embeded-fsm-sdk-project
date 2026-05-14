@@ -1,0 +1,79 @@
+language fsm 2.0
+
+feature hsm
+feature history
+feature parallel
+feature timers
+feature deferred
+
+const MAX_RETRIES = 3
+const TIMER_MS = 5000
+
+enum DeviceMode {
+    Slow = 0,
+    Fast = 1,
+}
+
+pure extern can_retry(ctx) : bool
+extern reset_link()
+extern set_speed(u16 rpm)
+extern log_event(u8 code)
+
+/// Doc-comment on the machine.
+
+@id("m-fullgrammar")
+machine FullGrammar {
+    context {
+        retries   : u8         = 0
+        mode      : DeviceMode = DeviceMode.Slow
+        last_speed: u16        = 0
+    }
+
+    events {
+        @id("ev-start")
+        START
+        STOP
+        TICK(value: u16)
+    }
+
+    queue {
+        capacity = 16
+        overflow = drop_oldest
+    }
+
+    target C99 {
+        strategy    = switch_based
+        allow_float = false
+    }
+
+    initial Outer
+
+    @id("s-outer")
+    state Outer {
+        initial Inner
+
+        shallow_history HOuter { initial Inner }
+
+        on STOP -> Done
+
+        @id("s-inner")
+        state Inner {
+            entry : reset_link()
+            exit : log_event(1)
+
+            after TIMER_MS ms -> Inner : ctx.retries = ctx.retries + 1
+            every 1000 ms : log_event(0)
+
+            on TICK [can_retry] -> Inner : ctx.last_speed = payload.value
+            on START            -> Working
+        }
+
+        state Working {
+            on START ~> Inner
+
+            done -> Inner
+        }
+    }
+
+    state Done { }
+}

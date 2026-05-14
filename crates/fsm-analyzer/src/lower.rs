@@ -641,6 +641,7 @@ impl<'a> LoweringCtx<'a> {
                         out.push(StateNode::Final(FinalState {
                             id: self.state_id(&name),
                             stable_id: format!("M:{}:final:{name}", self.machine_name),
+                            name: name.clone(),
                             loc: self.loc(&child),
                         }));
                     }
@@ -797,8 +798,11 @@ impl<'a> LoweringCtx<'a> {
         // Missing default is rejected by [`crate::checks::history`] — we
         // still produce an IR entry with empty default_target so codegen
         // never sees `Option::None` (matching the type-system embodiment of
-        // B-14).
-        let default_target = default.unwrap_or_default();
+        // B-14). Normalize the raw `default` name to the canonical state IR
+        // id so consumers (codegen, simulator) can look it up via the same
+        // `s-<Machine>-<Name>` key family used for all other transition
+        // targets.
+        let default_target = default.map(|n| self.state_id(&n)).unwrap_or_default();
         StateNode::History(HistoryObject {
             id: self.state_id(&name),
             stable_id: format!("M:{}:history:{name}", self.machine_name),

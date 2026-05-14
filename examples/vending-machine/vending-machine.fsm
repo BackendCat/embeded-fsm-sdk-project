@@ -1,0 +1,65 @@
+language fsm 2.0
+
+feature parallel
+feature hsm
+
+extern dispense_item()
+
+machine VendingMachine {
+    context {
+        balance: u16 = 0
+        price  : u16 = 150
+    }
+
+    events {
+        COIN(value: u16)
+        SELECT
+        DISPENSE
+        RESET
+    }
+
+    initial Operational
+
+    state Operational {
+        on RESET -> Done
+
+        region Payment {
+            initial Idle
+
+            state Idle {
+                on COIN -> CoinInserted : ctx.balance = ctx.balance + payload.value
+            }
+
+            state CoinInserted {
+                on COIN                                -> CoinInserted : ctx.balance = ctx.balance + payload.value
+                on DISPENSE [ctx.balance >= ctx.price] -> ChangeAvailable : ctx.balance = ctx.balance - ctx.price
+            }
+
+            state ChangeAvailable {
+                done -> PaymentFinal
+            }
+
+            final PaymentFinal
+        }
+
+        region Selection {
+            initial Browsing
+
+            state Browsing {
+                on SELECT -> Selected
+            }
+
+            state Selected {
+                on DISPENSE -> Dispensing : dispense_item()
+            }
+
+            state Dispensing {
+                done -> SelectionFinal
+            }
+
+            final SelectionFinal
+        }
+    }
+
+    state Done { }
+}

@@ -1,0 +1,38 @@
+language fsm 2.0
+
+feature parallel
+
+machine Parallel {
+    events {
+        TICK
+        STOP
+    }
+
+    initial Working
+
+    state Working {
+        on STOP -> Done
+
+        region A {
+            initial A1
+
+            state A1 {
+                on TICK -> A2
+            }
+
+            state A2 { }
+        }
+
+        region B {
+            initial B1
+
+            state B1 {
+                on TICK -> B2
+            }
+
+            state B2 { }
+        }
+    }
+
+    state Done { }
+}

@@ -1,0 +1,3 @@
+Composite_parent_table[COMPOSITE_STATE__COUNT]
+B-10: walk from the active leaf up through ancestors via parent_table
+Composite_dispatch(Composite_t *m, const Composite_Event_t *ev)

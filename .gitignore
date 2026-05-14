@@ -15,6 +15,7 @@ Thumbs.db
 
 # Generated code dropped by `fsm generate` during dogfood runs
 /generated/
+examples/*/generated/
 
 # Snapshot test pending files
 **/*.snap.new

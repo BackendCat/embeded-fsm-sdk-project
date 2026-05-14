@@ -1,0 +1,231 @@
+{
+  "version": "1.0.0",
+  "categories": [
+    {
+      "name": "parser",
+      "fixtures": [
+        {
+          "id": "PARSE-POS-001",
+          "kind": "positive",
+          "path": "parser/pos/001_empty_machine.fsm",
+          "description": "Minimal valid machine — single state, no events, no context",
+          "normative": true,
+          "tags": ["minimal", "smoke"]
+        },
+        {
+          "id": "PARSE-POS-002",
+          "kind": "positive",
+          "path": "parser/pos/002_motor.fsm",
+          "description": "Canonical Motor — context, events with payload, timer, guard, action",
+          "normative": true,
+          "tags": ["motor", "smoke"]
+        },
+        {
+          "id": "PARSE-POS-003",
+          "kind": "positive",
+          "path": "parser/pos/003_full_grammar.fsm",
+          "description": "Exercises imports, features, consts, enums, externs, composite, history, timers, action sub-language, stable IDs, doc comments",
+          "normative": true,
+          "tags": ["grammar-coverage"]
+        },
+        {
+          "id": "PARSE-NEG-001",
+          "kind": "negative",
+          "path": "parser/neg/001_no_initial/",
+          "description": "Missing initial declaration triggers FSM-E0107 (per Doc 00 NEG-001 corrected code)",
+          "normative": true,
+          "expectedCodes": ["FSM-E0107"],
+          "tags": ["initial"]
+        },
+        {
+          "id": "PARSE-NEG-002",
+          "kind": "negative",
+          "path": "parser/neg/002_multiple_initials/",
+          "description": "Two initial declarations in one scope triggers FSM-E0108 (per Doc 00 NEG-005 corrected code)",
+          "normative": true,
+          "expectedCodes": ["FSM-E0108"],
+          "tags": ["initial"]
+        },
+        {
+          "id": "PARSE-NEG-003",
+          "kind": "negative",
+          "path": "parser/neg/003_unknown_context_field/",
+          "description": "Guard references undeclared ctx.field triggers FSM-E0104 (per Doc 00 NEG-008 corrected code)",
+          "normative": true,
+          "expectedCodes": ["FSM-E0104"],
+          "tags": ["resolution"]
+        }
+      ]
+    },
+    {
+      "name": "validator",
+      "fixtures": [
+        {
+          "id": "VAL-POS-001",
+          "kind": "positive",
+          "path": "validator/pos/001_simple_machine_valid.fsm",
+          "description": "Pure-extern guard, action assignment, two-state cycle",
+          "normative": true,
+          "tags": ["simple"]
+        },
+        {
+          "id": "VAL-POS-002",
+          "kind": "positive",
+          "path": "validator/pos/002_motor_typed.fsm",
+          "description": "Motor with full type-checked context, events, guards, timer, payload",
+          "normative": true,
+          "tags": ["motor"]
+        },
+        {
+          "id": "VAL-POS-003",
+          "kind": "positive",
+          "path": "validator/pos/003_parallel_regions.fsm",
+          "description": "Parallel composite with two independent regions and a composite-parent transition",
+          "normative": true,
+          "tags": ["parallel"]
+        },
+        {
+          "id": "VAL-NEG-001",
+          "kind": "negative",
+          "path": "validator/neg/001_assignment_type_mismatch/",
+          "description": "Negative literal assigned to unsigned field triggers FSM-E0201 (per Doc 00 NEG-010 corrected code)",
+          "normative": true,
+          "expectedCodes": ["FSM-E0201"],
+          "tags": ["type"]
+        },
+        {
+          "id": "VAL-NEG-002",
+          "kind": "negative",
+          "path": "validator/neg/002_after_zero_ms/",
+          "description": "Zero-millisecond timer triggers FSM-E0410 (B-13)",
+          "normative": true,
+          "expectedCodes": ["FSM-E0410"],
+          "tags": ["timer"]
+        },
+        {
+          "id": "VAL-NEG-003",
+          "kind": "negative",
+          "path": "validator/neg/003_history_no_default/",
+          "description": "History pseudo-state without `default ->` triggers FSM-E0111 (B-14)",
+          "normative": true,
+          "expectedCodes": ["FSM-E0111"],
+          "tags": ["history"]
+        }
+      ]
+    },
+    {
+      "name": "semantic",
+      "fixtures": [
+        {
+          "id": "SEM-POS-001",
+          "kind": "positive",
+          "path": "semantic/pos/001_motor_full.fsm",
+          "description": "Motor exercising the full state space (also driven by examples/motor/motor.trace)",
+          "normative": true,
+          "tags": ["motor"]
+        },
+        {
+          "id": "SEM-POS-002",
+          "kind": "positive",
+          "path": "semantic/pos/002_completion_with_guards.fsm",
+          "description": "Completion transition with a guard — allowed per Doc 00 B-07 (NO FSM-E0301)",
+          "normative": true,
+          "tags": ["completion"]
+        },
+        {
+          "id": "SEM-POS-003",
+          "kind": "positive",
+          "path": "semantic/pos/003_parallel_completion.fsm",
+          "description": "Parallel regions with per-region final states — both must reach `final` before composite completion fires (B-08)",
+          "normative": true,
+          "tags": ["parallel", "completion"]
+        },
+        {
+          "id": "SEM-NEG-001",
+          "kind": "negative",
+          "path": "semantic/neg/001_undeclared_event/",
+          "description": "Transition on undeclared event triggers FSM-E0101",
+          "normative": true,
+          "expectedCodes": ["FSM-E0101"],
+          "tags": ["resolution"]
+        },
+        {
+          "id": "SEM-NEG-002",
+          "kind": "negative",
+          "path": "semantic/neg/002_nondeterministic_transitions/",
+          "description": "Two transitions on same event with overlapping guards triggers FSM-E0300",
+          "normative": true,
+          "expectedCodes": ["FSM-E0300"],
+          "tags": ["determinism"]
+        },
+        {
+          "id": "SEM-NEG-003",
+          "kind": "negative",
+          "path": "semantic/neg/003_parallel_region_no_initial/",
+          "description": "Parallel region with no `initial` triggers FSM-E0600",
+          "normative": true,
+          "expectedCodes": ["FSM-E0600"],
+          "tags": ["parallel"]
+        }
+      ]
+    },
+    {
+      "name": "codegen-c",
+      "fixtures": [
+        {
+          "id": "CGEN-001",
+          "kind": "golden",
+          "path": "codegen-c/001_motor/",
+          "description": "Motor — verify generated Motor.h carries the expected state/event enums and Motor.c emits init/dispatch/current_state. gcc -Werror clean.",
+          "normative": true,
+          "tags": ["motor", "gcc-werror"]
+        },
+        {
+          "id": "CGEN-002",
+          "kind": "golden",
+          "path": "codegen-c/002_composite_dispatch/",
+          "description": "Composite — verify B-10 parent-table dispatch lands the leaf-to-root walk for hierarchical transitions. gcc -Werror clean.",
+          "normative": true,
+          "tags": ["composite", "B-10"]
+        },
+        {
+          "id": "CGEN-003",
+          "kind": "golden",
+          "path": "codegen-c/003_parallel_completion/",
+          "description": "Parallel completion — verify per-region slots and B-08 all-regions-final helper. gcc -Werror clean.",
+          "normative": true,
+          "tags": ["parallel", "B-08"]
+        }
+      ]
+    },
+    {
+      "name": "formatter",
+      "fixtures": [
+        {
+          "id": "FMT-001",
+          "kind": "idempotent",
+          "path": "formatter/001_canonical_minimal.fsm",
+          "description": "Already-canonical minimal machine — `fsm fmt --check` exits 0",
+          "normative": true,
+          "tags": ["minimal"]
+        },
+        {
+          "id": "FMT-002",
+          "kind": "idempotent",
+          "path": "formatter/002_canonical_motor.fsm",
+          "description": "Canonical Motor — `fsm fmt --check` exits 0; idempotent",
+          "normative": true,
+          "tags": ["motor"]
+        },
+        {
+          "id": "FMT-003",
+          "kind": "transform",
+          "path": "formatter/003_uncanonical_then_canonical/",
+          "description": "Loose whitespace + non-canonical layout normalises to the matching expected.fsm",
+          "normative": true,
+          "tags": ["transform"]
+        }
+      ]
+    }
+  ]
+}
