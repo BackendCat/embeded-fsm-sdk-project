@@ -32,7 +32,15 @@ use crate::parser::{ExprContext, Parser};
 
 /// Parse an expression at the given minimum binding power. The recursive
 /// driver: see Pratt 1973, "Top down operator precedence."
+///
+/// Depth-bounded via [`Parser::with_recursion`] — a `(((...)))`-style
+/// adversarial input is rejected with `FSM-E0010` once the configured
+/// depth limit is hit (Doc 00 §7.12 G-02 / audit P1-5).
 pub fn parse_expr(p: &mut Parser, min_bp: u8, ctx: ExprContext) {
+    p.with_recursion((), |p| parse_expr_inner(p, min_bp, ctx));
+}
+
+fn parse_expr_inner(p: &mut Parser, min_bp: u8, ctx: ExprContext) {
     let lhs_cp = p.checkpoint();
     if !parse_prefix(p, ctx) {
         // No valid prefix token; emit an error and return without consuming.

@@ -49,7 +49,14 @@ const ACTION_BLOCK_TERMINATORS: TokenSet = TokenSet::new(&[
 ]);
 
 /// Parse an `action_list` introduced by `:`.
+///
+/// Depth-bounded — `if`/`while`/`for` bodies nest action blocks
+/// recursively (Doc 00 §7.12 G-02 / audit P1-5).
 pub fn parse_action_block(p: &mut Parser) {
+    p.with_recursion((), |p| parse_action_block_inner(p));
+}
+
+fn parse_action_block_inner(p: &mut Parser) {
     p.start_node(SyntaxKind::ACTION_BLOCK);
 
     // The first statement is mandatory (the EBNF requires `statement` then
@@ -236,7 +243,14 @@ fn parse_for(p: &mut Parser) {
 }
 
 /// Parse a brace-delimited inner action list — used by `if`/`while`/`for`.
+///
+/// Depth-bounded — `if` bodies may contain further nested `if`s with
+/// their own brace blocks, so the recursion goes through here.
 fn parse_block_action(p: &mut Parser) {
+    p.with_recursion((), |p| parse_block_action_inner(p));
+}
+
+fn parse_block_action_inner(p: &mut Parser) {
     if !p.expect(TokenKind::LBrace, DiagnosticCode::E0010) {
         return;
     }
