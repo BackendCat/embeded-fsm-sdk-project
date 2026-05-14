@@ -225,7 +225,12 @@ macro_rules! for_each_code {
             // §10 — Runtime Safety Errors (FSM-E0900 – FSM-E0999)
             E0900 => (Error,   "FSM-E0900", "completion event chain too deep"),
             // Reconciler addition (Doc 00 §8 / G-08):
-            E0903 => (Error,   "FSM-E0903", "too many event types for defer bitmask"),
+            // Audit P0-5 option-b (2026-05-14): repurposed from "too many
+            // event types for defer bitmask" — v1.0 has no working defer
+            // queue at all, so every `defer EVENT` is rejected at analysis
+            // time. The bitmask-size limit re-applies in v1.1 once the
+            // queue ships.
+            E0903 => (Error,   "FSM-E0903", "`defer EVENT` is not supported in v1.0"),
 
             // §11 — Warnings (FSM-W0xxx)
             //   W0400 retired (now E0410) -> deprecated module

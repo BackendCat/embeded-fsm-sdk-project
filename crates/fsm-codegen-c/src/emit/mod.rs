@@ -87,6 +87,22 @@ pub fn emit(ir: &Ir, config: &CodegenConfig) -> Result<EmittedFiles, EmitError> 
         return Err(EmitError::QueueCapacityNotPowerOfTwo(config.queue_capacity));
     }
 
+    // Audit P0-5 option-b (2026-05-14): the analyzer rejects every
+    // `defer EVENT` with FSM-E0903 in v1.0, so a defer-bearing IR should
+    // never reach codegen. Belt-and-braces: assert it in debug builds.
+    // If this fires, an analyzer regression has let a non-conforming IR
+    // through and we'd otherwise silently emit broken C.
+    #[cfg(debug_assertions)]
+    for machine in &ir.machines {
+        debug_assert!(
+            !any_state_has_defer(&machine.root.states),
+            "fsm-codegen-c: machine `{}` reached codegen with a `defer EVENT` \
+             declaration — the analyzer must have rejected it with FSM-E0903 \
+             first (audit P0-5; defer not supported in v1.0)",
+            machine.name,
+        );
+    }
+
     let mut files = Vec::new();
     // Single HAL header shared by every emitted machine (Doc 16).
     files.push(hal::emit_hal_header(config));
@@ -179,6 +195,25 @@ impl<'a> MachineEmitCtx<'a> {
 
 fn is_power_of_two(n: u8) -> bool {
     n != 0 && (n & (n - 1)) == 0
+}
+
+/// Recursively check whether any state (top-level or nested through
+/// composite / parallel regions) carries a non-empty `defers` list.
+/// Used by the `debug_assertions` guard at the top of `emit` to catch
+/// analyzer regressions before they produce broken C (audit P0-5).
+#[cfg(debug_assertions)]
+fn any_state_has_defer(states: &[fsm_ir::StateNode]) -> bool {
+    use fsm_ir::StateNode;
+    states.iter().any(|s| match s {
+        StateNode::Simple(ss) => !ss.defers.is_empty(),
+        StateNode::Composite(c) => {
+            !c.defers.is_empty() || c.regions.iter().any(|r| any_state_has_defer(&r.states))
+        }
+        StateNode::Parallel(p) => {
+            !p.defers.is_empty() || p.regions.iter().any(|r| any_state_has_defer(&r.states))
+        }
+        _ => false,
+    })
 }
 
 #[cfg(test)]

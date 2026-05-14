@@ -8,8 +8,8 @@ use crate::state_index::StateRecordKind;
 
 use super::license::header_block;
 use super::{
-    completion, defer, dispatch_switch, dispatch_table, history, queue, timer, EmittedFile,
-    FileRole, MachineEmitCtx,
+    completion, dispatch_switch, dispatch_table, history, queue, timer, EmittedFile, FileRole,
+    MachineEmitCtx,
 };
 
 pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
@@ -25,9 +25,15 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
     body.push_str(&format!("#include \"{}_impl.h\"\n", stem));
     body.push_str("#include <string.h> /* memset */\n\n");
 
-    // Defer mask, history helpers, completion helpers, timer tick.
-    body.push_str(&defer::emit_defer_mask(ctx));
-    body.push_str("\n");
+    // History helpers, completion helpers, timer tick.
+    //
+    // Audit P0-5 option-b (2026-05-14): defer mask table no longer emitted.
+    // The runtime path that read it silently dropped events, contradicting
+    // Doc 02 G1. With `defer EVENT` rejected at analysis time via
+    // FSM-E0903, no machine that reaches codegen has anything to defer; an
+    // emitted-but-unread `Motor_defer_mask[]` would just be dead weight
+    // (and `-Werror=unused-const-variable` would reject it anyway). The
+    // emitter is preserved in `emit/defer.rs` for v1.1.
     body.push_str(&history::emit_history_helpers(ctx));
     body.push_str("\n");
     body.push_str(&completion::emit_all_regions_final_helper(ctx));

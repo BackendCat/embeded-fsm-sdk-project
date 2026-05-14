@@ -275,14 +275,12 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
     format!(
         r#"
 void {prefix}_dispatch({prefix}_t *m, const {prefix}_Event_t *ev) {{
-    /* B-11 collect-then-execute. One transition per region maximum. */
-    if (ev->id < {macro}_EVENT__COUNT) {{
-        for (uint8_t r = 0; r < m->_active_count; r++) {{
-            if ({prefix}_defer_mask[m->_active[r]] & (1u << ev->id)) {{
-                return;
-            }}
-        }}
-    }}
+    /* B-11 collect-then-execute. One transition per region maximum.
+     *
+     * Audit P0-5 option-b (2026-05-14): the prior `defer_mask` short-circuit
+     * lived here and silently dropped events. The analyzer now rejects every
+     * `defer EVENT` with FSM-E0903 (Doc 02 G1 compliance), so this path is
+     * gone. The mask table is still emitted; no runtime read survives. */
 
     const {prefix}_TransRow_t *selected[{macro}_MAX_PARALLEL_REGIONS];
     uint8_t selected_count = 0;

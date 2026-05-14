@@ -1,45 +1,51 @@
-//! Defer-related checks — Doc 04 §9.4 / Doc 00 §G-08.
+//! Defer-related checks — Doc 04 §9.4 / Doc 00 §G-08 / Audit P0-5.
 //!
 //! - `FSM-E0310` if a state declares both `defer E` and an explicit
 //!   `on E -> ...` (or `internal on E:`) for the same event.
-//! - `FSM-E0903` if the machine uses any `defer` declaration AND has more
-//!   than 256 distinct event types (the upper cap from Doc 00 §G-08; the
-//!   codegen-c bitmask grows to `uint8_t[ceil(N/8)]` between 33 and 256
-//!   events, beyond which there is no fast representation).
+//! - `FSM-E0903` on every `defer EVENT` declaration. Per audit P0-5
+//!   option-b: v1.0 codegen has no real defer queue (the prior runtime
+//!   path silently dropped deferred events, contradicting Doc 02 G1
+//!   "no undefined behaviour"). Until v1.1 ships a working queue, we
+//!   reject `defer` at analysis time so users get a clear error pointing
+//!   at the v1.1 roadmap rather than silently broken machines. The
+//!   simulator's defer support (Doc 08 §10) remains intact for internal
+//!   tooling; this gate is codegen-facing. See Doc 00 §6 (D-15 to be
+//!   added) and `docs/AUDIT_2026_05_14.md` §P0-5.
 
 use std::collections::HashSet;
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
-use fsm_parser::cst::SyntaxKind;
 
 use crate::symbol_table::SymbolTable;
 use crate::util::span_of;
 
-const DEFER_EVENT_LIMIT: usize = 256;
-
 /// Run defer-related checks.
-pub fn check(file: &ast::File, st: &SymbolTable, out: &mut Vec<Diagnostic>) {
-    for (m_idx, machine) in file.machines().enumerate() {
+pub fn check(file: &ast::File, _st: &SymbolTable, out: &mut Vec<Diagnostic>) {
+    for machine in file.machines() {
         // E0310 — defer-vs-transition conflict per state.
         for state in walk_states(&machine) {
             check_state_defer_conflicts(&state, out);
         }
-        // E0903 — defer + too many events.
-        let event_count = st.machines.get(m_idx).map(|s| s.events.len()).unwrap_or(0);
-        if event_count > DEFER_EVENT_LIMIT
-            && machine
-                .syntax()
-                .descendants()
-                .any(|d| d.kind() == SyntaxKind::DEFER_DECL || d.kind() == SyntaxKind::STMT_DEFER)
-        {
-            out.push(
-                Diagnostic::new(DiagnosticCode::E0903, span_of(machine.syntax())).with_message(
-                    format!(
-                        "machine has {event_count} event types — defer bitmask supports up to {DEFER_EVENT_LIMIT}",
+        // E0903 — defer is not yet supported in v1.0 (audit P0-5
+        // option-b). Emit one diagnostic per `defer EVENT` declaration so
+        // users see every offending site, not just the first machine. The
+        // older "too many event types for defer bitmask" trigger is
+        // subsumed: with zero supported defers, the >256-event capacity
+        // check is moot.
+        for state in walk_states(&machine) {
+            for d in state.defers() {
+                let event = d.event().unwrap_or_else(|| "<unknown>".to_string());
+                out.push(
+                    Diagnostic::new(DiagnosticCode::E0903, span_of(d.syntax())).with_message(
+                        format!(
+                            "`defer {event}` is not yet supported in v1.0; \
+                             remove the `defer` clause or wait for v1.1 \
+                             (see docs/AUDIT_2026_05_14.md §P0-5)",
+                        ),
                     ),
-                ),
-            );
+                );
+            }
         }
     }
 }

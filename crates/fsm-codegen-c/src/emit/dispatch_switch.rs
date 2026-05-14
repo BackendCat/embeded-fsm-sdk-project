@@ -166,17 +166,14 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
      * `_active[]`, walk leaf-to-root via parent_table; the first ancestor
      * with a matching transition fires it. Regions iterate independently,
      * so a single event can drive every region in a parallel state in the
-     * same RTC step. */
-    if (ev->id < {macro}_EVENT__COUNT) {{
-        for (uint8_t r = 0; r < m->_active_count; r++) {{
-            if ({prefix}_defer_mask[m->_active[r]] & (1u << ev->id)) {{
-                /* Deferred — store and return without processing. v1.0
-                 * simplifies the defer queue to a single slot per state;
-                 * multi-slot defer is tracked under follow-up work. */
-                return;
-            }}
-        }}
-    }}
+     * same RTC step.
+     *
+     * Audit P0-5 option-b (2026-05-14): the prior `defer_mask` short-circuit
+     * lived here and silently dropped events — a documented "store and
+     * return" that never actually stored. The analyzer now rejects every
+     * `defer EVENT` with FSM-E0903 (Doc 02 G1 compliance), so this path is
+     * gone. The mask table is still emitted for inspection / future v1.1
+     * defer queue, but no runtime read survives. */
     bool fired_any = false;
     bool fired_in_region[{macro}_MAX_PARALLEL_REGIONS] = {{ false }};
     /* Snapshot active region count up front so transition side effects
