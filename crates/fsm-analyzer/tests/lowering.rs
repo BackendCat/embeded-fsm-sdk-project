@@ -4,7 +4,7 @@
 //! fills with `""` and emits FSM-E0111 separately).
 
 use fsm_analyzer::analyze;
-use fsm_ir::{HistoryKind, StateNode, TransitionKind};
+use fsm_ir::{HistoryKind, StateNode, TimerKind, TransitionKind, Trigger};
 use fsm_parser::parse;
 
 #[test]
@@ -195,4 +195,108 @@ fn ir_serializes_to_json() {
     let json = fsm_ir::to_json(&ir).expect("serialise IR");
     assert!(json.contains("\"irVersion\""));
     assert!(json.contains("\"kind\""));
+}
+
+#[test]
+fn after_decl_lowers_to_timer_plus_after_triggered_transition() {
+    // P0-4: `after N ms -> X` must produce BOTH a TimerObject and a
+    // matching TransitionObject whose trigger is `Trigger::After { timer_id
+    // }`. Pre-fix, only the timer was produced and the transition vanished
+    // into a `trigger: None` slot indistinguishable from completion.
+    let src = "language fsm 2.0\nfeature timers\nmachine M { events { E } initial A state A { after 100 ms -> B } state B {} }";
+    let pr = parse(src);
+    let ir = analyze(&pr).ir.unwrap();
+    let s = ir.machines[0]
+        .root
+        .states
+        .iter()
+        .find_map(|s| match s {
+            StateNode::Simple(s) if s.name == "A" => Some(s),
+            _ => None,
+        })
+        .expect("state A");
+    assert_eq!(s.timers.len(), 1, "state A should own one timer");
+    let timer = &s.timers[0];
+    assert!(matches!(timer.kind, TimerKind::After));
+    assert_eq!(timer.duration_ms, 100);
+
+    let after_t = s
+        .transitions
+        .iter()
+        .find(|t| matches!(t.trigger, Some(Trigger::After { .. })))
+        .expect("after-triggered transition");
+    if let Some(Trigger::After {
+        duration_ms,
+        timer_id,
+    }) = &after_t.trigger
+    {
+        assert_eq!(*duration_ms, 100);
+        assert_eq!(
+            timer_id, &timer.id,
+            "timer_id on Trigger::After must reference the owning TimerObject"
+        );
+    } else {
+        unreachable!()
+    }
+}
+
+#[test]
+fn every_decl_lowers_to_timer_plus_every_triggered_transition() {
+    let src = "language fsm 2.0\nfeature timers\nmachine M { events { E } initial A state A { every 50 ms -> A } }";
+    let pr = parse(src);
+    let ir = analyze(&pr).ir.unwrap();
+    let s = ir.machines[0]
+        .root
+        .states
+        .iter()
+        .find_map(|s| match s {
+            StateNode::Simple(s) if s.name == "A" => Some(s),
+            _ => None,
+        })
+        .expect("state A");
+    assert_eq!(s.timers.len(), 1);
+    let timer = &s.timers[0];
+    assert!(matches!(timer.kind, TimerKind::Every));
+    let every_t = s
+        .transitions
+        .iter()
+        .find(|t| matches!(t.trigger, Some(Trigger::Every { .. })))
+        .expect("every-triggered transition");
+    if let Some(Trigger::Every {
+        period_ms,
+        timer_id,
+    }) = &every_t.trigger
+    {
+        assert_eq!(*period_ms, 50);
+        assert_eq!(timer_id, &timer.id);
+    } else {
+        unreachable!()
+    }
+}
+
+#[test]
+fn every_internal_decl_lowers_to_internal_kind_transition() {
+    // `every N ms : action_block` (no target) — analyzer must still emit a
+    // transition so the action runs on each fire, but with TransitionKind::
+    // Internal so no exit/entry sequence executes.
+    let src = "language fsm 2.0\nfeature timers\nextern tick()\nmachine M { initial A state A { every 25 ms : tick() } }";
+    let pr = parse(src);
+    let ir = analyze(&pr).ir.unwrap();
+    let s = ir.machines[0]
+        .root
+        .states
+        .iter()
+        .find_map(|s| match s {
+            StateNode::Simple(s) if s.name == "A" => Some(s),
+            _ => None,
+        })
+        .expect("state A");
+    assert_eq!(s.timers.len(), 1);
+    assert!(matches!(s.timers[0].kind, TimerKind::EveryInternal));
+    let internal_t = s
+        .transitions
+        .iter()
+        .find(|t| matches!(t.trigger, Some(Trigger::Every { .. })))
+        .expect("every-internal transition");
+    assert!(matches!(internal_t.kind, TransitionKind::Internal));
 }
