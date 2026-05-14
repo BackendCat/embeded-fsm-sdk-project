@@ -1,6 +1,6 @@
 {
   "machineFile": "motor.fsm",
-  "description": "Walk every state and every transition in Motor. The intended path is Idle → Running → Idle → Running → Faulted (after-timer) → Idle → Running → Faulted (FAULT) → Idle. The `after 5000 ms` timer in Running currently does not transition to Faulted (P0-4); the recorded `expected` reflects observed behaviour and must be re-recorded once the timer fix lands.",
+  "description": "Walk every state and every transition in Motor. The intended path is Idle -> Running -> Idle -> Running -> Faulted (after-timer) -> Idle -> Running -> Faulted (FAULT) -> Idle. The `after 5000 ms` timer in Running now fires and transitions to Faulted; the recorded `expected` was refreshed post-P0-4 (timer fix) and post-P0-2/3 (codegen rewrite re-numbered stable IDs: the timer transition now occupies `t-Motor-3`, shifting RESET to `t-Motor-4`).",
   "init": {
     "machineName": "Motor",
     "externReturns": { "can_start": { "type": "bool", "value": true } }
@@ -77,23 +77,45 @@
       "kind": "timer_fired",
       "virtualClockMs": 5000,
       "eventReceived": { "name": "__timer__:ps-timer-Motor-1" },
+      "transitionTaken": {
+        "stableId": "M:Motor:transition:t-Motor-3",
+        "source": "s-Motor-Running",
+        "target": "s-Motor-Faulted"
+      },
+      "exitedStates": ["s-Motor-Running"],
+      "enteredStates": ["s-Motor-Faulted"],
       "configBefore": ["s-Motor-Running"],
-      "configAfter": ["s-Motor-Running"]
+      "configAfter": ["s-Motor-Faulted"]
     },
     {
       "traceId": 5,
       "kind": "dispatched",
       "virtualClockMs": 5001,
       "eventReceived": { "name": "RESET", "stableId": "M:Motor:event:RESET" },
-      "configBefore": ["s-Motor-Running"],
-      "configAfter": ["s-Motor-Running"]
+      "transitionTaken": {
+        "stableId": "M:Motor:transition:t-Motor-4",
+        "source": "s-Motor-Faulted",
+        "target": "s-Motor-Idle"
+      },
+      "exitedStates": ["s-Motor-Faulted"],
+      "enteredStates": ["s-Motor-Idle"],
+      "configBefore": ["s-Motor-Faulted"],
+      "configAfter": ["s-Motor-Idle"]
     },
     {
       "traceId": 6,
       "kind": "dispatched",
       "virtualClockMs": 5001,
       "eventReceived": { "name": "START", "stableId": "M:Motor:event:START" },
-      "configBefore": ["s-Motor-Running"],
+      "transitionTaken": {
+        "stableId": "M:Motor:transition:t-Motor-0",
+        "source": "s-Motor-Idle",
+        "target": "s-Motor-Running"
+      },
+      "exitedStates": ["s-Motor-Idle"],
+      "enteredStates": ["s-Motor-Running"],
+      "actionsExecuted": ["set_speed"],
+      "configBefore": ["s-Motor-Idle"],
       "configAfter": ["s-Motor-Running"]
     },
     {
@@ -122,7 +144,7 @@
       "virtualClockMs": 5001,
       "eventReceived": { "name": "RESET", "stableId": "M:Motor:event:RESET" },
       "transitionTaken": {
-        "stableId": "M:Motor:transition:t-Motor-3",
+        "stableId": "M:Motor:transition:t-Motor-4",
         "source": "s-Motor-Faulted",
         "target": "s-Motor-Idle"
       },

@@ -1,6 +1,6 @@
 {
   "machineFile": "traffic-light.fsm",
-  "description": "Drive the Auto sub-region timer through Red, then OVERRIDE -> Manual, then RESUME via shallow_history back to Red. The intended path also cycles Red -> GreenAccelerating -> Green -> Yellow but the `after N ms` timers do not re-arm on entry today (P0-4); the recorded `expected` reflects observed behaviour and must be re-recorded once the timer fix lands.",
+  "description": "Drive the full Auto sub-region timer cycle Red -> GreenAccelerating -> Green -> Yellow -> Red, then OVERRIDE -> Manual, then RESUME via shallow_history back to Red. The `after N ms` timers now re-arm on entry (P0-4); each `advance_clock` step expires the entering state's freshly-armed timer. The recorded `expected` was refreshed post-P0-4 (timer fix) and post-P0-2/3 (codegen rewrite re-numbered stable IDs: every timer transition now occupies `t-TrafficLight-1..4`, shifting RESUME to `t-TrafficLight-5`).",
   "init": { "machineName": "TrafficLight" },
   "steps": [
     { "action": "advance_clock", "deltaMs": 2001 },
@@ -24,11 +24,63 @@
       "kind": "timer_fired",
       "virtualClockMs": 2000,
       "eventReceived": { "name": "__timer__:ps-timer-TrafficLight-2" },
+      "transitionTaken": {
+        "stableId": "M:TrafficLight:transition:t-TrafficLight-1",
+        "source": "s-TrafficLight-Red",
+        "target": "s-TrafficLight-GreenAccelerating"
+      },
+      "exitedStates": ["s-TrafficLight-Red"],
+      "enteredStates": ["s-TrafficLight-GreenAccelerating"],
       "configBefore": ["s-TrafficLight-Red"],
-      "configAfter": ["s-TrafficLight-Red"]
+      "configAfter": ["s-TrafficLight-GreenAccelerating"]
     },
     {
       "traceId": 2,
+      "kind": "timer_fired",
+      "virtualClockMs": 4000,
+      "eventReceived": { "name": "__timer__:ps-timer-TrafficLight-3" },
+      "transitionTaken": {
+        "stableId": "M:TrafficLight:transition:t-TrafficLight-2",
+        "source": "s-TrafficLight-GreenAccelerating",
+        "target": "s-TrafficLight-Green"
+      },
+      "exitedStates": ["s-TrafficLight-GreenAccelerating"],
+      "enteredStates": ["s-TrafficLight-Green"],
+      "configBefore": ["s-TrafficLight-GreenAccelerating"],
+      "configAfter": ["s-TrafficLight-Green"]
+    },
+    {
+      "traceId": 3,
+      "kind": "timer_fired",
+      "virtualClockMs": 34000,
+      "eventReceived": { "name": "__timer__:ps-timer-TrafficLight-4" },
+      "transitionTaken": {
+        "stableId": "M:TrafficLight:transition:t-TrafficLight-3",
+        "source": "s-TrafficLight-Green",
+        "target": "s-TrafficLight-Yellow"
+      },
+      "exitedStates": ["s-TrafficLight-Green"],
+      "enteredStates": ["s-TrafficLight-Yellow"],
+      "configBefore": ["s-TrafficLight-Green"],
+      "configAfter": ["s-TrafficLight-Yellow"]
+    },
+    {
+      "traceId": 4,
+      "kind": "timer_fired",
+      "virtualClockMs": 39000,
+      "eventReceived": { "name": "__timer__:ps-timer-TrafficLight-5" },
+      "transitionTaken": {
+        "stableId": "M:TrafficLight:transition:t-TrafficLight-4",
+        "source": "s-TrafficLight-Yellow",
+        "target": "s-TrafficLight-Red"
+      },
+      "exitedStates": ["s-TrafficLight-Yellow"],
+      "enteredStates": ["s-TrafficLight-Red"],
+      "configBefore": ["s-TrafficLight-Yellow"],
+      "configAfter": ["s-TrafficLight-Red"]
+    },
+    {
+      "traceId": 5,
       "kind": "dispatched",
       "virtualClockMs": 39004,
       "eventReceived": { "name": "OVERRIDE", "stableId": "M:TrafficLight:event:OVERRIDE" },
@@ -43,12 +95,12 @@
       "configAfter": ["s-TrafficLight-Manual"]
     },
     {
-      "traceId": 3,
+      "traceId": 6,
       "kind": "dispatched",
       "virtualClockMs": 39004,
       "eventReceived": { "name": "RESUME", "stableId": "M:TrafficLight:event:RESUME" },
       "transitionTaken": {
-        "stableId": "M:TrafficLight:transition:t-TrafficLight-1",
+        "stableId": "M:TrafficLight:transition:t-TrafficLight-5",
         "source": "s-TrafficLight-Manual",
         "target": "s-TrafficLight-HAuto"
       },

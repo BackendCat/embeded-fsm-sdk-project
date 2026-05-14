@@ -454,6 +454,7 @@ dependencies = [
  "fsm-analyzer",
  "fsm-diagnostics",
  "fsm-ir",
+ "fsm-parser",
  "insta",
  "serde",
  "serde_json",

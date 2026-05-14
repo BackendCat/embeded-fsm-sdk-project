@@ -21,3 +21,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+# Used only by `examples/capture_trace.rs` — a scratch helper for refreshing
+# example traces after simulator-semantic changes.
+fsm-parser = { path = "../fsm-parser" }
