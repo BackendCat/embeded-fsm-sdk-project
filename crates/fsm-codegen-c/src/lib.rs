@@ -53,6 +53,7 @@ pub mod config;
 pub mod emit;
 pub mod expr;
 pub mod parent_table;
+pub mod region_layout;
 pub mod state_index;
 pub mod stmt;
 
@@ -60,4 +61,5 @@ pub use budget::{compute_budget, MemoryBudget};
 pub use config::{CodegenConfig, DispatchStrategy, OverflowPolicy, TargetProfile};
 pub use emit::{emit, EmitError, EmittedFile, EmittedFiles, FileRole};
 pub use parent_table::{build_parent_table, ParentTable};
+pub use region_layout::{build_region_layout, RegionLayout};
 pub use state_index::{build_state_index, StateIndex, ROOT_SENTINEL};

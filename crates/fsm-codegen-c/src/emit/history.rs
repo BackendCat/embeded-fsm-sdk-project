@@ -39,8 +39,12 @@ pub fn emit_history_helpers(ctx: &MachineEmitCtx<'_>) -> String {
             "    /* Record current leaf for history {hp} */\n",
             hp = hp_rec.dsl_name,
         ));
+        // History recording targets the composite's primary slot. v1.0
+        // does not yet support history across parallel regions; for
+        // non-parallel composites the relevant leaf always lives in
+        // `_active[0]`.
         s.push_str(&format!(
-            "    m->_history_{name} = m->_state;\n",
+            "    m->_history_{name} = m->_active[0];\n",
             name = rec.c_name,
         ));
         s.push_str("}\n\n");
@@ -68,7 +72,7 @@ pub fn emit_history_helpers(ctx: &MachineEmitCtx<'_>) -> String {
         } else {
             s.push_str("    /* default_target missing — analyzer should have rejected */\n");
         }
-        s.push_str("    m->_state = restore;\n");
+        s.push_str("    m->_active[0] = restore;\n");
         s.push_str("}\n\n");
     }
     s

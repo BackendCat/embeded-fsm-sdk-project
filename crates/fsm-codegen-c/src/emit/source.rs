@@ -87,32 +87,74 @@ fn emit_init(ctx: &MachineEmitCtx<'_>) -> String {
         "void {prefix}_init({prefix}_t *m) {{\n",
         prefix = prefix,
     ));
+    s.push_str("    memset(m, 0, sizeof(*m));\n");
+    s.push_str("    m->_active_count = 1;\n");
     s.push_str(&format!(
-        "    memset(m, 0, sizeof(*m));\n    m->_state = {macro}_STATE_ROOT;\n",
+        "    m->_active[0] = {macro}_STATE_ROOT;\n",
         macro = macro_prefix,
     ));
-    // Determine the initial leaf for the root region — follow `initial`
-    // through the chain of pseudo / composite states.
-    if let Some(start_rec) = walk_initial(ctx) {
+
+    // Expand the root region's initial pseudo into a list of leaves the
+    // runtime starts out in. For a non-parallel path this is a single
+    // leaf; if the path crosses a parallel state, every region of that
+    // parallel contributes one leaf (Doc 08 §2.3).
+    let mut entries: Vec<EntryRec> = Vec::new();
+    if let Some(start_idx) = ctx.index.records[0].initial_child {
+        let chain = resolve_initial_chain(ctx, start_idx);
+        for chain_state in &chain {
+            expand_initial_to_leaves(ctx, *chain_state, &mut entries);
+        }
+    }
+
+    // Emit entry actions for every state along the initial path (composites
+    // / parallels first, then the leaf), and write each leaf into its
+    // assigned `_active[]` slot. We dedupe via `entered` to avoid emitting
+    // the same entry function twice when the same composite is on multiple
+    // chain paths.
+    let mut entered: std::collections::BTreeSet<u8> = std::collections::BTreeSet::new();
+    let mut leaf_count: u8 = 0;
+    for e in &entries {
+        for anc in &e.ancestors {
+            if !entered.insert(*anc) {
+                continue;
+            }
+            let rec = ctx.index.get(*anc);
+            if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
+                s.push_str(&format!(
+                    "    {prefix}_entry_{name}(m);\n",
+                    prefix = prefix,
+                    name = rec.c_name,
+                ));
+            }
+        }
+        let leaf = ctx.index.get(e.leaf);
+        let slot = ctx.layout.slot(e.leaf);
         s.push_str(&format!(
-            "    m->_state = {macro}_STATE_{name};\n",
+            "    m->_active[{slot}] = {macro}_STATE_{name};\n",
             macro = macro_prefix,
-            name = start_rec.c_name,
+            name = leaf.c_name,
+            slot = slot,
         ));
-        // Final states have no user-supplied entry action (matches
-        // `impl_header.rs` and the dispatch emitters).
-        if start_rec.kind != StateRecordKind::Final {
+        if leaf.kind.is_active_at_rest() && leaf.kind != StateRecordKind::Final {
             s.push_str(&format!(
                 "    {prefix}_entry_{name}(m);\n",
                 prefix = prefix,
-                name = start_rec.c_name,
+                name = leaf.c_name,
             ));
         }
+        leaf_count += 1;
     }
-    // Start any timers owned by the initial state (best-effort — full
-    // start-on-entry happens through the user's entry handler if needed).
+
+    if leaf_count > 1 {
+        s.push_str(&format!("    m->_active_count = {};\n", leaf_count));
+    }
+
+    // Start any timers owned by states entered during init.
     for t in timer::collect_timers(ctx) {
-        if Some(t.owner_state) == walk_initial(ctx).map(|r| ctx.index.lookup(&r.ir_id).unwrap()) {
+        let owned = entries
+            .iter()
+            .any(|e| e.leaf == t.owner_state || e.ancestors.contains(&t.owner_state));
+        if owned {
             s.push_str(&format!(
                 "    m->_timer_{field}_remaining_ms = {dur}u;\n",
                 field = t.field_name,
@@ -124,46 +166,171 @@ fn emit_init(ctx: &MachineEmitCtx<'_>) -> String {
     s
 }
 
-fn emit_current_state(ctx: &MachineEmitCtx<'_>) -> String {
-    let prefix = ctx.type_prefix();
-    format!(
-        "{prefix}_StateId_t {prefix}_current_state(const {prefix}_t *m) {{\n    return m->_state;\n}}\n",
-        prefix = prefix,
-    )
+/// One leaf entered during init. `ancestors` lists the path of composites /
+/// parallels traversed on the way down (root-first, NOT including the
+/// leaf itself).
+struct EntryRec {
+    leaf: u8,
+    ancestors: Vec<u8>,
 }
 
-/// Follow the root region's initial chain to the first active-at-rest
-/// state. Used by `Motor_init` to set the initial state.
-fn walk_initial<'a>(ctx: &'a MachineEmitCtx<'a>) -> Option<&'a crate::state_index::StateRecord> {
-    // Start at the root sentinel's initial child, then walk through
-    // initial pseudos.
-    let root_init = ctx.index.records[0].initial_child?;
-    let mut cur = root_init;
+/// Resolve a chain of Initial pseudo-states down to the first active-at-
+/// rest state ID. Returns the resulting chain (length 1 unless the IR
+/// has a degenerate Initial→Initial path, which the analyzer rejects).
+fn resolve_initial_chain(ctx: &MachineEmitCtx<'_>, mut cur: u8) -> Vec<u8> {
+    let mut out = Vec::new();
     let mut bounce = 0;
     while bounce < 32 {
         bounce += 1;
         let rec = ctx.index.get(cur);
         match rec.kind {
-            StateRecordKind::Simple
-            | StateRecordKind::Composite
-            | StateRecordKind::Parallel
-            | StateRecordKind::Submachine => return Some(rec),
-            StateRecordKind::Final => return Some(rec),
             StateRecordKind::Initial => {
-                // Look up the actual InitialPseudo from the IR to follow
-                // its target.
                 if let Some(target_id) = find_initial_target(ctx.machine, &rec.ir_id) {
                     if let Some(next) = ctx.index.lookup(&target_id) {
                         cur = next;
                         continue;
                     }
                 }
-                return None;
+                break;
             }
-            _ => return Some(rec),
+            _ => {
+                out.push(cur);
+                break;
+            }
         }
     }
-    None
+    out
+}
+
+/// Expand a state into the list of leaf-active states the runtime is in at
+/// rest. A simple/final state yields itself; a composite yields its
+/// initial-chain's leaves (recursive); a parallel yields one leaf per
+/// region (recursive). Each emitted `EntryRec` carries the chain of
+/// composites / parallels that needed to be entered to reach the leaf.
+fn expand_initial_to_leaves(ctx: &MachineEmitCtx<'_>, state_idx: u8, out: &mut Vec<EntryRec>) {
+    expand_recurse(ctx, state_idx, &mut Vec::new(), out);
+}
+
+fn expand_recurse(
+    ctx: &MachineEmitCtx<'_>,
+    state_idx: u8,
+    ancestors: &mut Vec<u8>,
+    out: &mut Vec<EntryRec>,
+) {
+    let rec = ctx.index.get(state_idx);
+    match rec.kind {
+        StateRecordKind::Simple | StateRecordKind::Final | StateRecordKind::Submachine => {
+            out.push(EntryRec {
+                leaf: state_idx,
+                ancestors: ancestors.clone(),
+            });
+        }
+        StateRecordKind::Composite => {
+            ancestors.push(state_idx);
+            // A composite has at most one region in v1.0; follow its
+            // initial chain into the deeper structure.
+            let composite_node = find_composite(ctx.machine, &rec.ir_id);
+            if let Some(c) = composite_node {
+                if let Some(region) = c.regions.first() {
+                    if let Some(init_idx) = ctx.index.lookup(&region.initial) {
+                        let chain = resolve_initial_chain(ctx, init_idx);
+                        for child in chain {
+                            expand_recurse(ctx, child, ancestors, out);
+                        }
+                    }
+                }
+            }
+            ancestors.pop();
+        }
+        StateRecordKind::Parallel => {
+            ancestors.push(state_idx);
+            let parallel_node = find_parallel(ctx.machine, &rec.ir_id);
+            if let Some(p) = parallel_node {
+                for region in &p.regions {
+                    if let Some(init_idx) = ctx.index.lookup(&region.initial) {
+                        let chain = resolve_initial_chain(ctx, init_idx);
+                        for child in chain {
+                            expand_recurse(ctx, child, ancestors, out);
+                        }
+                    }
+                }
+            }
+            ancestors.pop();
+        }
+        _ => {
+            // Pseudo-state — analyzer should have lowered this to a real
+            // target by now.
+        }
+    }
+}
+
+fn find_composite<'a>(
+    m: &'a fsm_ir::MachineObject,
+    id: &str,
+) -> Option<&'a fsm_ir::CompositeState> {
+    fn walk<'a>(states: &'a [StateNode], id: &str) -> Option<&'a fsm_ir::CompositeState> {
+        for s in states {
+            match s {
+                StateNode::Composite(c) => {
+                    if c.id == id {
+                        return Some(c);
+                    }
+                    for r in &c.regions {
+                        if let Some(hit) = walk(&r.states, id) {
+                            return Some(hit);
+                        }
+                    }
+                }
+                StateNode::Parallel(p) => {
+                    for r in &p.regions {
+                        if let Some(hit) = walk(&r.states, id) {
+                            return Some(hit);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    walk(&m.root.states, id)
+}
+
+fn find_parallel<'a>(m: &'a fsm_ir::MachineObject, id: &str) -> Option<&'a fsm_ir::ParallelState> {
+    fn walk<'a>(states: &'a [StateNode], id: &str) -> Option<&'a fsm_ir::ParallelState> {
+        for s in states {
+            match s {
+                StateNode::Parallel(p) => {
+                    if p.id == id {
+                        return Some(p);
+                    }
+                    for r in &p.regions {
+                        if let Some(hit) = walk(&r.states, id) {
+                            return Some(hit);
+                        }
+                    }
+                }
+                StateNode::Composite(c) => {
+                    for r in &c.regions {
+                        if let Some(hit) = walk(&r.states, id) {
+                            return Some(hit);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    walk(&m.root.states, id)
+}
+
+fn emit_current_state(ctx: &MachineEmitCtx<'_>) -> String {
+    let prefix = ctx.type_prefix();
+    format!(
+        "{prefix}_StateId_t {prefix}_current_state(const {prefix}_t *m) {{\n    return m->_active[0];\n}}\n",
+        prefix = prefix,
+    )
 }
 
 fn find_initial_target(machine: &fsm_ir::MachineObject, ir_id: &str) -> Option<String> {
@@ -195,28 +362,6 @@ fn find_initial_target(machine: &fsm_ir::MachineObject, ir_id: &str) -> Option<S
         None
     }
     walk(&machine.root.states, ir_id)
-}
-
-/// Public helper: count parallel-region state slots needed in the machine
-/// struct (each region of each parallel state stores one StateId_t).
-pub fn count_parallel_region_slots(machine: &fsm_ir::MachineObject) -> usize {
-    fn walk(states: &[StateNode], acc: &mut usize) {
-        for s in states {
-            if let StateNode::Parallel(p) = s {
-                *acc += p.regions.len();
-                for r in &p.regions {
-                    walk(&r.states, acc);
-                }
-            } else if let StateNode::Composite(c) = s {
-                for r in &c.regions {
-                    walk(&r.states, acc);
-                }
-            }
-        }
-    }
-    let mut acc = 0;
-    walk(&machine.root.states, &mut acc);
-    acc
 }
 
 /// Public helper: collect every timer's struct-field name in document

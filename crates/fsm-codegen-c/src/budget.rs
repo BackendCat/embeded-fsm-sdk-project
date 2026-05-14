@@ -64,10 +64,11 @@ pub fn compute_machine_budget(machine: &MachineObject, config: &CodegenConfig) -
     let timer_bytes = count_timers(machine) * 4; // uint32_t per timer
     let max_completion_depth = state_depth(&index);
 
-    // Internal bookkeeping: _state, _queue_head, _queue_tail, _queue_count,
-    // _completion_depth, parent state for parallel — five u8 fields plus
-    // any region-specific state field.
-    let bookkeeping = 5 + count_parallel_regions(machine);
+    // Internal bookkeeping: `_active[]` (`MAX_PARALLEL_REGIONS` u8 slots
+    // — one per simultaneously active leaf), `_active_count` (u8),
+    // `_queue_head`, `_queue_tail`, `_queue_count`, `_completion_depth` —
+    // four u8 fixed fields plus the variable-size active-leaf array.
+    let bookkeeping = 5 + count_active_slots(machine);
     let sizeof_machine = sizeof_context + queue_bytes + history_bytes + timer_bytes + bookkeeping;
 
     let estimated_rom_bytes = estimate_rom(&index, machine);
@@ -155,33 +156,11 @@ fn count_timers(machine: &MachineObject) -> usize {
     acc
 }
 
-fn count_parallel_regions(machine: &MachineObject) -> usize {
-    fn count_state(s: &StateNode, acc: &mut usize) {
-        match s {
-            StateNode::Parallel(ps) => {
-                // Each region needs its own state field at runtime.
-                *acc += ps.regions.len();
-                for r in &ps.regions {
-                    for s in &r.states {
-                        count_state(s, acc);
-                    }
-                }
-            }
-            StateNode::Composite(cs) => {
-                for r in &cs.regions {
-                    for s in &r.states {
-                        count_state(s, acc);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut acc = 0;
-    for s in &machine.root.states {
-        count_state(s, &mut acc);
-    }
-    acc
+fn count_active_slots(machine: &MachineObject) -> usize {
+    // Number of `_active[]` slots. Reuses the same conservative analysis
+    // `region_layout::compute_max_active_leaves` performs.
+    let idx = build_state_index(machine);
+    crate::region_layout::build_region_layout(machine, &idx).max_parallel_regions as usize
 }
 
 fn state_depth(index: &StateIndex) -> usize {

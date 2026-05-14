@@ -204,19 +204,16 @@ fn emit_machine_struct(ctx: &MachineEmitCtx<'_>) -> String {
         "    {prefix}_Context_t context;\n",
         prefix = prefix
     ));
+    // B-11 active-leaf array: slot 0 holds the singleton non-parallel
+    // leaf; slots 1..N hold per-region leaves inside parallel states.
+    // `_active_count` tracks how many slots are currently valid (1 in
+    // non-parallel mode, region-count when a parallel state is active).
     s.push_str(&format!(
-        "    {prefix}_StateId_t _state;\n",
-        prefix = prefix
+        "    {prefix}_StateId_t _active[{macro}_MAX_PARALLEL_REGIONS];\n",
+        prefix = prefix,
+        macro = macro_prefix,
     ));
-    // One parallel-region state slot per parallel region in the machine.
-    let region_count = crate::emit::source::count_parallel_region_slots(ctx.machine);
-    for i in 0..region_count {
-        s.push_str(&format!(
-            "    {prefix}_StateId_t _state_region_{i};\n",
-            prefix = prefix,
-            i = i,
-        ));
-    }
+    s.push_str("    uint8_t _active_count;\n");
     // History slots.
     for (slot_idx, rec) in ctx
         .index
