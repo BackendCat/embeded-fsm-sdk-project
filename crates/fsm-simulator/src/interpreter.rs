@@ -18,7 +18,7 @@
 //! 2. **Re-arm timers on entry, cancel on exit.** Pure book-keeping; no
 //!    cross-cutting timer-state required.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use fsm_ir::{
@@ -38,13 +38,20 @@ use crate::runtime::{
 };
 use crate::trace::{EventReceivedRecord, StepKind, StepRecord, TransitionTakenRecord};
 
+/// Maximum ancestor-walk depth before we treat the parent table as cyclic
+/// and bail out with an internal error. UML statecharts in practice nest
+/// ≤15 levels — see Doc 08 §2.1 (no normative cap, but every realistic
+/// model is far shallower). 256 covers the wildest legitimate nest and
+/// still detects malformed-IR cycles before they blow the stack.
+const MAX_STATE_DEPTH: u32 = 256;
+
 /// Options for [`Interpreter::init`].
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitOptions {
     pub machine_name: String,
     #[serde(default)]
-    pub initial_context: Option<HashMap<String, Value>>,
+    pub initial_context: Option<BTreeMap<String, Value>>,
     #[serde(default)]
     pub virtual_clock_start_ms: u64,
 }
@@ -65,6 +72,13 @@ pub enum StepError {
     QueueOverflow(#[from] QueueError),
     #[error("eval: {0}")]
     Eval(#[from] EvalError),
+    /// Guard expression failed at runtime (overflow, type mismatch, missing
+    /// extern, etc). Distinguished from `Eval` (which covers action-language
+    /// failures) so callers can report "transition guard errored" cleanly.
+    /// Prior audit P1-7 / Audit D §"Anti-patterns" 1: pre-fix sites silently
+    /// downgraded guard errors to `false`, masking real defects.
+    #[error("guard evaluation: {0}")]
+    GuardEval(EvalError),
     #[error("stmt: {0}")]
     Stmt(#[from] StmtError),
     #[error(
@@ -207,7 +221,7 @@ impl Interpreter {
     pub fn dispatch_with_payload(
         &mut self,
         event_name: &str,
-        payload: Option<HashMap<String, Value>>,
+        payload: Option<BTreeMap<String, Value>>,
     ) -> Result<Vec<StepRecord>, StepError> {
         let rt = self.runtime.as_mut().ok_or(StepError::NotInitialized)?;
         let event_id = rt
@@ -252,7 +266,7 @@ impl Interpreter {
     pub fn raise_with_payload(
         &mut self,
         event_name: &str,
-        payload: Option<HashMap<String, Value>>,
+        payload: Option<BTreeMap<String, Value>>,
     ) -> Result<Vec<StepRecord>, StepError> {
         let rt = self.runtime.as_mut().ok_or(StepError::NotInitialized)?;
         let event_id = rt
@@ -364,11 +378,15 @@ impl Interpreter {
         ordered
     }
 
-    pub fn context(&self) -> &HashMap<String, Value> {
+    /// Borrow of the live context map. Errors with [`StepError::NotInitialized`]
+    /// if [`Interpreter::init`] has not been called yet — prior audit D P1-A
+    /// (the three `expect("not initialized")` sites in this file). Embedders
+    /// reading state before init now get a typed error instead of a panic.
+    pub fn context(&self) -> Result<&BTreeMap<String, Value>, StepError> {
         self.runtime
             .as_ref()
             .map(|r| &r.context)
-            .expect("interpreter must be initialized before reading context")
+            .ok_or(StepError::NotInitialized)
     }
 
     pub fn virtual_clock_ms(&self) -> u64 {
@@ -378,9 +396,13 @@ impl Interpreter {
             .unwrap_or(0)
     }
 
-    pub fn snapshot(&self) -> InterpreterSnapshot {
-        let rt = self.runtime.as_ref().expect("not initialized");
-        InterpreterSnapshot {
+    /// Snapshot the runtime for replay / time-travel. Errors with
+    /// [`StepError::NotInitialized`] if the interpreter has not been initialised.
+    /// Pre-fix this site panicked — embedders calling `snapshot()` before
+    /// `init()` aborted the process.
+    pub fn snapshot(&self) -> Result<InterpreterSnapshot, StepError> {
+        let rt = self.runtime.as_ref().ok_or(StepError::NotInitialized)?;
+        Ok(InterpreterSnapshot {
             active_states: rt.active_states.clone(),
             history: rt.history.clone(),
             defer_set: rt.defer_set.clone(),
@@ -388,11 +410,15 @@ impl Interpreter {
             context: rt.context.clone(),
             next_trace_id: rt.next_trace_id,
             initialized: rt.initialized,
-        }
+        })
     }
 
-    pub fn restore(&mut self, snap: InterpreterSnapshot) {
-        let rt = self.runtime.as_mut().expect("not initialized");
+    /// Restore from a previously captured snapshot. Errors with
+    /// [`StepError::NotInitialized`] if the interpreter has not been initialised
+    /// (call `init` first to instantiate the runtime; `restore` then replaces
+    /// the runtime's mutable state with the snapshot).
+    pub fn restore(&mut self, snap: InterpreterSnapshot) -> Result<(), StepError> {
+        let rt = self.runtime.as_mut().ok_or(StepError::NotInitialized)?;
         rt.active_states = snap.active_states;
         rt.history = snap.history;
         rt.defer_set = snap.defer_set;
@@ -400,6 +426,7 @@ impl Interpreter {
         rt.context = snap.context;
         rt.next_trace_id = snap.next_trace_id;
         rt.initialized = snap.initialized;
+        Ok(())
     }
 
     /// Drain the internal queue, processing each event through a single RTC
@@ -572,21 +599,24 @@ fn select_transitions(
         if let Some(node) = rt.machine.node(source_state) {
             if let Some(t) = node.transitions.iter().find(|t| &t.id == transition_id) {
                 // Guard still must pass (timer transitions may have guards).
-                if t.guard
-                    .as_ref()
-                    .map(|g| {
-                        eval_guard(
-                            g,
-                            &EvalCtx {
-                                context: &rt.context,
-                                payload: rt.current_payload.as_ref(),
-                                externs,
-                            },
-                        )
-                        .unwrap_or(false)
-                    })
-                    .unwrap_or(true)
-                {
+                // No guard ⇒ fire unconditionally; Ok(true) ⇒ fire; Ok(false)
+                // ⇒ skip; Err ⇒ propagate as `StepError::GuardEval` (was
+                // silently `false` pre-fix — audit P1-7 / D anti-pattern 1).
+                let fire = match &t.guard {
+                    None => true,
+                    Some(g) => {
+                        let evctx = EvalCtx {
+                            context: &rt.context,
+                            payload: rt.current_payload.as_ref(),
+                            externs,
+                        };
+                        match eval_guard(g, &evctx) {
+                            Ok(b) => b,
+                            Err(e) => return Err(StepError::GuardEval(e)),
+                        }
+                    }
+                };
+                if fire {
                     selected.push(t.clone());
                 }
             }
@@ -662,8 +692,12 @@ fn select_transitions(
                         payload: rt.current_payload.as_ref(),
                         externs,
                     };
-                    if !eval_guard(g, &evctx).unwrap_or(false) {
-                        continue;
+                    // Ok(true) ⇒ candidate; Ok(false) ⇒ skip; Err ⇒ propagate
+                    // (was silently `false` pre-fix — audit P1-7).
+                    match eval_guard(g, &evctx) {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(e) => return Err(StepError::GuardEval(e)),
                     }
                 }
                 candidates.push(t);
@@ -686,7 +720,7 @@ fn select_transitions(
             // empty.
             if !matches!(t.kind, TransitionKind::Internal | TransitionKind::Local) {
                 let lca = effective_lca(&t, &rt.machine);
-                for ext in exit_set(&rt.machine, &t.source, &lca) {
+                for ext in exit_set(&rt.machine, &t.source, &lca)? {
                     done.insert(ext);
                 }
             }
@@ -699,11 +733,20 @@ fn select_transitions(
 
 /// Compute exit set: every state from `source` walking up the parent chain
 /// until we reach (but do not include) `lca`. Innermost-first ordering.
-fn exit_set(idx: &MachineIndex, source: &str, lca: &str) -> Vec<String> {
+///
+/// Defence-in-depth against malformed IR with a cyclic parent table — at
+/// most [`MAX_STATE_DEPTH`] iterations before we bail out with
+/// `StepError::Internal`. UML statecharts in practice nest ≤15 levels.
+fn exit_set(idx: &MachineIndex, source: &str, lca: &str) -> Result<Vec<String>, StepError> {
     let mut out = Vec::new();
     let mut cur = source.to_string();
-    let mut guard = 0;
-    while cur != lca && guard < 1024 {
+    let mut guard: u32 = 0;
+    while cur != lca {
+        if guard >= MAX_STATE_DEPTH {
+            return Err(StepError::Internal(
+                "cycle in parent table — malformed IR".into(),
+            ));
+        }
         guard += 1;
         // For exit_set we only emit STATE ids, not regions.
         if idx.nodes.contains_key(&cur) {
@@ -718,16 +761,23 @@ fn exit_set(idx: &MachineIndex, source: &str, lca: &str) -> Vec<String> {
             None => break,
         }
     }
-    out
+    Ok(out)
 }
 
 /// Walk ancestors of `target` from outer to inner, stopping at `lca`. Yields
 /// state IDs only (no regions), outermost-first.
-fn entry_path(idx: &MachineIndex, lca: &str, target: &str) -> Vec<String> {
+///
+/// Same `MAX_STATE_DEPTH` cycle-detection contract as [`exit_set`].
+fn entry_path(idx: &MachineIndex, lca: &str, target: &str) -> Result<Vec<String>, StepError> {
     let mut path: Vec<String> = Vec::new();
     let mut cur = target.to_string();
-    let mut guard = 0;
-    while cur != lca && guard < 1024 {
+    let mut guard: u32 = 0;
+    while cur != lca {
+        if guard >= MAX_STATE_DEPTH {
+            return Err(StepError::Internal(
+                "cycle in parent table — malformed IR".into(),
+            ));
+        }
         guard += 1;
         if idx.nodes.contains_key(&cur) {
             path.push(cur.clone());
@@ -742,7 +792,7 @@ fn entry_path(idx: &MachineIndex, lca: &str, target: &str) -> Vec<String> {
         }
     }
     path.reverse();
-    path
+    Ok(path)
 }
 
 /// Execute one transition's full exit / action / entry sequence.
@@ -766,7 +816,7 @@ fn execute_one_transition(
     }
 
     let lca = effective_lca(t, &rt.machine);
-    let exits = exit_set(&rt.machine, &t.source, &lca);
+    let exits = exit_set(&rt.machine, &t.source, &lca)?;
 
     // 1) Record history BEFORE running exit actions. Doc 08 §6.4.
     record_history_before_exit(rt, &exits);
@@ -819,7 +869,7 @@ fn execute_one_transition(
     let resolved = resolve_target(rt, &t.target, externs, outcome)?;
     for tgt in resolved {
         // 5) Entry path from LCA down to `tgt`, then expand initial substates.
-        let path = entry_path(&rt.machine.clone(), &lca, &tgt);
+        let path = entry_path(&rt.machine.clone(), &lca, &tgt)?;
         for sid in &path {
             run_entry(rt, sid, outcome, externs)?;
             entered_all.push(sid.clone());
@@ -1045,9 +1095,15 @@ fn resolve_target(
                     else_branch = Some(b.clone());
                     continue;
                 }
-                if eval_guard(&b.guard, &evctx).unwrap_or(false) {
-                    pick = Some(b.clone());
-                    break;
+                // Ok(true) ⇒ pick; Ok(false) ⇒ try next; Err ⇒ propagate
+                // (was silently `false` pre-fix — audit P1-7).
+                match eval_guard(&b.guard, &evctx) {
+                    Ok(true) => {
+                        pick = Some(b.clone());
+                        break;
+                    }
+                    Ok(false) => continue,
+                    Err(e) => return Err(StepError::GuardEval(e)),
                 }
             }
             let branch = pick.or(else_branch).ok_or_else(|| {
@@ -1130,7 +1186,7 @@ fn enter_state_path(
     // composite states whose own initial expansion runs).
     let resolved = resolve_target(rt, target, externs, outcome)?;
     for tgt in resolved {
-        let path = entry_path(&rt.machine.clone(), lca, &tgt);
+        let path = entry_path(&rt.machine.clone(), lca, &tgt)?;
         for sid in &path {
             run_entry(rt, sid, outcome, externs)?;
             entered_all.push(sid.clone());
@@ -1241,11 +1297,17 @@ fn release_deferred(rt: &mut RuntimeState) -> Result<(), StepError> {
 
 /// Build a "Parent.Child" dot path for a state ID, recursing up through
 /// states (skipping regions).
+///
+/// Display-only path-builder, so a cyclic parent table (malformed IR) is
+/// truncated at [`MAX_STATE_DEPTH`] rather than returned as an error — the
+/// generated display string would be visibly broken anyway, and the
+/// upstream callers (`current_states_named`) intentionally tolerate
+/// partial-init state.
 fn dot_path(rt: &RuntimeState, state_id: &str) -> String {
     let mut names: Vec<String> = Vec::new();
     let mut cur = state_id.to_string();
-    let mut guard = 0;
-    while guard < 1024 {
+    let mut guard: u32 = 0;
+    while guard < MAX_STATE_DEPTH {
         guard += 1;
         let Some(node) = rt.machine.node(&cur) else {
             break;

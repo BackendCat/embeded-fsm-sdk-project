@@ -4,7 +4,7 @@
 //! `M_tick`), and completion (synthetic when a `final` state is reached, Doc
 //! 08 §9 / Doc 00 §7.6).
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::value::Value;
 
@@ -14,8 +14,9 @@ use super::value::Value;
 pub struct QueuedEvent {
     pub kind: EventKind,
     /// Map of payload-field name → value. `None` for completion / timer
-    /// events that do not carry a payload.
-    pub payload: Option<HashMap<String, Value>>,
+    /// events that do not carry a payload. `BTreeMap` so trace records
+    /// emit payload entries in deterministic lexical order.
+    pub payload: Option<BTreeMap<String, Value>>,
 }
 
 /// Three concrete event kinds.

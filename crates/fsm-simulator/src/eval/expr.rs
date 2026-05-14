@@ -4,7 +4,7 @@
 //! through [`eval_expr`]. The two languages overlap heavily so they share
 //! arithmetic helpers in [`super::arith`].
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use fsm_ir::{BinaryOp, CmpOp, Expr, FieldRef, GuardExpr, GuardOperand, UnaryOp};
 use thiserror::Error;
@@ -29,9 +29,13 @@ pub enum EvalError {
 /// fields and the optional current event payload are passed by reference so
 /// guard evaluation cannot mutate them (Doc 08 §4.3 — guards MUST NOT have
 /// side effects).
+///
+/// Maps are `BTreeMap` so that any caller-side iteration during eval is in
+/// deterministic key order — matches the wire-format determinism contract
+/// enforced for snapshot / trace serialisation.
 pub struct EvalCtx<'a> {
-    pub context: &'a HashMap<String, Value>,
-    pub payload: Option<&'a HashMap<String, Value>>,
+    pub context: &'a BTreeMap<String, Value>,
+    pub payload: Option<&'a BTreeMap<String, Value>>,
     pub externs: &'a ExternRegistry,
 }
 

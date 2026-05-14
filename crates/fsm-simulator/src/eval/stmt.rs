@@ -2,10 +2,11 @@
 //!
 //! Statements mutate the runtime context, enqueue events, or invoke externs.
 //! The action emitter MUST be deterministic: the implementation does not
-//! introspect iteration order of `HashMap`, all loops over statements use
-//! `Vec`.
+//! introspect iteration order of `BTreeMap`, all loops over statements use
+//! `Vec`. (`BTreeMap` is keyed-sorted anyway — the determinism contract is
+//! belt-and-braces.)
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use fsm_ir::{Expr, FieldRef, Statement};
 use thiserror::Error;
@@ -57,7 +58,7 @@ pub struct ExecOutcome {
 pub struct StmtCtx<'a> {
     pub machine: &'a MachineIndex,
     pub externs: &'a super::extern_registry::ExternRegistry,
-    pub current_payload: Option<HashMap<String, Value>>,
+    pub current_payload: Option<BTreeMap<String, Value>>,
 }
 
 /// Run a sequence of statements in order. The interpreter passes the live
@@ -206,14 +207,14 @@ fn build_event_payload(
     sctx: &StmtCtx,
     event_id: &str,
     args: &[Expr],
-) -> Result<Option<HashMap<String, Value>>, StmtError> {
+) -> Result<Option<BTreeMap<String, Value>>, StmtError> {
     let evctx = EvalCtx {
         context: &rt.context,
         payload: sctx.current_payload.as_ref(),
         externs: sctx.externs,
     };
     let event = sctx.machine.events_by_id.get(event_id);
-    let mut map = HashMap::new();
+    let mut map = BTreeMap::new();
     if let Some(ev) = event {
         for (i, arg) in args.iter().enumerate() {
             let v = eval_expr(arg, &evctx)?;

@@ -4,7 +4,7 @@
 //! `snapshot()` / `restore()` to replay traces without re-loading the IR
 //! (the IR plus the [`MachineIndex`] is shared via `Arc`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -14,9 +14,12 @@ use super::queue::EventQueue;
 use super::timer::TimerSet;
 use super::value::Value;
 
-/// Map of context-field name → current [`Value`]. Held as a `HashMap` so
-/// `eval` can resolve `ctx.field` without a vector scan.
-pub type ContextValues = HashMap<String, Value>;
+/// Map of context-field name → current [`Value`]. Held as a `BTreeMap` so
+/// every iteration (and every serde serialization) emits keys in sorted
+/// lexicographic order — the wire-format byte-exactness contract in
+/// Doc 13 §11 depends on this. `HashMap` would randomise the order per
+/// process via `RandomState` and break golden-trace replay.
+pub type ContextValues = BTreeMap<String, Value>;
 
 #[derive(Clone, Debug)]
 pub struct RuntimeState {
@@ -28,7 +31,10 @@ pub struct RuntimeState {
     /// For shallow history: stores a single direct-child state ID.
     /// For deep history: stores the path leaf (the simulator reconstructs
     /// the deeper substates by replaying the configuration at exit).
-    pub history: HashMap<String, Vec<String>>,
+    ///
+    /// `BTreeMap` so serialised snapshots are byte-deterministic — see
+    /// `ContextValues` rationale above.
+    pub history: BTreeMap<String, Vec<String>>,
     /// Set of currently deferred events — Doc 08 §10. Keyed by event ID.
     /// Stored in insertion order so release respects FIFO.
     pub defer_set: Vec<String>,
@@ -44,8 +50,9 @@ pub struct RuntimeState {
     /// Auto-incremented step counter; populates `StepRecord.traceId`.
     pub next_trace_id: u64,
     /// Last current event's payload, accessible to action statements via
-    /// `payload.field` references. `None` between steps.
-    pub current_payload: Option<HashMap<String, Value>>,
+    /// `payload.field` references. `None` between steps. `BTreeMap` for
+    /// the same wire-format determinism reason as `context`.
+    pub current_payload: Option<BTreeMap<String, Value>>,
     /// Set of completion events fired without an intervening external event.
     /// Doc 08 §9.4 caps consecutive completions at 100.
     pub completion_run: u32,
@@ -61,7 +68,7 @@ impl RuntimeState {
         Self {
             machine,
             active_states: Vec::new(),
-            history: HashMap::new(),
+            history: BTreeMap::new(),
             defer_set: Vec::new(),
             queue,
             virtual_clock_ms: 0,
@@ -108,10 +115,13 @@ impl RuntimeState {
 /// Snapshot serialisable form — used by `Interpreter::snapshot` /
 /// `Interpreter::restore` for replay support (Doc 13 §8, deferred WS layer,
 /// but the snapshot API is generally useful).
+///
+/// `BTreeMap` (not `HashMap`) so JSON encoding is byte-deterministic across
+/// runs — Doc 13 §11 wire-format contract.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InterpreterSnapshot {
     pub active_states: Vec<String>,
-    pub history: HashMap<String, Vec<String>>,
+    pub history: BTreeMap<String, Vec<String>>,
     pub defer_set: Vec<String>,
     pub virtual_clock_ms: u64,
     pub context: ContextValues,

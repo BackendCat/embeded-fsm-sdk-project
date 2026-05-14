@@ -8,7 +8,7 @@ use fsm_ir::{
     Literal, StateNode, Statement, TransitionKind, Type,
 };
 use fsm_simulator::{eval, runtime::Value, InitOptions, Interpreter};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[test]
 fn field_compare_with_literal() {
@@ -22,7 +22,7 @@ fn field_compare_with_literal() {
             loc: None,
         })),
     };
-    let mut ctx = HashMap::new();
+    let mut ctx = BTreeMap::new();
     ctx.insert("speed".to_string(), Value::I32(7));
     let externs = eval::ExternRegistry::new();
     let evctx = eval::EvalCtx {
@@ -39,7 +39,7 @@ fn extern_call_in_guard_uses_registry() {
         callee: "isSpeedValid".into(),
         args: vec![],
     };
-    let mut ctx = HashMap::new();
+    let mut ctx = BTreeMap::new();
     let mut externs = eval::ExternRegistry::new();
     externs.register("isSpeedValid", |_| Value::Bool(true));
     let evctx = eval::EvalCtx {
@@ -74,7 +74,7 @@ fn and_short_circuits_and_combines() {
             args: vec![],
         }),
     };
-    let mut ctx = HashMap::new();
+    let mut ctx = BTreeMap::new();
     ctx.insert("x".to_string(), Value::I32(5));
     let mut externs = eval::ExternRegistry::new();
     externs.register("always_true", |_| Value::Bool(true));
@@ -148,12 +148,12 @@ fn assign_then_guard_uses_updated_value() {
         recs[0].transition_taken.is_some(),
         "guard should have passed"
     );
-    assert_eq!(interp.context().get("x"), Some(&Value::I32(7)));
+    assert_eq!(interp.context().unwrap().get("x"), Some(&Value::I32(7)));
 }
 
 #[test]
 fn binary_arithmetic_widens_signed() {
-    let ctx = HashMap::new();
+    let ctx = BTreeMap::new();
     let externs = eval::ExternRegistry::new();
     let evctx = eval::EvalCtx {
         context: &ctx,
@@ -315,7 +315,7 @@ fn transition_action_mutates_context() {
         .unwrap();
     interp.dispatch("TICK").unwrap();
     assert_eq!(
-        interp.context().get("n"),
+        interp.context().unwrap().get("n"),
         Some(&Value::I32(1)),
         "action must run: n=0+1=1 expected"
     );

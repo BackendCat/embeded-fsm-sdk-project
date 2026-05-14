@@ -160,9 +160,9 @@ fn snapshot_restore_round_trips() {
             ..Default::default()
         })
         .unwrap();
-    let snap = interp.snapshot();
+    let snap = interp.snapshot().unwrap();
     interp.dispatch("START").unwrap();
     assert_eq!(interp.current_states(), vec!["s-running".to_string()]);
-    interp.restore(snap);
+    interp.restore(snap).unwrap();
     assert_eq!(interp.current_states(), vec!["s-idle".to_string()]);
 }

@@ -27,7 +27,7 @@
 //! }
 //! ```
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -101,8 +101,10 @@ pub struct EventReceivedRecord {
     /// Stable event ID — only present when distinct from `name`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stable_id: Option<String>,
+    /// `BTreeMap` so JSON encoding emits payload fields in sorted order —
+    /// preserves Doc 13 §11 byte-exact wire format under serde.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub payload: Option<HashMap<String, Value>>,
+    pub payload: Option<BTreeMap<String, Value>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -137,9 +139,10 @@ pub struct TraceFile {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitTrace {
-    /// Initial context values keyed by field name.
+    /// Initial context values keyed by field name. `BTreeMap` so the trace
+    /// file's serialised form sorts context keys deterministically.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context: Option<HashMap<String, Value>>,
+    pub context: Option<BTreeMap<String, Value>>,
     /// Initial virtual clock — defaults to 0 if omitted.
     #[serde(default)]
     pub virtual_clock_start_ms: u64,
@@ -154,7 +157,7 @@ pub enum TraceCommand {
     Dispatch {
         event: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        payload: Option<HashMap<String, Value>>,
+        payload: Option<BTreeMap<String, Value>>,
     },
     AdvanceClock {
         #[serde(rename = "deltaMs")]
@@ -163,7 +166,7 @@ pub enum TraceCommand {
     Raise {
         event: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        payload: Option<HashMap<String, Value>>,
+        payload: Option<BTreeMap<String, Value>>,
     },
 }
 
