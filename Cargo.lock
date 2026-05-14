@@ -392,6 +392,10 @@ dependencies = [
  "fsm-analyzer",
  "fsm-diagnostics",
  "fsm-ir",
+ "insta",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
