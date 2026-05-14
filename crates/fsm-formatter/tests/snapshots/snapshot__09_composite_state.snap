@@ -1,0 +1,24 @@
+---
+source: crates/fsm-formatter/tests/snapshot.rs
+assertion_line: 35
+expression: "fmt(\"09_composite_state.fsm\")"
+---
+language fsm 2.0
+
+feature hsm
+
+machine M {
+    initial Operational
+
+    state Operational {
+        initial Normal
+
+        state Normal {
+            on FAULT -> Degraded
+        }
+
+        state Degraded {
+            on RECOVER -> Normal
+        }
+    }
+}

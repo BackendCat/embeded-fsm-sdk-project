@@ -1,0 +1,64 @@
+---
+source: crates/fsm-formatter/tests/snapshot.rs
+assertion_line: 45
+expression: "fmt(\"15_full_example.fsm\")"
+---
+language fsm 2.0
+
+feature hsm
+feature timers
+
+const MAX_RETRIES = 3
+const TIMEOUT_MS = 5000
+
+pure extern can_retry(ctx) : bool
+extern reset_link()
+extern initiate_connect()
+extern set_speed(u16 rpm)
+
+@id("m-device")
+machine Device {
+    context {
+        retries: u8   = 0
+        active : bool = false
+    }
+
+    events {
+        CMD_CONNECT
+        CMD_DISCONNECT
+        LINK_UP
+        LINK_DOWN
+    }
+
+    queue {
+        capacity = 32
+        overflow = drop_oldest
+    }
+
+    initial Disconnected
+
+    state Disconnected {
+        entry : reset_link()
+
+        on CMD_CONNECT -> Connecting
+    }
+
+    state Connecting {
+        entry : initiate_connect()
+
+        after TIMEOUT_MS ms      -> Disconnected
+        on LINK_UP               -> Connected
+        on LINK_DOWN [can_retry] -> Connecting
+        on LINK_DOWN             -> Disconnected
+    }
+
+    state Connected {
+        on LINK_DOWN      -> Disconnected
+        on CMD_DISCONNECT -> Disconnected
+    }
+
+    target C99 {
+        strategy    = switch_based
+        allow_float = false
+    }
+}

@@ -1,0 +1,22 @@
+language fsm 2.0
+
+feature hsm
+feature history
+
+machine M {
+    initial Operational
+
+    state Operational {
+        initial Normal
+
+        shallow_history H { initial Normal }
+
+        state Normal {
+            on FAULT -> Degraded
+        }
+
+        state Degraded {
+            on RECOVER -> H
+        }
+    }
+}

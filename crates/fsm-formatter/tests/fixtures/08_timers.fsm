@@ -1,0 +1,19 @@
+language fsm 2.0
+
+feature timers
+
+machine M {
+    initial Idle
+
+    state Idle {
+        after 1000 ms -> Active
+    }
+
+    state Active {
+        every 100 ms : tick()
+        every 500 ms -> Heartbeat
+        after 5000 ms -> Idle
+    }
+
+    state Heartbeat { }
+}

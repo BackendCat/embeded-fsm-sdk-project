@@ -1,0 +1,18 @@
+---
+source: crates/fsm-formatter/tests/snapshot.rs
+assertion_line: 25
+expression: "fmt(\"02_minimal_machine.fsm\")"
+---
+language fsm 2.0
+
+machine M {
+    initial Idle
+
+    state Idle {
+        on START -> Running
+    }
+
+    state Running {
+        on STOP -> Idle
+    }
+}
