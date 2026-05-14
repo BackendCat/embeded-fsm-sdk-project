@@ -1,19 +1,26 @@
-//! Deferred event codegen — Doc 11 §22.
+//! Deferred event codegen — Doc 11 §22 (parked until v1.1).
 //!
 //! Per-state defer bitmask. Each state lists the events it defers. When
 //! `Motor_dispatch` receives a deferred event, it stores it in a side
 //! buffer rather than processing it. On state change, deferred events
 //! whose new-state mask does not include them are released.
 //!
-//! For v1.0 the implementation is minimal: codegen always emits the defer
-//! mask table (zero for states without defers) so the dispatcher can do an
-//! unconditional bitmask check.
+//! Audit P0-5 option-b (2026-05-14): the v1.0 implementation never had a
+//! working queue — the dispatch path silently dropped events on a defer
+//! hit, contradicting Doc 02 G1 ("no undefined behaviour"). Until the v1.1
+//! queue ships, `defer EVENT` is rejected at analysis time with
+//! FSM-E0903. The mask emitter below is preserved for v1.1 revival but is
+//! not invoked by `source.rs` in v1.0; the `#[allow(dead_code)]` is
+//! deliberate (Doc 00 §6 / §10 follow-up).
+
+#![allow(dead_code)]
 
 use fsm_ir::StateNode;
 
 use super::MachineEmitCtx;
 
-/// Emit `Motor_defer_mask[]` — one bitmask per state.
+/// Emit `Motor_defer_mask[]` — one bitmask per state. Parked: see module
+/// docs.
 pub fn emit_defer_mask(ctx: &MachineEmitCtx<'_>) -> String {
     let prefix = ctx.type_prefix();
     let macro_prefix = ctx.macro_prefix();
