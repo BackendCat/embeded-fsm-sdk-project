@@ -151,17 +151,18 @@ fn lower_machine(
     let features = ctx.lower_features();
 
     // Root region.
-    let initial_name = machine
-        .initial()
-        .and_then(|i| i.target())
-        .unwrap_or_default();
-    let root_states: Vec<StateNode> = ctx.lower_state_children(machine.syntax(), &initial_name);
+    //
+    // Per Doc 09 §5, `region.initial` MUST be the ID of an Initial
+    // pseudo-state node that lives inside `region.states` (Doc 09 §4.4).
+    // `lower_state_children` emits that pseudo-state on the way through and
+    // returns its id so we can wire it up here.
+    let (root_states, root_initial_pseudo_id) = ctx.lower_state_children(machine.syntax());
     let root_loc = ctx.loc(machine.syntax());
     let root = RegionObject {
         id: format!("r-{name}-root"),
         stable_id: None,
         name: format!("{name}__root"),
-        initial: initial_name,
+        initial: root_initial_pseudo_id.unwrap_or_default(),
         states: root_states,
         priority: 0,
         loc: root_loc.clone(),
@@ -594,19 +595,30 @@ impl<'a> LoweringCtx<'a> {
     // -- state lowering ------------------------------------------------------
 
     /// Lower the direct children of `parent` (a machine or a state) into a
-    /// list of [`StateNode`]s.
-    fn lower_state_children(&mut self, parent: &SyntaxNode, _initial: &str) -> Vec<StateNode> {
+    /// list of [`StateNode`]s. Returns the produced state list and the
+    /// pseudo-state ID of the **first** Initial pseudo-state emitted (so the
+    /// caller can plumb it into [`RegionObject::initial`] per Doc 09 §5).
+    /// `None` when the source declared no `initial` keyword in this scope.
+    fn lower_state_children(&mut self, parent: &SyntaxNode) -> (Vec<StateNode>, Option<String>) {
         let mut out = Vec::new();
-        // INITIAL_DECL becomes an InitialPseudo state.
+        let mut initial_pseudo_id: Option<String> = None;
+        // INITIAL_DECL becomes an InitialPseudo state. Its `target` MUST be a
+        // state ID per Doc 09 §4.4, so we translate the AST-level name
+        // ("Idle") into the canonical state ID form ("s-<machine>-Idle")
+        // produced by [`state_target_id`] — the same form transitions use.
         for child in parent.children() {
             match child.kind() {
                 SyntaxKind::INITIAL_DECL => {
                     if let Some(init) = ast::InitialDecl::cast(child.clone()) {
-                        let target = init.target().unwrap_or_default();
+                        let target_name = init.target().unwrap_or_default();
+                        let target_id = state_target_id(self, &target_name);
                         let id = self.next_pseudo_id("initial");
+                        if initial_pseudo_id.is_none() {
+                            initial_pseudo_id = Some(id.clone());
+                        }
                         out.push(StateNode::Initial(InitialPseudo {
                             id,
-                            target,
+                            target: target_id,
                             loc: self.loc(&child),
                         }));
                     }
@@ -646,7 +658,7 @@ impl<'a> LoweringCtx<'a> {
                 _ => {}
             }
         }
-        out
+        (out, initial_pseudo_id)
     }
 
     fn lower_state(&mut self, state: &ast::StateDecl) -> StateNode {
@@ -706,19 +718,15 @@ impl<'a> LoweringCtx<'a> {
         }
         if !nested_states.is_empty() {
             // Composite with implicit region — collect children into one
-            // synthetic region.
-            let inner_initial = state
-                .syntax()
-                .children()
-                .find(|c| c.kind() == SyntaxKind::INITIAL_DECL)
-                .and_then(|n| ast::InitialDecl::cast(n).and_then(|i| i.target()))
-                .unwrap_or_default();
-            let states = self.lower_state_children(state.syntax(), &inner_initial);
+            // synthetic region. Doc 09 §5 requires `region.initial` to be the
+            // ID of an Initial pseudo-state; `lower_state_children` emits it
+            // and returns its id.
+            let (states, inner_initial_pseudo_id) = self.lower_state_children(state.syntax());
             let region = RegionObject {
                 id: format!("r-{}-{name}", self.machine_name),
                 stable_id: None,
                 name: format!("{name}__r"),
-                initial: inner_initial,
+                initial: inner_initial_pseudo_id.unwrap_or_default(),
                 states,
                 priority: 0,
                 loc: self.loc(state.syntax()),
@@ -754,19 +762,15 @@ impl<'a> LoweringCtx<'a> {
         let name = r
             .name()
             .unwrap_or_else(|| format!("__region_{}", self.pseudo_counter));
-        // The region's initial declaration lives under the region's CST.
-        let initial = r
-            .syntax()
-            .children()
-            .find(|c| c.kind() == SyntaxKind::INITIAL_DECL)
-            .and_then(|n| ast::InitialDecl::cast(n).and_then(|i| i.target()))
-            .unwrap_or_default();
-        let states = self.lower_state_children(r.syntax(), &initial);
+        // `region.initial` holds the ID of the Initial pseudo-state (Doc 09
+        // §5). `lower_state_children` emits it inside `states` and gives us
+        // back its id.
+        let (states, initial_pseudo_id) = self.lower_state_children(r.syntax());
         RegionObject {
             id: format!("r-{}-{name}", self.machine_name),
             stable_id: None,
             name,
-            initial,
+            initial: initial_pseudo_id.unwrap_or_default(),
             states,
             priority: 0,
             loc: self.loc(r.syntax()),

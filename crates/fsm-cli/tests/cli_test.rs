@@ -7,15 +7,13 @@ use assert_cmd::Command;
 #[test]
 fn runner_discovers_and_executes_trace_files() {
     // Lay out a self-contained test suite: one .fsm + one .trace pointing
-    // at it. The trace contains no `expected` records, so any actual
-    // simulator output that doesn't error matches.
+    // at it. The trace contains no `expected` records, so the simulator
+    // executes through init without producing a mismatch — the runner
+    // should report `pass:`.
     //
-    // We assert the runner found and executed the trace (it appears in
-    // the summary line). The simulator's verdict for analyzer-lowered IR
-    // is currently an upstream concern (the lowered `region.initial` does
-    // not match the simulator's expected Initial-pseudo-state shape — a
-    // contract mismatch between fsm-analyzer and fsm-simulator that lives
-    // outside this CLI wiring task). The CLI is doing its job either way.
+    // (Before the analyzer↔simulator Initial-pseudo-state contract was
+    // fixed the simulator returned `"root initial is not Initial"` here
+    // and the runner reported `fail:`; that historical caveat is gone.)
     let td = tempfile::tempdir().unwrap();
     let suite = td.path();
 
@@ -55,13 +53,13 @@ machine Simple {
         .unwrap()
         .args(["test"])
         .arg(suite)
-        .assert();
+        .assert()
+        .success();
     let stdout = String::from_utf8_lossy(&assertion.get_output().stdout);
-    // Either pass or fail is acceptable; the runner must report the file
-    // and emit the summary line.
     assert!(
-        stdout.contains("simple.trace"),
-        "expected trace filename in runner output, got:\n{}",
+        stdout.contains("pass:") && stdout.contains("simple.trace"),
+        "expected `pass: …simple.trace` after analyzer↔simulator contract \
+         fix, got:\n{}",
         stdout
     );
     assert!(

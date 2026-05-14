@@ -9,12 +9,21 @@
 //!
 //! When gcc is not on PATH the test prints a skip notice and exits OK so
 //! CI on minimal runners still passes.
+//!
+//! [`golden_simulator_runs_motor`] also covers MVP gate **G6** (simulator
+//! trace match): the same Motor fixture is driven through `parse + analyze
+//! + fsm_simulator::Interpreter` and asserted to flow Idle → Running → Idle
+//! → Faulted on the canonical event sequence. This proves the
+//! analyzer↔simulator IR contract is honoured end-to-end.
 
 use std::fs;
 use std::path::Path;
 use std::process::Command as StdCommand;
 
 use assert_cmd::Command;
+use fsm_analyzer::analyze_with_source;
+use fsm_parser::parse;
+use fsm_simulator::{InitOptions, Interpreter};
 
 const VALID_FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/motor.fsm");
 
@@ -172,4 +181,82 @@ int main(void) { return (int)fsm_hal_clock_now_ms() == 0 ? 0 : 0; }
         "fsm_hal.h failed standalone compile: {}",
         String::from_utf8_lossy(&result.stderr)
     );
+}
+
+/// MVP gate **G6** — simulator-trace match.
+///
+/// Drive the canonical Motor fixture through the in-process simulator and
+/// assert the active-state sequence Idle → Running → Faulted → Idle on the
+/// declared transitions. This is the smoke test that the analyzer's IR is
+/// compatible with the simulator (Doc 09 §4.4 + §5 contract).
+#[test]
+fn golden_simulator_runs_motor() {
+    let src = fs::read_to_string(VALID_FIXTURE).expect("read motor.fsm");
+    let pr = parse(&src);
+    let result = analyze_with_source(&pr, VALID_FIXTURE, &src);
+
+    let errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == fsm_diagnostics::Severity::Error)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "analyzer reported errors on motor.fsm: {:?}",
+        errors
+    );
+    let ir = result.ir.expect("ir produced");
+
+    let mut interp = Interpreter::new(&ir).expect("build interpreter");
+    // The analyzer's v1.0 lowering does not yet emit guard expressions on
+    // transitions, so the `[can_start]` annotation in motor.fsm has no
+    // effect on the lowered IR — every transition fires unconditionally.
+    // Once guard lowering ships, register `ex-Motor-can_start` via
+    // `interp.externs_mut().register(...)` to drive deterministic outcomes.
+    let records = interp
+        .init(InitOptions {
+            machine_name: "Motor".into(),
+            ..Default::default()
+        })
+        .expect("init must succeed — proves Doc 09 §4.4/§5 contract is honoured");
+
+    assert!(
+        records
+            .iter()
+            .any(|r| r.config_after.iter().any(|s| s == "s-Motor-Idle")),
+        "init must enter Idle, got records: {:?}",
+        records
+    );
+    assert_eq!(interp.current_states(), vec!["s-Motor-Idle".to_string()]);
+
+    // START → Running
+    let recs = interp.dispatch("START").expect("dispatch START");
+    assert!(
+        recs.iter()
+            .any(|r| r.config_after == vec!["s-Motor-Running"]),
+        "after START active state must be Running, got: {:?}",
+        recs
+    );
+    assert_eq!(interp.current_states(), vec!["s-Motor-Running".to_string()]);
+
+    // STOP → Faulted
+    let recs = interp.dispatch("STOP").expect("dispatch STOP");
+    assert!(
+        recs.iter()
+            .any(|r| r.config_after == vec!["s-Motor-Faulted"]),
+        "after STOP active state must be Faulted, got: {:?}",
+        recs
+    );
+    assert_eq!(interp.current_states(), vec!["s-Motor-Faulted".to_string()]);
+
+    // START (from Faulted) → Idle, closing the loop.
+    let recs = interp
+        .dispatch("START")
+        .expect("dispatch START from Faulted");
+    assert!(
+        recs.iter().any(|r| r.config_after == vec!["s-Motor-Idle"]),
+        "after START from Faulted active state must be Idle, got: {:?}",
+        recs
+    );
+    assert_eq!(interp.current_states(), vec!["s-Motor-Idle".to_string()]);
 }

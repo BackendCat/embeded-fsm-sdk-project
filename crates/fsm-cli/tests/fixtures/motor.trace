@@ -1,0 +1,10 @@
+{
+  "machineFile": "motor.fsm",
+  "description": "Smoke trace exercising the analyzer→simulator contract on the canonical Motor fixture.",
+  "init": { "machineName": "Motor" },
+  "steps": [
+    { "action": "dispatch", "event": "START" },
+    { "action": "dispatch", "event": "STOP" },
+    { "action": "dispatch", "event": "START" }
+  ]
+}
