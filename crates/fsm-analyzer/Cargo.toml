@@ -6,10 +6,17 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "FSM Studio semantic analyzer — symbol table, type check, determinism"
+description = "FSM Studio semantic analyzer — symbol table, type check, determinism, AST→IR lowering"
 
 [dependencies]
-# Analyzer emits Diagnostic values for every semantic / determinism check.
+# Analyzer emits `Diagnostic` values for every semantic / determinism check
+# and consumes the `Span` / `DiagnosticCode` types from the foundation crate.
 fsm-diagnostics = { workspace = true }
+# Consumed: the typed AST view (`fsm_parser::ast::*`) plus `ParseResult`.
 fsm-parser = { path = "../fsm-parser" }
+# Produced: the canonical IR document.
 fsm-ir = { path = "../fsm-ir" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

@@ -301,6 +301,8 @@ dependencies = [
  "fsm-diagnostics",
  "fsm-ir",
  "fsm-parser",
+ "insta",
+ "thiserror",
 ]
 
 [[package]]
