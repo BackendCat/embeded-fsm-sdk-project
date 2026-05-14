@@ -1233,8 +1233,20 @@ fn arm_timers_on_entry(timers: &mut TimerSet, idx: &MachineIndex, state: &str, n
                 period_ms: t.duration_ms,
             },
         };
-        // Find the (possibly None) transition associated with this timer.
+        // P0-4: link timer to its transition by `timer_id` (set by analyzer
+        // in `Trigger::After { timer_id }` / `Trigger::Every { timer_id }`).
+        // Fall back to legacy (source + target) match for IR docs produced
+        // by older test fixtures that don't supply timer_id.
         let transition_id = node.transitions.iter().find_map(|tr| match &tr.trigger {
+            Some(Trigger::After { timer_id, .. }) | Some(Trigger::Every { timer_id, .. })
+                if !timer_id.is_empty() =>
+            {
+                if timer_id == &t.id {
+                    Some(tr.id.clone())
+                } else {
+                    None
+                }
+            }
             Some(Trigger::After { .. }) | Some(Trigger::Every { .. }) => {
                 if tr.source == state && Some(tr.target.clone()) == t.target.clone() {
                     Some(tr.id.clone())

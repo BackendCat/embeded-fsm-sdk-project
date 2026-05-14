@@ -87,6 +87,9 @@ pub fn emit_transition_body(
         }
     }
     // Emit the source-region exit chain.
+    // P0-4: when a state owns timers, disarm them on exit so they cannot
+    // fire after the owning state is no longer active (Doc 08 §13.2).
+    let all_timers = super::timer::collect_timers(ctx);
     for exit_idx in &exits {
         let rec = ctx.index.get(*exit_idx);
         if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
@@ -96,6 +99,15 @@ pub fn emit_transition_body(
                 prefix = prefix,
                 name = rec.c_name,
             ));
+        }
+        for timer in &all_timers {
+            if timer.owner_state == *exit_idx {
+                out.push_str(&format!(
+                    "{pad}m->_timer_{tname}_remaining_ms = 0u; /* P0-4: cancel owned timer on exit */\n",
+                    pad = pad,
+                    tname = timer.field_name,
+                ));
+            }
         }
     }
     // Clear sibling-region slots when we just exited a parallel.
@@ -139,6 +151,7 @@ pub fn emit_transition_body(
     }
 
     // 4. Entry sequence — root first.
+    // P0-4: arm any timers owned by states being entered (Doc 08 §13.1).
     for entry_idx in entry_path(t, ctx.index, ctx.parents) {
         let rec = ctx.index.get(entry_idx);
         if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
@@ -148,6 +161,16 @@ pub fn emit_transition_body(
                 prefix = prefix,
                 name = rec.c_name,
             ));
+        }
+        for timer in &all_timers {
+            if timer.owner_state == entry_idx {
+                out.push_str(&format!(
+                    "{pad}m->_timer_{tname}_remaining_ms = {dur}u; /* P0-4: arm timer on entry */\n",
+                    pad = pad,
+                    tname = timer.field_name,
+                    dur = timer.duration_ms,
+                ));
+            }
         }
     }
 
@@ -312,6 +335,19 @@ fn emit_enter_chain(ctx: &MachineEmitCtx<'_>, state_idx: u8, pad: &str, out: &mu
     let rec = ctx.index.get(state_idx);
     let prefix = ctx.type_prefix();
     let macro_prefix = ctx.macro_prefix();
+    let all_timers = super::timer::collect_timers(ctx);
+    let arm_timers = |state_idx: u8, out: &mut String| {
+        for timer in &all_timers {
+            if timer.owner_state == state_idx {
+                out.push_str(&format!(
+                    "{pad}m->_timer_{tname}_remaining_ms = {dur}u; /* P0-4: arm timer on initial-chain entry */\n",
+                    pad = pad,
+                    tname = timer.field_name,
+                    dur = timer.duration_ms,
+                ));
+            }
+        }
+    };
     match rec.kind {
         StateRecordKind::Simple | StateRecordKind::Final | StateRecordKind::Submachine => {
             let slot = ctx.layout.slot(state_idx);
@@ -329,6 +365,7 @@ fn emit_enter_chain(ctx: &MachineEmitCtx<'_>, state_idx: u8, pad: &str, out: &mu
                     prefix = prefix,
                     name = rec.c_name,
                 ));
+                arm_timers(state_idx, out);
             }
         }
         StateRecordKind::Composite => {
@@ -338,6 +375,7 @@ fn emit_enter_chain(ctx: &MachineEmitCtx<'_>, state_idx: u8, pad: &str, out: &mu
                 prefix = prefix,
                 name = rec.c_name,
             ));
+            arm_timers(state_idx, out);
             if let Some(c) = find_composite(ctx.machine, &rec.ir_id) {
                 if let Some(region) = c.regions.first() {
                     if let Some(init_idx) = ctx.index.lookup(&region.initial) {
@@ -356,6 +394,7 @@ fn emit_enter_chain(ctx: &MachineEmitCtx<'_>, state_idx: u8, pad: &str, out: &mu
                 prefix = prefix,
                 name = rec.c_name,
             ));
+            arm_timers(state_idx, out);
             if let Some(p) = find_parallel(ctx.machine, &rec.ir_id) {
                 for region in &p.regions {
                     if let Some(init_idx) = ctx.index.lookup(&region.initial) {

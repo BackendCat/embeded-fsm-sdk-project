@@ -104,8 +104,15 @@ fn collect_transitions(ctx: &MachineEmitCtx<'_>) -> Vec<EmittedTransRow> {
         for t in transitions {
             let source = ctx.index.must_lookup(&t.source);
             let target = ctx.index.must_lookup(&t.target);
+            // P0-4: per-timer event variant resolution so the trans table
+            // row matches the timer's own event id, not generic completion.
             let trigger_c = match &t.trigger {
                 Some(fsm_ir::Trigger::Event { event_id, .. }) => ctx.event_c_enum(event_id),
+                Some(fsm_ir::Trigger::After { timer_id, .. })
+                | Some(fsm_ir::Trigger::Every { timer_id, .. }) => {
+                    super::timer::timer_event_c(ctx, timer_id)
+                        .unwrap_or_else(|| format!("{}_EVENT__COMPLETION", ctx.macro_prefix()))
+                }
                 _ => format!("{}_EVENT__COMPLETION", ctx.macro_prefix()),
             };
             let kind_tag = match t.kind {

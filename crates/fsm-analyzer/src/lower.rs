@@ -688,8 +688,9 @@ impl<'a> LoweringCtx<'a> {
             .and_then(|e| e.action_block())
             .map(|ab| self.lower_action_block(&ab))
             .unwrap_or_default();
-        let transitions = self.lower_transitions(state, &id, &name);
-        let timers = self.lower_timers(state, &id);
+        let mut transitions = self.lower_transitions(state, &id, &name);
+        let (timers, timer_transitions) = self.lower_timers(state, &id);
+        transitions.extend(timer_transitions);
         let defers = self.lower_defers(state);
 
         let regions: Vec<_> = state.regions().collect();
@@ -1092,17 +1093,48 @@ impl<'a> LoweringCtx<'a> {
         }
     }
 
-    fn lower_timers(&mut self, state: &ast::StateDecl, owner: &str) -> Vec<TimerObject> {
-        let mut out = Vec::new();
-        for a in state.after() {
+    /// Lower `after` / `every` / `every_internal` declarations into the
+    /// owning state's [`TimerObject`] list AND, for the targeted forms,
+    /// matching [`TransitionObject`]s with `Trigger::After` / `Trigger::Every`
+    /// carrying the timer's stable id (P0-4 fix). Without the timer-bound
+    /// trigger, downstream codegen had no way to dispatch the timer event
+    /// independently from `done` completion and would collapse both into
+    /// `EVENT__COMPLETION`.
+    fn lower_timers(
+        &mut self,
+        state: &ast::StateDecl,
+        owner: &str,
+    ) -> (Vec<TimerObject>, Vec<TransitionObject>) {
+        let mut timers = Vec::new();
+        let mut transitions = Vec::new();
+        for (kind_idx, a) in state.after().enumerate() {
             if let Some(ms) = duration_ms(a.syntax()) {
                 let target = a.target();
                 let actions = action_block_under(a.syntax())
                     .map(|ab| self.lower_action_block(&ab))
                     .unwrap_or_default();
-                out.push(TimerObject {
-                    id: self.next_pseudo_id("timer"),
-                    stable_id: format!("M:{}:timer:after", self.machine_name),
+                let timer_id = self.next_pseudo_id("timer");
+                let stable_id =
+                    format!("M:{}:timer:after:{}:{}", self.machine_name, owner, kind_idx);
+                if let Some(t) = target.as_ref() {
+                    transitions.push(self.build_transition(
+                        owner,
+                        &state_target_id(self, t),
+                        TransitionKind::External,
+                        Some(Trigger::After {
+                            duration_ms: ms,
+                            timer_id: timer_id.clone(),
+                        }),
+                        0,
+                        None,
+                        actions.clone(),
+                        a.syntax(),
+                        "",
+                    ));
+                }
+                timers.push(TimerObject {
+                    id: timer_id,
+                    stable_id,
                     kind: TimerKind::After,
                     duration_ms: ms,
                     owner_state_id: owner.to_string(),
@@ -1112,15 +1144,34 @@ impl<'a> LoweringCtx<'a> {
                 });
             }
         }
-        for e in state.every() {
+        for (kind_idx, e) in state.every().enumerate() {
             if let Some(ms) = duration_ms(e.syntax()) {
                 let target = e.target();
                 let actions = action_block_under(e.syntax())
                     .map(|ab| self.lower_action_block(&ab))
                     .unwrap_or_default();
-                out.push(TimerObject {
-                    id: self.next_pseudo_id("timer"),
-                    stable_id: format!("M:{}:timer:every", self.machine_name),
+                let timer_id = self.next_pseudo_id("timer");
+                let stable_id =
+                    format!("M:{}:timer:every:{}:{}", self.machine_name, owner, kind_idx);
+                if let Some(t) = target.as_ref() {
+                    transitions.push(self.build_transition(
+                        owner,
+                        &state_target_id(self, t),
+                        TransitionKind::External,
+                        Some(Trigger::Every {
+                            period_ms: ms,
+                            timer_id: timer_id.clone(),
+                        }),
+                        0,
+                        None,
+                        actions.clone(),
+                        e.syntax(),
+                        "",
+                    ));
+                }
+                timers.push(TimerObject {
+                    id: timer_id,
+                    stable_id,
                     kind: TimerKind::Every,
                     duration_ms: ms,
                     owner_state_id: owner.to_string(),
@@ -1130,14 +1181,37 @@ impl<'a> LoweringCtx<'a> {
                 });
             }
         }
-        for e in state.every_internal() {
+        for (kind_idx, e) in state.every_internal().enumerate() {
             if let Some(ms) = duration_ms(e.syntax()) {
                 let actions = action_block_under(e.syntax())
                     .map(|ab| self.lower_action_block(&ab))
                     .unwrap_or_default();
-                out.push(TimerObject {
-                    id: self.next_pseudo_id("timer"),
-                    stable_id: format!("M:{}:timer:every_internal", self.machine_name),
+                let timer_id = self.next_pseudo_id("timer");
+                let stable_id = format!(
+                    "M:{}:timer:every_internal:{}:{}",
+                    self.machine_name, owner, kind_idx
+                );
+                // `every_internal` has no target; codegen runs the actions
+                // on each fire without an exit/entry sequence. We still emit
+                // an internal-kind transition so the timer trigger is
+                // distinguishable from `done` completion in dispatch.
+                transitions.push(self.build_transition(
+                    owner,
+                    owner,
+                    TransitionKind::Internal,
+                    Some(Trigger::Every {
+                        period_ms: ms,
+                        timer_id: timer_id.clone(),
+                    }),
+                    0,
+                    None,
+                    actions.clone(),
+                    e.syntax(),
+                    "",
+                ));
+                timers.push(TimerObject {
+                    id: timer_id,
+                    stable_id,
                     kind: TimerKind::EveryInternal,
                     duration_ms: ms,
                     owner_state_id: owner.to_string(),
@@ -1147,7 +1221,7 @@ impl<'a> LoweringCtx<'a> {
                 });
             }
         }
-        out
+        (timers, transitions)
     }
 
     fn lower_defers(&mut self, state: &ast::StateDecl) -> Vec<IrDeferDecl> {

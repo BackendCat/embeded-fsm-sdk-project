@@ -117,17 +117,18 @@ fn emit_per_state_helpers(ctx: &MachineEmitCtx<'_>) -> String {
 fn emit_one_case(t: &TransitionObject, ctx: &MachineEmitCtx<'_>, out: &mut String) {
     let trigger_id = match &t.trigger {
         Some(fsm_ir::Trigger::Event { event_id, .. }) => event_id.clone(),
-        // Completion / timer triggers come in as the reserved internal
-        // event. We use the synthetic completion event ID here as a stand-in.
+        // `done -> Y` / pre-P0-4 timer triggers come in with no trigger;
+        // map to the reserved completion event id.
         Some(fsm_ir::Trigger::Completion { .. }) | None => {
             format!("{}_EVENT__COMPLETION", ctx.macro_prefix())
         }
-        Some(fsm_ir::Trigger::After { .. }) | Some(fsm_ir::Trigger::Every { .. }) => {
-            // Timers are dispatched via completion event with a per-timer
-            // payload in this simplified codegen; the analyzer is the
-            // authoritative resolver. We map to completion as the safe
-            // catch-all.
-            format!("{}_EVENT__COMPLETION", ctx.macro_prefix())
+        // P0-4: timer triggers carry the IR timer id; resolve to the
+        // distinct per-timer event variant so this transition is
+        // dispatched only on its own timer's fire, not on EVENT__COMPLETION.
+        Some(fsm_ir::Trigger::After { timer_id, .. })
+        | Some(fsm_ir::Trigger::Every { timer_id, .. }) => {
+            super::timer::timer_event_c(ctx, timer_id)
+                .unwrap_or_else(|| format!("{}_EVENT__COMPLETION", ctx.macro_prefix()))
         }
     };
     let event_c = if trigger_id.starts_with(&ctx.macro_prefix()) {

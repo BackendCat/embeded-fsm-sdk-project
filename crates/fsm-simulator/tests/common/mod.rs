@@ -152,6 +152,17 @@ pub fn timer_transition(
     duration_ms: u32,
     periodic: bool,
 ) -> TransitionObject {
+    timer_transition_with_id(id, source, target, duration_ms, periodic, "")
+}
+
+pub fn timer_transition_with_id(
+    id: &str,
+    source: &str,
+    target: &str,
+    duration_ms: u32,
+    periodic: bool,
+    timer_id: &str,
+) -> TransitionObject {
     #[allow(deprecated)]
     TransitionObject {
         id: id.to_string(),
@@ -161,9 +172,13 @@ pub fn timer_transition(
         trigger: Some(if periodic {
             Trigger::Every {
                 period_ms: duration_ms,
+                timer_id: timer_id.to_string(),
             }
         } else {
-            Trigger::After { duration_ms }
+            Trigger::After {
+                duration_ms,
+                timer_id: timer_id.to_string(),
+            }
         }),
         guard: None,
         actions: vec![],

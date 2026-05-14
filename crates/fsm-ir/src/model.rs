@@ -515,12 +515,24 @@ pub enum Trigger {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         payload_binding: Option<String>,
     },
-    /// `after` one-shot timer (Doc 09 §13).
+    /// `after` one-shot timer (Doc 09 §13). `timer_id` is the IR
+    /// [`TimerObject::id`] that this transition is bound to — codegen uses it
+    /// to emit a distinct `MOTOR_EVENT_TIMER_<ID>_FIRED` enum variant so the
+    /// transition is dispatchable independently of `done` completion
+    /// (audit P0-4).
     #[serde(rename = "after")]
-    After { duration_ms: u32 },
-    /// `every` periodic timer.
+    After {
+        duration_ms: u32,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        timer_id: String,
+    },
+    /// `every` periodic timer. `timer_id` plays the same role as in `After`.
     #[serde(rename = "every")]
-    Every { period_ms: u32 },
+    Every {
+        period_ms: u32,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        timer_id: String,
+    },
     /// Completion of a referenced state (Doc 08 §4.4).
     #[serde(rename = "completion")]
     Completion { from: String },

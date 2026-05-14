@@ -78,12 +78,23 @@ fn emit_event_enum(ctx: &MachineEmitCtx<'_>) -> String {
             i = i,
         ));
     }
-    // Internal completion event slot — reserved at the end so the user enum
-    // values stay stable. Doc 11 §15 reserves this slot.
+    // Internal completion event slot — reserved before the timer block so
+    // its enum value stays stable (Doc 11 §15).
     s.push_str(&format!(
         "    {macro}_EVENT__COMPLETION,\n",
         macro = macro_prefix
     ));
+    // P0-4: per-timer events. Each `after` / `every` / `every_internal`
+    // declaration gets its own variant so the transition's trigger is
+    // distinguishable from `done` completion. These are synthesized by
+    // `Motor_advance_clock` only — public callers do not push them.
+    for t in super::timer::collect_timers(ctx) {
+        s.push_str(&format!(
+            "    {macro}_EVENT_{esuffix},\n",
+            macro = macro_prefix,
+            esuffix = t.event_suffix,
+        ));
+    }
     s.push_str(&format!(
         "    {macro}_EVENT__COUNT\n}} {prefix}_EventId_t;\n",
         macro = macro_prefix,
