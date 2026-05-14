@@ -149,8 +149,10 @@ fn run_parallel_smoke(strategy: fsm_codegen_c::DispatchStrategy, label: &str) {
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
 
-    let mut cfg = CodegenConfig::default();
-    cfg.strategy = strategy;
+    let cfg = CodegenConfig {
+        strategy,
+        ..CodegenConfig::default()
+    };
     let out = emit(&common::parallel_motor_ir(), &cfg).expect("emit");
     write_files(dir, &out);
     write_host_hal_c(dir);
