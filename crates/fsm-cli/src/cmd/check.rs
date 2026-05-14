@@ -6,13 +6,31 @@
 //!
 //! Per Doc 18 §3 the rendering format is the Rust-style block with caret;
 //! the JSON formatter is opt-in via `--json` and writes to stdout.
+//!
+//! ## Import-path security pass (Doc 00 §7.12 G-02 / audit P1-4)
+//!
+//! After parsing, every `import "..."` declaration is run through
+//! [`fsm_parser::import_resolver::resolve_import`] using the workspace
+//! root discovered via the `fsm.toml` walker. The shape check has already
+//! happened in the parser; the resolver adds canonicalize-plus-prefix
+//! containment so a workspace-relative symlink pointing outside the
+//! workspace is rejected. Unresolvable imports are *not* a hard error
+//! here — `fsm check` is run against a single file and the imported
+//! sibling may not exist yet in author workflows. The escape check (out
+//! of workspace) IS a hard error because it indicates an unsafe import
+//! regardless of file presence.
 
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fsm_analyzer::analyze_with_source;
-use fsm_parser::parse;
+use fsm_diagnostics::{Diagnostic, Span};
+use fsm_parser::ast::{AstNode, File as AstFile};
+use fsm_parser::import_resolver::{resolve_import, ImportError};
+use fsm_parser::{parse, ParseResult};
 
 use crate::cli::CheckArgs;
+use crate::config;
 use crate::diagnostics;
 
 pub fn run(args: CheckArgs) -> ExitCode {
@@ -28,8 +46,19 @@ pub fn run(args: CheckArgs) -> ExitCode {
         };
         let pr = parse(&src);
         let label = path.to_string_lossy().into_owned();
+        // Resolve the workspace root once per file — the resolver walks
+        // upwards from the file's parent looking for `fsm.toml`. A
+        // missing `fsm.toml` falls back to the file's directory; that is
+        // the most permissive position the resolver can hold without
+        // exposing escape paths (everything outside that directory is
+        // still rejected by `resolve_import`).
+        let workspace_root = workspace_root_for(path);
+        let mut import_diags = security_check_imports(&pr, path, &workspace_root);
         let result = analyze_with_source(&pr, &label, &src);
         let mut diags = result.diagnostics;
+        // Surface import-security diagnostics alongside parse/analyze
+        // diagnostics — they share the renderer.
+        diags.append(&mut import_diags);
         if args.warn_as_error {
             diagnostics::promote_warnings(&mut diags);
         }
@@ -110,6 +139,75 @@ fn emit_json_aggregate(entries: &[(fsm_diagnostics::Diagnostic, String, String)]
     }
     let s = serde_json::to_string_pretty(&out).unwrap_or_else(|_| "[]".to_string());
     println!("{}", s);
+}
+
+/// Find the workspace root for an input file. Walks upwards looking for
+/// `fsm.toml`; if none is found, the file's parent directory is used as
+/// a permissive fallback. The result is canonicalized so symlinks are
+/// followed before containment checks happen downstream.
+fn workspace_root_for(path: &Path) -> PathBuf {
+    let start = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    if let Ok(Some((toml_path, _))) = config::load(&start) {
+        if let Some(parent) = toml_path.parent() {
+            if let Ok(canon) = parent.canonicalize() {
+                return canon;
+            }
+        }
+    }
+    start.canonicalize().unwrap_or(start)
+}
+
+/// Run every `import "..."` declaration through `resolve_import` so any
+/// workspace-relative symlink that escapes the workspace is rejected.
+/// Returns diagnostics in source order. Unresolvable imports
+/// (`ImportError::Unresolved`) are intentionally **not** flagged here:
+/// `fsm check` is run on a single file in author workflows where sibling
+/// `.fsm` files may not exist yet. The escape check (`OutsideWorkspace`)
+/// is always a hard error; shape failures have already been caught at
+/// parse time and produce a duplicate, suppressed by the dedupe at the
+/// bottom of the loop.
+fn security_check_imports(
+    pr: &ParseResult,
+    file_path: &Path,
+    workspace_root: &Path,
+) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    let file = AstFile::cast(pr.syntax()).expect("root node is always FILE");
+    for imp in file.imports() {
+        let Some(raw) = imp.path() else { continue };
+        // Recover the path span via the IMPORT_DECL subtree — first
+        // StringLiteral token.
+        let span = imp
+            .syntax()
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .find(|t| t.kind() == fsm_parser::SyntaxKind::StringLiteral)
+            .map(|t| {
+                let r = t.text_range();
+                Span::new(usize::from(r.start()), usize::from(r.end()))
+            })
+            .unwrap_or_else(|| Span::new(0, 0));
+        match resolve_import(workspace_root, file_path, &raw) {
+            Ok(_) => {}
+            Err(ImportError::BadShape { .. }) => {
+                // Already diagnosed by the parser's shape check — silent
+                // here to avoid duplicate noise in the report.
+            }
+            Err(ImportError::Unresolved) => {
+                // Not flagged in `fsm check` — sibling file may not
+                // exist yet. The build driver (`fsm generate`) is the
+                // right place to fail-loud on unresolvable imports.
+            }
+            Err(err @ ImportError::OutsideWorkspace) => {
+                out.push(err.into_diagnostic(span));
+            }
+        }
+    }
+    out
 }
 
 fn line_col(src: &str, byte: usize) -> (u32, u32) {

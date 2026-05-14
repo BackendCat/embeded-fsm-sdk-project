@@ -13,6 +13,7 @@ use fsm_diagnostics::{Diagnostic, DiagnosticCode, Span};
 use fsm_lexer::{Token, TokenKind};
 
 use crate::cst::{syntax_kind_from_token, SyntaxKind};
+use crate::limits::ParseLimits;
 use crate::token_set::TokenSet;
 
 /// Parser state carried through every grammar rule. Methods follow the
@@ -36,6 +37,19 @@ pub struct Parser<'src> {
     /// recover them through `stable_id()`. This buffer holds an annotation
     /// that has been parsed but not yet wrapped into its declaration.
     pending_stable_id_start: Option<rowan::Checkpoint>,
+    /// DoS hardening (P1-5, Doc 00 §7.12 G-02). Per-call limits + the
+    /// running depth counter. `current_depth` is incremented through
+    /// [`DepthGuard`] in recursive grammar rules so it always reflects the
+    /// nesting depth of the active rule even on error-return paths.
+    limits: ParseLimits,
+    /// Number of recursive grammar frames currently on the stack. Compared
+    /// against `limits.max_recursion_depth` by [`DepthGuard::enter`].
+    current_depth: u32,
+    /// Sticky flag: once the depth cap has been hit at least once during
+    /// this parse call, recursive rules short-circuit instead of repeating
+    /// the same diagnostic on every descent. Caller-facing diagnostics
+    /// remain "one per limit-hit nest", not "one per descended frame".
+    depth_limit_reported: bool,
 }
 
 impl std::fmt::Debug for Parser<'_> {
@@ -63,16 +77,35 @@ pub enum ExprContext {
 
 impl<'src> Parser<'src> {
     /// Build a parser over `src`. The source is tokenised eagerly so the
-    /// parser can do constant-time peeks.
+    /// parser can do constant-time peeks. Uses [`ParseLimits::DEFAULT`].
     pub fn new(src: &'src str) -> Self {
         let tokens = fsm_lexer::tokenize(src);
-        Self::from_tokens(src, tokens)
+        Self::from_tokens_with_limits(src, tokens, ParseLimits::DEFAULT)
+    }
+
+    /// Like [`Parser::new`] but with caller-supplied limits. Used by
+    /// [`crate::parse_with_limits`] and by test code that needs to drive
+    /// the depth/byte caps at unusual values.
+    pub fn with_limits(src: &'src str, limits: ParseLimits) -> Self {
+        let tokens = fsm_lexer::tokenize(src);
+        Self::from_tokens_with_limits(src, tokens, limits)
     }
 
     /// Alternative entry point for callers that already have a token
     /// vector — useful for the LSP incremental-reparse pipeline (Doc 20
-    /// §4.5).
+    /// §4.5). Uses [`ParseLimits::DEFAULT`].
     pub fn from_tokens(src: &'src str, tokens: Vec<Token>) -> Self {
+        Self::from_tokens_with_limits(src, tokens, ParseLimits::DEFAULT)
+    }
+
+    /// Most-general constructor — caller supplies both the token vector
+    /// and the limit configuration. The other constructors are thin
+    /// adapters.
+    pub fn from_tokens_with_limits(
+        src: &'src str,
+        tokens: Vec<Token>,
+        limits: ParseLimits,
+    ) -> Self {
         let mut p = Self {
             src,
             tokens,
@@ -80,6 +113,9 @@ impl<'src> Parser<'src> {
             builder: rowan::GreenNodeBuilder::new(),
             errors: Vec::new(),
             pending_stable_id_start: None,
+            limits,
+            current_depth: 0,
+            depth_limit_reported: false,
         };
         // Position at first non-trivia token. Trivia at the start of the
         // file is auto-attached to the first declaration's CST subtree by
@@ -332,6 +368,102 @@ impl<'src> Parser<'src> {
     /// Pop the stashed checkpoint, if any.
     pub fn take_stable_id_checkpoint(&mut self) -> Option<rowan::Checkpoint> {
         self.pending_stable_id_start.take()
+    }
+
+    // ─── Recursion depth tracking (P1-5, Doc 00 §7.12 G-02) ─────────────
+    //
+    // Every recursive grammar rule should call [`Parser::enter_recursion`]
+    // at the top, check the returned `DepthGuard` for the limit-exceeded
+    // signal, and let the guard's `Drop` decrement the counter on exit.
+    // The pattern is:
+    //
+    // ```text
+    // pub fn parse_expr(p: &mut Parser, ...) {
+    //     let _guard = match p.enter_recursion() {
+    //         Some(g) => g,
+    //         None => return, // diagnostic already emitted
+    //     };
+    //     // ... do the work ...
+    // }
+    // ```
+
+    /// Snapshot of the configured limits. Cheap (Copy).
+    pub fn limits(&self) -> ParseLimits {
+        self.limits
+    }
+
+    /// Current recursion depth. Visible for tests / diagnostics; rules
+    /// should use [`Parser::enter_recursion`] rather than touching this
+    /// directly.
+    pub fn current_depth(&self) -> u32 {
+        self.current_depth
+    }
+
+    /// Run `body` inside a recursive grammar frame, transparently tracking
+    /// the depth counter. Returns the `body`'s value on success, or
+    /// `default` if the call would exceed `limits.max_recursion_depth`
+    /// (in which case `body` is **not** invoked and a single diagnostic
+    /// is appended on the first hit).
+    ///
+    /// The counter is decremented on every exit path — early `return`,
+    /// `?` propagation, or panic — because the [`DepthGuard`] holds the
+    /// `&mut Parser` via [`std::marker::PhantomData`] and decrements in
+    /// its `Drop` impl. The closure receives the parser back through
+    /// the guard's `parser` accessor so it can call any parser method
+    /// without re-borrowing tricks.
+    pub fn with_recursion<R>(
+        &mut self,
+        default: R,
+        body: impl FnOnce(&mut Parser<'src>) -> R,
+    ) -> R {
+        if self.current_depth >= self.limits.max_recursion_depth {
+            if !self.depth_limit_reported {
+                self.depth_limit_reported = true;
+                let span = self.current_span();
+                let msg = format!(
+                    "input exceeds maximum recursion depth ({})",
+                    self.limits.max_recursion_depth
+                );
+                self.errors
+                    .push(Diagnostic::new(DiagnosticCode::E0010, span).with_message(msg));
+            }
+            return default;
+        }
+        let mut guard = DepthGuard::enter(self);
+        body(guard.parser())
+    }
+}
+
+/// RAII helper that increments [`Parser::current_depth`] on construction
+/// and decrements on drop. Constructed exclusively through
+/// [`Parser::with_recursion`]; the type is public only so the `Drop` impl
+/// is documented for readers tracing the depth-budget machinery.
+#[derive(Debug)]
+pub struct DepthGuard<'p, 'src> {
+    parser: &'p mut Parser<'src>,
+}
+
+impl<'p, 'src> DepthGuard<'p, 'src> {
+    /// Increment the parser's depth counter and produce a guard. The
+    /// caller MUST have verified the depth budget before calling — the
+    /// public entry point is [`Parser::with_recursion`].
+    fn enter(parser: &'p mut Parser<'src>) -> Self {
+        parser.current_depth += 1;
+        Self { parser }
+    }
+
+    /// Borrow the parser back out for use inside the recursive rule.
+    pub fn parser(&mut self) -> &mut Parser<'src> {
+        self.parser
+    }
+}
+
+impl<'p, 'src> Drop for DepthGuard<'p, 'src> {
+    fn drop(&mut self) {
+        // Saturating: enter() always increments before constructing the
+        // guard, so the counter is > 0 here, but the saturating sub keeps
+        // future refactors safe.
+        self.parser.current_depth = self.parser.current_depth.saturating_sub(1);
     }
 }
 

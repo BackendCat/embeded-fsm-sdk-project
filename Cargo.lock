@@ -443,6 +443,7 @@ dependencies = [
  "fsm-lexer",
  "insta",
  "rowan",
+ "tempfile",
  "thiserror",
 ]
 

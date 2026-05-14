@@ -50,7 +50,15 @@ pub const STATE_ITEM_STARTS: TokenSet = TokenSet::new(&[
 ]);
 
 /// `state_decl = [ "export" ] , "state" , identifier , "{" , { state_item } , "}" ;`
+///
+/// Depth-bounded — nested composite states drive recursion through
+/// `parse_state_item -> parse_state_decl`. See [`Parser::with_recursion`]
+/// (Doc 00 §7.12 G-02 / audit P1-5).
 pub fn parse_state_decl(p: &mut Parser) {
+    p.with_recursion((), |p| parse_state_decl_inner(p));
+}
+
+fn parse_state_decl_inner(p: &mut Parser) {
     p.start_node(SyntaxKind::STATE_DECL);
     let _ = p.eat(TokenKind::KwExport);
     p.expect(TokenKind::KwState, DiagnosticCode::E0010);
@@ -160,7 +168,14 @@ pub fn parse_exit_point_decl(p: &mut Parser) {
 // ─── regions ─────────────────────────────────────────────────────────────
 
 /// `region_decl = "region" , identifier , "{" , { region_item } , "}" ;`
+///
+/// Depth-bounded — regions live inside composite states and may contain
+/// further nested states; the recursion mirrors `parse_state_decl`.
 pub fn parse_region_decl(p: &mut Parser) {
+    p.with_recursion((), |p| parse_region_decl_inner(p));
+}
+
+fn parse_region_decl_inner(p: &mut Parser) {
     p.start_node(SyntaxKind::REGION_DECL);
     p.bump(); // region
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);

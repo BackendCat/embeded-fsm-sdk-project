@@ -36,6 +36,7 @@ pub mod cst;
 pub mod expr;
 mod grammar;
 pub mod import_resolver;
+pub mod limits;
 pub mod opaque_type_validator;
 mod parse;
 mod parser;
@@ -47,8 +48,9 @@ pub use crate::cst::{
     syntax_kind_from_token, FsmLanguage, GreenNode, GreenNodeBuilder, GreenToken, SyntaxElement,
     SyntaxKind, SyntaxNode, SyntaxToken,
 };
-pub use crate::parse::{parse, parse_with_tokens, ParseResult};
-pub use crate::parser::{ExprContext, Parser};
+pub use crate::limits::ParseLimits;
+pub use crate::parse::{parse, parse_with_limits, parse_with_tokens, ParseResult};
+pub use crate::parser::{DepthGuard, ExprContext, Parser};
 pub use crate::token_set::TokenSet;
 
 pub use crate::ast::AstNode;
