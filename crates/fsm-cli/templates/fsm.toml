@@ -1,0 +1,17 @@
+# fsm.toml — FSM Studio project configuration.
+# See docs/18-CLI-Specification.md §6 for the full schema.
+
+[compiler]
+max_errors = 100
+warn_as_error = false
+
+[generate]
+target   = "c99"
+strategy = "auto"
+out      = "generated"
+queue_size     = 8
+license        = "MIT"
+
+[format]
+indent_size   = 4
+bracket_style = "same-line"

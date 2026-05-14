@@ -1,0 +1,28 @@
+language fsm 2.0
+
+pure extern can_start() : bool
+
+machine Motor {
+    context {
+        count: u32 = 0
+    }
+
+    events {
+        START
+        STOP
+    }
+
+    initial Idle
+
+    state Idle {
+        on START [can_start] -> Running
+    }
+
+    state Running {
+        on STOP -> Faulted
+    }
+
+    state Faulted {
+        on START -> Idle
+    }
+}

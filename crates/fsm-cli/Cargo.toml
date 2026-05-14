@@ -16,8 +16,9 @@ path = "src/main.rs"
 # Aggregates the v1.0 pipeline. Deferred crates (codegen-cpp, lsp, wasm)
 # are intentionally absent here; they land in v1.1+. The CLI renders
 # diagnostics through miette, so it pulls in fsm-diagnostics with the
-# `miette` feature explicitly enabled.
-fsm-diagnostics = { workspace = true, features = ["miette"] }
+# `miette` feature explicitly enabled. The `serde` feature exposes
+# Diagnostic for the `--json` formatter.
+fsm-diagnostics = { workspace = true, features = ["miette", "serde"] }
 fsm-lexer = { path = "../fsm-lexer" }
 fsm-parser = { path = "../fsm-parser" }
 fsm-analyzer = { path = "../fsm-analyzer" }
@@ -29,3 +30,17 @@ fsm-formatter = { path = "../fsm-formatter" }
 clap = { workspace = true }
 miette = { workspace = true }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Toml 0.8 is the newest 0.x that still compiles on Rust 1.75 (Doc 23 §2);
+# newer 0.9 bumps the MSRV. The CLI uses it only to parse fsm.toml.
+toml = "0.8"
+
+[dev-dependencies]
+# Integration tests spawn the `fsm` binary via assert_cmd; predicates
+# powers the stdout/stderr matching; tempfile gives every test its own
+# clean output directory.
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
