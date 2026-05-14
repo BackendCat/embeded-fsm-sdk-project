@@ -1,0 +1,19 @@
+language fsm 2.0
+
+feature hsm
+
+machine M {
+    initial Operational
+
+    state Operational {
+        initial Normal
+
+        state Normal {
+            on FAULT -> Degraded
+        }
+
+        state Degraded {
+            on RECOVER -> Normal
+        }
+    }
+}

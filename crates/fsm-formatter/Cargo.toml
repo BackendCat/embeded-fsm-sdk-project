@@ -15,3 +15,9 @@ description = "FSM Studio canonical formatter — CST in, formatted .fsm text ou
 fsm-diagnostics = { workspace = true }
 fsm-lexer = { path = "../fsm-lexer" }
 fsm-parser = { path = "../fsm-parser" }
+rowan = { workspace = true }
+
+[dev-dependencies]
+# Golden-file snapshots; the second-pass idempotency assertion is a plain
+# equality check.
+insta = { workspace = true }

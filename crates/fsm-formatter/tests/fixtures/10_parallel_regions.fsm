@@ -1,0 +1,29 @@
+language fsm 2.0
+
+feature parallel
+
+machine M {
+    initial Connected
+
+    state Connected {
+        region DataPath {
+            initial IdleData
+
+            state IdleData {
+                on DATA -> Processing
+            }
+
+            state Processing {
+                on DONE -> IdleData
+            }
+        }
+
+        region Monitor {
+            initial Active
+
+            state Active {
+                on TICK -> Active
+            }
+        }
+    }
+}

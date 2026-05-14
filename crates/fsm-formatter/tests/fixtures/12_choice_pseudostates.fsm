@@ -1,0 +1,23 @@
+language fsm 2.0
+
+machine M {
+    context {
+        mode: u8 = 0
+    }
+
+    initial Start
+
+    state Start {
+        on GO -> Decide
+    }
+
+    choice Decide {
+        [ctx.mode == 1] -> ModeA
+        [ctx.mode == 2] -> ModeB
+        [else] -> Default
+    }
+
+    state ModeA { }
+    state ModeB { }
+    state Default { }
+}

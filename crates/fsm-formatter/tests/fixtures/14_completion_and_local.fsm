@@ -1,0 +1,22 @@
+language fsm 2.0
+
+feature hsm
+
+machine M {
+    initial Outer
+
+    state Outer {
+        initial S1
+
+        state S1 {
+            on TICK ~> Inner
+            done -> S2
+        }
+
+        state Inner { }
+
+        state S2 {
+            done -> Outer
+        }
+    }
+}

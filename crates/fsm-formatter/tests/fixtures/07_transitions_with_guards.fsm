@@ -1,0 +1,32 @@
+language fsm 2.0
+
+pure extern can_retry(ctx) : bool
+
+machine M {
+    context {
+        retries: u8 = 0
+    }
+
+    events {
+        START
+        STOP
+        ERR
+    }
+
+    initial Idle
+
+    state Idle {
+        on START -> Running
+        on STOP -> Final
+    }
+
+    state Running {
+        on ERR [can_retry] -> Running
+        on ERR -> Failed
+        on STOP priority 50 -> Idle
+    }
+
+    state Failed { }
+
+    final Final
+}

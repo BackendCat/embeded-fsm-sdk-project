@@ -1,0 +1,13 @@
+language fsm 2.0
+
+machine Net {
+    events {
+        CMD_CONNECT(host: u32, port: u16)
+        CMD_DISCONNECT
+        DATA_RECEIVED(len: u8)
+    }
+
+    initial Down
+
+    state Down { }
+}

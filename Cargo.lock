@@ -351,6 +351,8 @@ dependencies = [
  "fsm-diagnostics",
  "fsm-lexer",
  "fsm-parser",
+ "insta",
+ "rowan",
 ]
 
 [[package]]

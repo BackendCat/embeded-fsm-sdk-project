@@ -1,0 +1,16 @@
+language fsm 2.0
+
+import "common/events.fsm" as Common
+import "shared/types.fsm" { PacketType, ErrorCode }
+
+enum Status {
+    OK = 0,
+    WARN = 1,
+    ERR = 2,
+}
+
+machine M {
+    initial S
+
+    state S { }
+}

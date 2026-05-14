@@ -1,0 +1,13 @@
+language fsm 2.0
+
+machine Motor {
+    context {
+        speed: u16 = 0
+        running: bool = false
+        retries: u8 = 3
+    }
+
+    initial Idle
+
+    state Idle { }
+}

@@ -1,0 +1,27 @@
+language fsm 2.0
+
+extern start_motor()
+extern log(u8 code)
+
+machine M {
+    context {
+        speed: u16 = 0
+        retries: u8 = 0
+    }
+
+    events {
+        START
+        TICK
+    }
+
+    initial Idle
+
+    state Idle {
+        entry : start_motor()
+        on START -> Running : ctx.speed = 100
+    }
+
+    state Running {
+        on TICK -> Running : ctx.retries = ctx.retries + 1; log(ctx.retries)
+    }
+}
