@@ -1,9 +1,10 @@
 //! `Motor.c` — translation unit. Wires every other emitter into a single
 //! compilable source file.
 
-use fsm_ir::StateNode;
+use fsm_ir::{Literal, StateNode};
 
 use crate::config::DispatchStrategy;
+use crate::expr::emit_literal;
 use crate::state_index::StateRecordKind;
 
 use super::license::header_block;
@@ -94,6 +95,21 @@ fn emit_init(ctx: &MachineEmitCtx<'_>) -> String {
         prefix = prefix,
     ));
     s.push_str("    memset(m, 0, sizeof(*m));\n");
+    // Context-field defaults — Doc 04 §3.3 + Doc 08 §2.2. Without this the
+    // generated `Motor_init` would leave every declared default silently as
+    // zero/false (the post-memset bit pattern), and callers would have to
+    // re-implement the DSL initializer in C. Emit one assignment per field
+    // that carries a `default` literal in the IR.
+    for field in &ctx.machine.context.fields {
+        let Some(lit) = &field.default else {
+            continue;
+        };
+        s.push_str(&format!(
+            "    m->context.{name} = {value};\n",
+            name = field.name,
+            value = render_default_literal(lit),
+        ));
+    }
     s.push_str("    m->_active_count = 1;\n");
     s.push_str(&format!(
         "    m->_active[0] = {macro}_STATE_ROOT;\n",
@@ -168,8 +184,26 @@ fn emit_init(ctx: &MachineEmitCtx<'_>) -> String {
             ));
         }
     }
+    // Run completion handling after the initial entry sequence — Doc 08
+    // §2.2 + §9.1. If any state entered during init carries a `done` /
+    // Final-state completion, this lets the auto-transition fire before
+    // any external event is dispatched.
+    s.push_str(&format!(
+        "    {prefix}_handle_completion(m);\n",
+        prefix = prefix,
+    ));
     s.push_str("}\n");
     s
+}
+
+/// Render a context-field default literal as a C99 constant expression.
+///
+/// Mirrors [`crate::expr::emit_literal`] but stays string-only so callers in
+/// `Motor_init` don't need to format expressions. Boolean / integer / float
+/// literals map directly; string literals are emitted as plain C string
+/// literals; enum variants reuse the `ENUMNAME_VARIANT` convention.
+fn render_default_literal(lit: &Literal) -> String {
+    emit_literal(lit)
 }
 
 /// One leaf entered during init. `ancestors` lists the path of composites /

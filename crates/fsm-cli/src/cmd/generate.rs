@@ -146,7 +146,16 @@ pub fn run(args: GenerateArgs) -> ExitCode {
             // document. Multi-machine IRs in v1.0 are an edge case; per-
             // machine reporting can ride a future flag.
             if !ir.machines.is_empty() {
-                let budget = compute_budget(&ir, &codegen_cfg);
+                // Audit P1-8: `compute_budget` now returns Result so that a
+                // >255-state machine surfaces as a clean CLI error instead
+                // of a `panic!` + backtrace.
+                let budget = match compute_budget(&ir, &codegen_cfg) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("error: codegen-c: {}", e);
+                        return ExitCode::from(2);
+                    }
+                };
                 let name = ir.machines[0].name.as_str();
                 println!("Memory budget for machine `{}`:", name);
                 println!("  sizeof(Machine_t)     = {} bytes", budget.sizeof_machine);

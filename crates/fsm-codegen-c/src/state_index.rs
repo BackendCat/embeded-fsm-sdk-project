@@ -18,6 +18,8 @@ use std::collections::HashMap;
 
 use fsm_ir::{MachineObject, RegionObject, StateNode};
 
+use crate::emit::EmitError;
+
 /// The reserved root sentinel index. The parent of the root region's
 /// immediate children. Used by the ancestor-walk dispatch to detect when
 /// it has run out of ancestors.
@@ -105,16 +107,34 @@ impl StateIndex {
         self.by_ir_id.get(ir_id).copied()
     }
 
-    /// Resolve an IR id, panicking with a diagnostic message on miss. Used
-    /// inside emit code where we've already validated via the analyzer that
-    /// every referenced id exists.
+    /// Resolve an IR id, falling back to the root sentinel index on a miss.
+    ///
+    /// **Audit P1-8 (2026-05-14)**: this used to `panic!` if a transition
+    /// target's id was missing from the codegen index — turning a recoverable
+    /// "analyzer should have caught this" invariant violation into a process
+    /// abort with stderr backtrace. `fsm generate` now pre-flights every
+    /// transition source/target through [`Self::lookup`] in
+    /// `crate::emit::emit` and surfaces a missing id as
+    /// [`EmitError::UnknownStateId`] *before* any emitter runs — so this
+    /// fallback is unreachable in production. The `debug_assert!` keeps the
+    /// invariant honest in debug builds. The fallback returns
+    /// [`ROOT_SENTINEL`] (always valid), so even if a regression slipped
+    /// through, the worst case is a malformed-but-non-panicking C99 emission
+    /// instead of a CLI crash.
     pub fn must_lookup(&self, ir_id: &str) -> u8 {
-        self.lookup(ir_id).unwrap_or_else(|| {
-            panic!(
-                "fsm-codegen-c: unindexed state id `{}` — analyzer was supposed to catch this",
-                ir_id
-            )
-        })
+        match self.lookup(ir_id) {
+            Some(i) => i,
+            None => {
+                debug_assert!(
+                    false,
+                    "fsm-codegen-c: unindexed state id `{}` reached must_lookup — \
+                     emit::pre_flight_validate should have caught this. \
+                     (P1-8 invariant)",
+                    ir_id,
+                );
+                ROOT_SENTINEL
+            }
+        }
     }
 
     /// Record for a given index. Cheap unchecked access.
@@ -124,7 +144,13 @@ impl StateIndex {
 }
 
 /// Build a [`StateIndex`] for a single [`MachineObject`].
-pub fn build_state_index(machine: &MachineObject) -> StateIndex {
+///
+/// Returns [`EmitError::TooManyStates`] if the machine exceeds the v1.0
+/// hardware cap of 255 indexed nodes (256 minus the root sentinel). Audit
+/// P1-8 (2026-05-14): this used to `expect("…")` and abort the process —
+/// `fsm generate` now propagates the error through and exits with code 2 +
+/// a human-readable diagnostic instead.
+pub fn build_state_index(machine: &MachineObject) -> Result<StateIndex, EmitError> {
     let mut builder = IndexBuilder {
         records: Vec::new(),
         by_ir_id: HashMap::new(),
@@ -139,20 +165,20 @@ pub fn build_state_index(machine: &MachineObject) -> StateIndex {
         kind: StateRecordKind::Root,
         initial_child: None,
         history_pseudo: None,
-    });
+    })?;
     // The root region's "initial" is recorded on the root record once its
     // children are indexed.
     let root_initial_target = machine.root.initial.clone();
-    walk_region(&mut builder, &machine.root, ROOT_SENTINEL);
+    walk_region(&mut builder, &machine.root, ROOT_SENTINEL)?;
     // Patch the root sentinel with its `initial_child` now that the target
     // is indexed.
     if let Some(idx) = builder.by_ir_id.get(&root_initial_target).copied() {
         builder.records[ROOT_SENTINEL as usize].initial_child = Some(idx);
     }
-    StateIndex {
+    Ok(StateIndex {
         records: builder.records,
         by_ir_id: builder.by_ir_id,
-    }
+    })
 }
 
 struct IndexBuilder {
@@ -162,7 +188,7 @@ struct IndexBuilder {
 }
 
 impl IndexBuilder {
-    fn push(&mut self, mut rec: StateRecord) -> u8 {
+    fn push(&mut self, mut rec: StateRecord) -> Result<u8, EmitError> {
         // De-duplicate C identifier names — the IR allows two states named
         // `Idle` in different regions, but the C enum cannot have two
         // members of the same name.
@@ -173,23 +199,25 @@ impl IndexBuilder {
         }
         *count += 1;
 
-        let idx = u8::try_from(self.records.len()).expect(
-            "fsm-codegen-c: state count exceeds 255; v1.0 codegen does not support that. \
-             Increase the index type or split the machine.",
-        );
+        // Audit P1-8 (2026-05-14): the index width is `u8`. `expect("…")`
+        // here used to abort `fsm generate` with a panic+backtrace when a
+        // machine had >255 states. Now bubble up as `TooManyStates` so the
+        // CLI exits 2 with a diagnostic.
+        let idx = u8::try_from(self.records.len()).map_err(|_| EmitError::TooManyStates)?;
         self.by_ir_id.insert(rec.ir_id.clone(), idx);
         self.records.push(rec);
-        idx
+        Ok(idx)
     }
 }
 
-fn walk_region(b: &mut IndexBuilder, region: &RegionObject, parent: u8) {
+fn walk_region(b: &mut IndexBuilder, region: &RegionObject, parent: u8) -> Result<(), EmitError> {
     for state in &region.states {
-        walk_state(b, state, parent);
+        walk_state(b, state, parent)?;
     }
+    Ok(())
 }
 
-fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
+fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) -> Result<(), EmitError> {
     match state {
         StateNode::Simple(s) => {
             b.push(StateRecord {
@@ -200,7 +228,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::Simple,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
         StateNode::Composite(c) => {
             let idx = b.push(StateRecord {
@@ -211,9 +239,9 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::Composite,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
             for region in &c.regions {
-                walk_region(b, region, idx);
+                walk_region(b, region, idx)?;
             }
             // After children are indexed, patch the initial child + history
             // pseudo if applicable.
@@ -235,7 +263,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                         kind: StateRecordKind::History,
                         initial_child: None,
                         history_pseudo: None,
-                    }),
+                    })?,
                 };
                 b.records[idx as usize].history_pseudo = Some(h_idx);
             }
@@ -249,9 +277,9 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::Parallel,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
             for region in &p.regions {
-                walk_region(b, region, idx);
+                walk_region(b, region, idx)?;
             }
         }
         StateNode::Initial(i) => {
@@ -263,7 +291,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::Initial,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
         StateNode::Final(f) => {
             // Prefer the DSL name (`final PaymentFinal` -> `PaymentFinal`).
@@ -287,7 +315,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::Final,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
         StateNode::Choice(c) => {
             b.push(StateRecord {
@@ -298,7 +326,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::Choice,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
         StateNode::Junction(j) => {
             b.push(StateRecord {
@@ -309,7 +337,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::Junction,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
         StateNode::History(h) => {
             b.push(StateRecord {
@@ -320,7 +348,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::History,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
         StateNode::Fork(f) => {
             b.push(StateRecord {
@@ -331,7 +359,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::Fork,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
         StateNode::Join(j) => {
             b.push(StateRecord {
@@ -342,7 +370,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::Join,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
         StateNode::Submachine(s) => {
             b.push(StateRecord {
@@ -353,7 +381,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::Submachine,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
         StateNode::EntryPoint(e) => {
             b.push(StateRecord {
@@ -364,7 +392,7 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::EntryPoint,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
         StateNode::ExitPoint(e) => {
             b.push(StateRecord {
@@ -375,9 +403,10 @@ fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) {
                 kind: StateRecordKind::ExitPoint,
                 initial_child: None,
                 history_pseudo: None,
-            });
+            })?;
         }
     }
+    Ok(())
 }
 
 /// Convert a DSL name into a C-safe identifier fragment. Per Doc 11 §4:
@@ -460,7 +489,8 @@ mod tests {
 
     #[test]
     fn root_sentinel_at_index_zero() {
-        let idx = build_state_index(&flat_machine());
+        let idx = build_state_index(&flat_machine())
+            .expect("build_state_index for flat machine should succeed");
         assert_eq!(idx.records[0].kind, StateRecordKind::Root);
         assert_eq!(idx.records[0].parent, ROOT_SENTINEL);
         // Initial pseudo of the root region populates `initial_child`.
@@ -470,7 +500,8 @@ mod tests {
 
     #[test]
     fn simple_state_is_active_at_rest() {
-        let idx = build_state_index(&flat_machine());
+        let idx = build_state_index(&flat_machine())
+            .expect("build_state_index for flat machine should succeed");
         let s_idx = idx.lookup("s-idle").unwrap();
         assert_eq!(idx.get(s_idx).kind, StateRecordKind::Simple);
         assert!(idx.get(s_idx).kind.is_active_at_rest());
@@ -478,7 +509,8 @@ mod tests {
 
     #[test]
     fn initial_pseudo_is_not_active_at_rest() {
-        let idx = build_state_index(&flat_machine());
+        let idx = build_state_index(&flat_machine())
+            .expect("build_state_index for flat machine should succeed");
         let p_idx = idx.lookup("ps-init").unwrap();
         assert!(!idx.get(p_idx).kind.is_active_at_rest());
     }
@@ -547,7 +579,8 @@ mod tests {
             targets: vec![],
             loc: loc(),
         };
-        let idx = build_state_index(&m);
+        let idx =
+            build_state_index(&m).expect("build_state_index for collision machine should succeed");
         let a = idx.lookup("s-idle-1").unwrap();
         let b = idx.lookup("s-idle-2").unwrap();
         assert_ne!(idx.get(a).c_name, idx.get(b).c_name);

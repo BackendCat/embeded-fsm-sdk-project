@@ -1,33 +1,58 @@
 //! Completion event helper — Doc 08 §9, Doc 00 §7.6 (B-08).
 //!
 //! When a state is entered, the interpreter calls
-//! [`check_and_enqueue_completion`] which walks the just-entered state's
-//! ancestor chain and enqueues a completion event at the FRONT of the queue
-//! for the deepest composite/parallel state whose completion condition is
-//! satisfied:
+//! [`check_and_enqueue_completion`] which:
 //!
-//! - **Composite parent**: if its single region's active leaf is `Final`,
-//!   enqueue `Completion(parent.id)`.
-//! - **Parallel parent**: if EVERY region's active leaf is `Final`, enqueue
-//!   `Completion(parent.id)`.
+//! 1. If the just-entered state itself declares a `done -> Target`
+//!    transition (UML "completion event" / auto-transition, Doc 04 §8.4),
+//!    enqueue `Completion(just_entered)`. This fires the auto-transition
+//!    after entry actions complete, without waiting for an external event.
 //!
-//! Doc 08 §9.3 propagates outward — but propagation is naturally handled by
+//! 2. Walks the just-entered state's ancestor chain and enqueues a
+//!    completion event for the deepest enclosing composite/parallel whose
+//!    completion condition is satisfied:
+//!    - **Composite parent**: if its single region's active leaf is `Final`,
+//!      enqueue `Completion(parent.id)`.
+//!    - **Parallel parent**: if EVERY region's active leaf is `Final`,
+//!      enqueue `Completion(parent.id)`.
+//!
+//! Doc 08 §9.3 propagates outward — propagation is naturally handled by
 //! firing the completion event for the inner state; when the inner state is
 //! exited and its parent becomes (recursively) final, the outer
 //! `check_and_enqueue_completion` call from the next entry sequence catches it.
+
+use fsm_ir::TransitionKind;
 
 use crate::runtime::event::{EventKind, QueuedEvent};
 use crate::runtime::machine_index::NodeKind;
 use crate::runtime::queue::QueueError;
 use crate::runtime::state::RuntimeState;
 
-/// Walk ancestors of `just_entered` and enqueue at most one Completion
-/// event for the deepest enclosing composite/parallel whose completion
-/// condition is satisfied.
+/// Walk ancestors of `just_entered`, enqueueing at most one Completion
+/// event. Priority order:
+///
+/// 1. If `just_entered` itself has a `done -> X` transition, enqueue
+///    `Completion(just_entered)` so the auto-transition fires next step.
+/// 2. Otherwise, find the deepest enclosing composite/parallel whose
+///    region(s) have all reached Final and enqueue a parent-completion.
 pub fn check_and_enqueue_completion(
     rt: &mut RuntimeState,
     just_entered: &str,
 ) -> Result<(), QueueError> {
+    // (1) Self-completion: `done -> X` on a basic state fires after entry
+    // actions complete, regardless of Final-state status. Doc 04 §8.4 +
+    // Doc 08 §3.1: the completion event for a non-final state with a `done`
+    // transition is the same auto-transition mechanism UML uses for
+    // "completion events".
+    if state_has_done_transition(rt, just_entered) {
+        rt.queue.push_front(QueuedEvent {
+            kind: EventKind::Completion {
+                state_id: just_entered.to_string(),
+            },
+            payload: None,
+        })?;
+        return Ok(());
+    }
     let ancestors = rt.machine.ancestors(just_entered);
     // The first ancestor is `just_entered` itself; skip it for the check
     // unless it is itself a `Final` state (in which case its enclosing
@@ -59,6 +84,26 @@ pub fn check_and_enqueue_completion(
         }
     }
     Ok(())
+}
+
+/// True iff `state_id` is a **basic** (Simple) state that declares at
+/// least one `done -> X` transition (`TransitionKind::Completion`).
+///
+/// Composite and Parallel states also use `done`, but their completion
+/// semantics are gated by region/Final-state status — handled in the
+/// existing ancestor walk below. Self-completion for non-basic states
+/// would fire prematurely (before all regions reach Final). Pseudo-states
+/// never carry transitions, so they always return `false`.
+fn state_has_done_transition(rt: &RuntimeState, state_id: &str) -> bool {
+    let Some(node) = rt.machine.node(state_id) else {
+        return false;
+    };
+    if !matches!(node.kind, NodeKind::Simple) {
+        return false;
+    }
+    node.transitions
+        .iter()
+        .any(|t| t.kind == TransitionKind::Completion)
 }
 
 /// True iff the single-region composite `state_id` has its active leaf in a

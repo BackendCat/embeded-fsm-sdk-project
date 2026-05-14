@@ -1,6 +1,6 @@
 {
   "machineFile": "vending-machine.fsm",
-  "description": "Drive both parallel regions to their final states and confirm the outer Operational composite is exited via RESET to Done.",
+  "description": "Drive both parallel regions to their final states and confirm the outer Operational composite is exited via RESET to Done. After the audit P1-8 sibling fix (2026-05-14), `done` transitions on non-final states auto-fire, so DISPENSE drives ChangeAvailable -> PaymentFinal and Dispensing -> SelectionFinal in the same RTC cycle as the user-dispatched event. The second `DISPENSE` is therefore a no-op (both regions are already in their Final state), kept here to confirm idle behaviour.",
   "init": { "machineName": "VendingMachine" },
   "steps": [
     { "action": "dispatch", "event": "COIN", "payload": { "value": { "type": "u16", "value": 100 } } },
@@ -94,14 +94,52 @@
     },
     {
       "traceId": 5,
-      "kind": "dispatched",
+      "kind": "completion",
       "virtualClockMs": 0,
-      "eventReceived": { "name": "DISPENSE", "stableId": "M:VendingMachine:event:DISPENSE" },
+      "eventReceived": { "name": "__completion__:s-VendingMachine-Dispensing" },
+      "transitionTaken": {
+        "stableId": "M:VendingMachine:transition:t-VendingMachine-7",
+        "source": "s-VendingMachine-Dispensing",
+        "target": "s-VendingMachine-SelectionFinal"
+      },
+      "exitedStates": ["s-VendingMachine-Dispensing"],
+      "enteredStates": ["s-VendingMachine-SelectionFinal"],
       "configBefore": ["s-VendingMachine-ChangeAvailable", "s-VendingMachine-Dispensing"],
-      "configAfter": ["s-VendingMachine-ChangeAvailable", "s-VendingMachine-Dispensing"]
+      "configAfter": ["s-VendingMachine-ChangeAvailable", "s-VendingMachine-SelectionFinal"]
     },
     {
       "traceId": 6,
+      "kind": "completion",
+      "virtualClockMs": 0,
+      "eventReceived": { "name": "__completion__:s-VendingMachine-ChangeAvailable" },
+      "transitionTaken": {
+        "stableId": "M:VendingMachine:transition:t-VendingMachine-4",
+        "source": "s-VendingMachine-ChangeAvailable",
+        "target": "s-VendingMachine-PaymentFinal"
+      },
+      "exitedStates": ["s-VendingMachine-ChangeAvailable"],
+      "enteredStates": ["s-VendingMachine-PaymentFinal"],
+      "configBefore": ["s-VendingMachine-ChangeAvailable", "s-VendingMachine-SelectionFinal"],
+      "configAfter": ["s-VendingMachine-SelectionFinal", "s-VendingMachine-PaymentFinal"]
+    },
+    {
+      "traceId": 7,
+      "kind": "completion",
+      "virtualClockMs": 0,
+      "eventReceived": { "name": "__completion__:s-VendingMachine-Operational" },
+      "configBefore": ["s-VendingMachine-SelectionFinal", "s-VendingMachine-PaymentFinal"],
+      "configAfter": ["s-VendingMachine-SelectionFinal", "s-VendingMachine-PaymentFinal"]
+    },
+    {
+      "traceId": 8,
+      "kind": "dispatched",
+      "virtualClockMs": 0,
+      "eventReceived": { "name": "DISPENSE", "stableId": "M:VendingMachine:event:DISPENSE" },
+      "configBefore": ["s-VendingMachine-SelectionFinal", "s-VendingMachine-PaymentFinal"],
+      "configAfter": ["s-VendingMachine-SelectionFinal", "s-VendingMachine-PaymentFinal"]
+    },
+    {
+      "traceId": 9,
       "kind": "dispatched",
       "virtualClockMs": 0,
       "eventReceived": { "name": "RESET", "stableId": "M:VendingMachine:event:RESET" },
@@ -111,12 +149,12 @@
         "target": "s-VendingMachine-Done"
       },
       "exitedStates": [
-        "s-VendingMachine-Dispensing",
-        "s-VendingMachine-ChangeAvailable",
+        "s-VendingMachine-SelectionFinal",
+        "s-VendingMachine-PaymentFinal",
         "s-VendingMachine-Operational"
       ],
       "enteredStates": ["s-VendingMachine-Done"],
-      "configBefore": ["s-VendingMachine-ChangeAvailable", "s-VendingMachine-Dispensing"],
+      "configBefore": ["s-VendingMachine-SelectionFinal", "s-VendingMachine-PaymentFinal"],
       "configAfter": ["s-VendingMachine-Done"]
     }
   ]

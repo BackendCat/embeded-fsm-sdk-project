@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn parent_chain_walks_to_root() {
         let m = nested_machine();
-        let idx = build_state_index(&m);
+        let idx = build_state_index(&m).expect("build_state_index");
         let pt = build_parent_table(&idx);
         let running_idx = idx.lookup("s-running").unwrap();
         let op_idx = idx.lookup("s-op").unwrap();

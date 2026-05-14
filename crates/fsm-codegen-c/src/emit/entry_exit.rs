@@ -229,7 +229,7 @@ mod tests {
             targets: vec![],
             loc: loc(),
         };
-        let index = crate::state_index::build_state_index(&m);
+        let index = crate::state_index::build_state_index(&m).expect("build_state_index");
         let parents = crate::parent_table::build_parent_table(&index);
         (index, parents)
     }

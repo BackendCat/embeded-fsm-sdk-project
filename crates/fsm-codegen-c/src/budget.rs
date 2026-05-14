@@ -10,6 +10,7 @@
 use fsm_ir::{ContextField, Ir, MachineObject, StateNode, Type};
 
 use crate::config::CodegenConfig;
+use crate::emit::EmitError;
 use crate::state_index::{build_state_index, StateIndex, StateRecordKind};
 
 /// Approximate memory budget for a single machine.
@@ -44,18 +45,25 @@ pub struct MemoryBudget {
 /// the CLI prints one block per machine. For codegen integration tests
 /// that build a single `Motor` IR, taking the first machine is the right
 /// behaviour.
-pub fn compute_budget(ir: &Ir, config: &CodegenConfig) -> MemoryBudget {
+///
+/// Audit P1-8 (2026-05-14): returns [`EmitError::TooManyStates`] instead of
+/// panicking on >255-state machines so the CLI can exit 2 with a diagnostic
+/// instead of aborting with a backtrace.
+pub fn compute_budget(ir: &Ir, config: &CodegenConfig) -> Result<MemoryBudget, EmitError> {
     let machine = ir
         .machines
         .first()
-        .expect("fsm-codegen-c: cannot compute budget for an empty IR document");
+        .ok_or_else(|| EmitError::EmptyMachine("<no machines in IR>".to_owned()))?;
     compute_machine_budget(machine, config)
 }
 
 /// Per-machine budget computation. Exposed so tests can address each
 /// machine in a multi-machine IR.
-pub fn compute_machine_budget(machine: &MachineObject, config: &CodegenConfig) -> MemoryBudget {
-    let index = build_state_index(machine);
+pub fn compute_machine_budget(
+    machine: &MachineObject,
+    config: &CodegenConfig,
+) -> Result<MemoryBudget, EmitError> {
+    let index = build_state_index(machine)?;
 
     let sizeof_event = sizeof_event(machine);
     let queue_bytes = (config.queue_capacity as usize) * sizeof_event;
@@ -68,12 +76,12 @@ pub fn compute_machine_budget(machine: &MachineObject, config: &CodegenConfig) -
     // — one per simultaneously active leaf), `_active_count` (u8),
     // `_queue_head`, `_queue_tail`, `_queue_count`, `_completion_depth` —
     // four u8 fixed fields plus the variable-size active-leaf array.
-    let bookkeeping = 5 + count_active_slots(machine);
+    let bookkeeping = 5 + count_active_slots(machine)?;
     let sizeof_machine = sizeof_context + queue_bytes + history_bytes + timer_bytes + bookkeeping;
 
     let estimated_rom_bytes = estimate_rom(&index, machine);
 
-    MemoryBudget {
+    Ok(MemoryBudget {
         sizeof_machine,
         sizeof_context,
         queue_bytes,
@@ -82,7 +90,7 @@ pub fn compute_machine_budget(machine: &MachineObject, config: &CodegenConfig) -
         timer_bytes,
         total_ram_bytes: sizeof_machine,
         estimated_rom_bytes,
-    }
+    })
 }
 
 fn sizeof_type(t: &Type) -> usize {
@@ -156,11 +164,11 @@ fn count_timers(machine: &MachineObject) -> usize {
     acc
 }
 
-fn count_active_slots(machine: &MachineObject) -> usize {
+fn count_active_slots(machine: &MachineObject) -> Result<usize, EmitError> {
     // Number of `_active[]` slots. Reuses the same conservative analysis
     // `region_layout::compute_max_active_leaves` performs.
-    let idx = build_state_index(machine);
-    crate::region_layout::build_region_layout(machine, &idx).max_parallel_regions as usize
+    let idx = build_state_index(machine)?;
+    Ok(crate::region_layout::build_region_layout(machine, &idx).max_parallel_regions as usize)
 }
 
 fn state_depth(index: &StateIndex) -> usize {
@@ -325,14 +333,14 @@ mod tests {
 
     #[test]
     fn budget_includes_context_fields() {
-        let b = compute_budget(&motor_ir(), &CodegenConfig::default());
+        let b = compute_budget(&motor_ir(), &CodegenConfig::default()).expect("budget");
         // u16 (2) + bool (1) = 3
         assert_eq!(b.sizeof_context, 3);
     }
 
     #[test]
     fn total_ram_exceeds_context() {
-        let b = compute_budget(&motor_ir(), &CodegenConfig::default());
+        let b = compute_budget(&motor_ir(), &CodegenConfig::default()).expect("budget");
         assert!(
             b.total_ram_bytes > b.sizeof_context,
             "got: {b:?} — queue + bookkeeping should push total above context"
@@ -343,9 +351,9 @@ mod tests {
     fn queue_bytes_scales_with_capacity() {
         let mut cfg = CodegenConfig::default();
         cfg.queue_capacity = 16;
-        let b16 = compute_budget(&motor_ir(), &cfg);
+        let b16 = compute_budget(&motor_ir(), &cfg).expect("budget");
         cfg.queue_capacity = 4;
-        let b4 = compute_budget(&motor_ir(), &cfg);
+        let b4 = compute_budget(&motor_ir(), &cfg).expect("budget");
         assert!(b16.queue_bytes > b4.queue_bytes);
     }
 
@@ -353,7 +361,7 @@ mod tests {
     fn rom_estimate_nonzero_even_for_empty_machine() {
         // Even a no-transition machine carries the parent table + function
         // tables in ROM.
-        let b = compute_budget(&motor_ir(), &CodegenConfig::default());
+        let b = compute_budget(&motor_ir(), &CodegenConfig::default()).expect("budget");
         assert!(b.estimated_rom_bytes > 0);
     }
 }

@@ -190,6 +190,15 @@ impl Interpreter {
             &self.externs,
         )?;
 
+        // Doc 08 §2.2 / §9.1: after the initial entry sequence, run the
+        // completion check so any `done -> X` on initially-entered states
+        // auto-fires before external dispatching begins. Without this,
+        // machines whose root-initial state carries `done` would idle until
+        // the first external event.
+        for s in entered.clone() {
+            check_and_enqueue_completion(&mut rt, &s)?;
+        }
+
         let rec = StepRecord {
             trace_id: rt.next_trace_id,
             kind: StepKind::Init,

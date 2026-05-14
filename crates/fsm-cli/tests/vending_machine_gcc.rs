@@ -88,10 +88,17 @@ void dispense_item(void)                                          { /* no-op */ 
 int main(void) {
     VendingMachine_t vm;
     VendingMachine_init(&vm);
-    /* v1.0 codegen does not yet apply DSL context defaults (out of
-     * scope for the P0-2 + P0-3 audit). Set `price` manually to match
-     * the DSL declaration `price : u16 = 150`. */
-    vm.context.price = 150;
+    /* Context defaults `balance: u16 = 0; price: u16 = 150` are now
+     * emitted by Motor_init (audit P1-8 sibling fix, 2026-05-14). No
+     * manual workaround required. */
+    if (vm.context.price != 150) {
+        fprintf(stderr, "init: expected price = 150 (DSL default), got %u\n", vm.context.price);
+        return 30;
+    }
+    if (vm.context.balance != 0) {
+        fprintf(stderr, "init: expected balance = 0 (DSL default), got %u\n", vm.context.balance);
+        return 31;
+    }
 
     /* Initial state expands the parallel `Operational` into both
      * regions. Payment region → Idle (slot 0), Selection region →
@@ -155,37 +162,27 @@ int main(void) {
 
     /* Dispatch DISPENSE: both regions can transition on this event.
      * Payment: CoinInserted → ChangeAvailable (balance >= price);
-     * Selection: Selected → Dispensing. */
+     * Selection: Selected → Dispensing.
+     *
+     * `done` on a non-final state now auto-fires (audit P1-8 sibling
+     * fix, 2026-05-14). After the dispatch step, Motor_handle_completion
+     * synthesises EVENT__COMPLETION for ChangeAvailable / Dispensing, so
+     * we land directly in PaymentFinal / SelectionFinal — no manual
+     * completion dispatch required. */
     VendingMachine_Event_t dispense = { .id = VENDINGMACHINE_EVENT_DISPENSE };
     VendingMachine_dispatch(&vm, &dispense);
-    if (vm._active[0] != VENDINGMACHINE_STATE_CHANGEAVAILABLE) {
-        fprintf(stderr, "DISPENSE: expected slot 0 = CHANGEAVAILABLE, got %d\n", vm._active[0]);
+    if (vm._active[0] != VENDINGMACHINE_STATE_PAYMENTFINAL) {
+        fprintf(stderr, "DISPENSE: expected slot 0 = PAYMENTFINAL (auto-fired via done), got %d\n", vm._active[0]);
         return 10;
     }
-    if (vm._active[1] != VENDINGMACHINE_STATE_DISPENSING) {
-        fprintf(stderr, "DISPENSE: expected slot 1 = DISPENSING, got %d\n", vm._active[1]);
+    if (vm._active[1] != VENDINGMACHINE_STATE_SELECTIONFINAL) {
+        fprintf(stderr, "DISPENSE: expected slot 1 = SELECTIONFINAL (auto-fired via done), got %d\n", vm._active[1]);
         return 11;
     }
     /* Balance reduced by price (200 - 150 = 50). */
     if (vm.context.balance != 50) {
         fprintf(stderr, "DISPENSE: expected balance = 50, got %u\n", vm.context.balance);
         return 12;
-    }
-
-    /* The `done` transitions on ChangeAvailable / Dispensing are
-     * synthesised as completion events. v1.0 codegen does not yet
-     * auto-fire those for non-Final states (out of scope for the P0-2
-     * + P0-3 audit fix), so we dispatch the completion event manually
-     * to drive each region into its Final state. */
-    VendingMachine_Event_t comp = { .id = VENDINGMACHINE_EVENT__COMPLETION };
-    VendingMachine_dispatch(&vm, &comp);
-    if (vm._active[0] != VENDINGMACHINE_STATE_PAYMENTFINAL) {
-        fprintf(stderr, "COMP1: expected slot 0 = PAYMENTFINAL, got %d\n", vm._active[0]);
-        return 20;
-    }
-    if (vm._active[1] != VENDINGMACHINE_STATE_SELECTIONFINAL) {
-        fprintf(stderr, "COMP1: expected slot 1 = SELECTIONFINAL, got %d\n", vm._active[1]);
-        return 21;
     }
 
     /* Dispatch RESET: parallel's own transition fires, exiting both

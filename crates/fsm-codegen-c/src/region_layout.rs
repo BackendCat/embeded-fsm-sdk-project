@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn flat_machine_max_regions_is_one() {
         let m = flat();
-        let idx = crate::state_index::build_state_index(&m);
+        let idx = crate::state_index::build_state_index(&m).expect("build_state_index");
         let layout = build_region_layout(&m, &idx);
         assert_eq!(layout.max_parallel_regions, 1);
         let idle = idx.lookup("s-idle").unwrap();
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn parallel_two_regions_gives_two_slots() {
         let m = parallel_two_regions();
-        let idx = crate::state_index::build_state_index(&m);
+        let idx = crate::state_index::build_state_index(&m).expect("build_state_index");
         let layout = build_region_layout(&m, &idx);
         // Two regions → two slots total (region 0 shares the parent's
         // slot 0, region 1 takes slot 1).

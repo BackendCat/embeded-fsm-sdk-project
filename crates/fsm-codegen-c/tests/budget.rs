@@ -8,7 +8,7 @@ use fsm_codegen_c::{compute_budget, CodegenConfig};
 #[test]
 fn motor_budget_is_nonempty_and_consistent() {
     let ir = common::motor_ir();
-    let b = compute_budget(&ir, &CodegenConfig::default());
+    let b = compute_budget(&ir, &CodegenConfig::default()).expect("budget");
 
     assert!(
         b.sizeof_context > 0,
@@ -37,16 +37,17 @@ fn larger_queue_means_more_ram() {
         queue_capacity: 16,
         ..Default::default()
     };
-    let b4 = compute_budget(&ir, &cfg4);
-    let b16 = compute_budget(&ir, &cfg16);
+    let b4 = compute_budget(&ir, &cfg4).expect("budget cfg4");
+    let b16 = compute_budget(&ir, &cfg16).expect("budget cfg16");
     assert!(b16.queue_bytes > b4.queue_bytes);
     assert!(b16.total_ram_bytes > b4.total_ram_bytes);
 }
 
 #[test]
 fn hierarchical_machine_deeper_completion_depth() {
-    let flat = compute_budget(&common::motor_ir(), &CodegenConfig::default());
-    let nested = compute_budget(&common::hierarchical_motor_ir(), &CodegenConfig::default());
+    let flat = compute_budget(&common::motor_ir(), &CodegenConfig::default()).expect("flat budget");
+    let nested = compute_budget(&common::hierarchical_motor_ir(), &CodegenConfig::default())
+        .expect("nested budget");
     assert!(
         nested.max_completion_depth >= flat.max_completion_depth,
         "nested machine should have at least the same depth: nested={:?}, flat={:?}",

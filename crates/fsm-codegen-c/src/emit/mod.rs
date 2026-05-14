@@ -76,8 +76,20 @@ pub enum EmitError {
          the C99 runtime uses bitwise-AND modulo and requires 2^N values"
     )]
     QueueCapacityNotPowerOfTwo(u8),
-    #[error("fsm-codegen-c: state index overflowed u8 — codegen does not support > 255 states")]
+    #[error(
+        "fsm-codegen-c: state index overflowed u8 — codegen does not support > 255 states. \
+         Split the machine, raise the index type, or audit the IR for accidental state duplication."
+    )]
     TooManyStates,
+    /// A transition source/target (or other id reference) points at a state
+    /// id that wasn't indexed for the machine. The analyzer is responsible
+    /// for rejecting unresolved names (FSM-E0002) before codegen runs; this
+    /// variant catches the case where an IR slipped through with an
+    /// unresolved reference and lets `fsm generate` exit 2 with a clear
+    /// diagnostic instead of aborting via `panic!` in
+    /// `state_index::must_lookup` (audit P1-8).
+    #[error("fsm-codegen-c: unindexed state id `{0}` referenced from a transition or trigger")]
+    UnknownStateId(String),
 }
 
 /// Run the full emit pipeline for an IR document.
@@ -115,7 +127,14 @@ pub fn emit(ir: &Ir, config: &CodegenConfig) -> Result<EmittedFiles, EmitError> 
             return Err(EmitError::EmptyMachine(machine.name.clone()));
         }
 
-        let index = crate::state_index::build_state_index(machine);
+        let index = crate::state_index::build_state_index(machine)?;
+        // Audit P1-8 (2026-05-14): walk every transition source / target
+        // through the index BEFORE any emitter dereferences via
+        // `must_lookup`. The analyzer is the authoritative gate (FSM-E0002
+        // unresolved-name), but defending in codegen turns "analyzer
+        // regression slipped through" from a `panic!` + backtrace into a
+        // clean `EmitError::UnknownStateId` propagated to CLI exit code 2.
+        pre_flight_validate(machine, &index)?;
         let parents = crate::parent_table::build_parent_table(&index);
         let layout = crate::region_layout::build_region_layout(machine, &index);
         let resolved_strategy = config.strategy.resolve(index.count());
@@ -136,6 +155,86 @@ pub fn emit(ir: &Ir, config: &CodegenConfig) -> Result<EmittedFiles, EmitError> 
     }
 
     Ok(EmittedFiles { files })
+}
+
+/// Verify that every state id referenced from a transition, trigger, or
+/// timer in `machine` is present in `index`. Surfaces missing ids as
+/// [`EmitError::UnknownStateId`] so callers can map the error to a
+/// non-zero CLI exit rather than crashing inside an emit pass.
+///
+/// The analyzer is supposed to reject unresolved names at parse time
+/// (FSM-E0002); this is a belt-and-braces check that lets `fsm generate`
+/// exit cleanly even when an analyzer regression lets a malformed IR
+/// reach codegen. Audit P1-8.
+fn pre_flight_validate(
+    machine: &fsm_ir::MachineObject,
+    index: &crate::state_index::StateIndex,
+) -> Result<(), EmitError> {
+    fn check(idx: &crate::state_index::StateIndex, id: &str) -> Result<(), EmitError> {
+        if id.is_empty() {
+            // Empty ids appear from lowering when a target name failed to
+            // resolve at analysis time; the diagnostic was already emitted
+            // and this codegen path simply skips them rather than calling
+            // `must_lookup` on `""`.
+            return Ok(());
+        }
+        if idx.lookup(id).is_none() {
+            return Err(EmitError::UnknownStateId(id.to_owned()));
+        }
+        Ok(())
+    }
+    fn walk(
+        idx: &crate::state_index::StateIndex,
+        states: &[fsm_ir::StateNode],
+    ) -> Result<(), EmitError> {
+        for s in states {
+            match s {
+                fsm_ir::StateNode::Simple(ss) => {
+                    for t in &ss.transitions {
+                        check(idx, &t.source)?;
+                        check(idx, &t.target)?;
+                    }
+                    for t in &ss.timers {
+                        if let Some(tgt) = &t.target {
+                            check(idx, tgt)?;
+                        }
+                    }
+                }
+                fsm_ir::StateNode::Composite(c) => {
+                    for t in &c.transitions {
+                        check(idx, &t.source)?;
+                        check(idx, &t.target)?;
+                    }
+                    for t in &c.timers {
+                        if let Some(tgt) = &t.target {
+                            check(idx, tgt)?;
+                        }
+                    }
+                    for r in &c.regions {
+                        walk(idx, &r.states)?;
+                    }
+                }
+                fsm_ir::StateNode::Parallel(p) => {
+                    for t in &p.transitions {
+                        check(idx, &t.source)?;
+                        check(idx, &t.target)?;
+                    }
+                    for r in &p.regions {
+                        walk(idx, &r.states)?;
+                    }
+                }
+                fsm_ir::StateNode::Submachine(sm) => {
+                    for t in &sm.transitions {
+                        check(idx, &t.source)?;
+                        check(idx, &t.target)?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    walk(index, &machine.root.states)
 }
 
 /// Per-machine emit context, threaded through the file emitters so they
