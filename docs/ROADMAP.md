@@ -40,6 +40,8 @@ See `docs/00-Decisions-And-Reconciliation.md` §11 for the full implementation-t
 
 Adoption-blocking items first; UML completeness second.
 
+> ⛔ **v1.1 TAG IS BLOCKED by W7-FU-1 (P0).** W7's behavioural-acceptance discipline surfaced a pre-existing P0-1-class core defect: a state with ≥2 transitions on the **same event** disambiguated by guards (`on E [g1]->A` / `on E [g2]->B`, incl. an `on E ->C` fallback — bread-and-butter UML) is mis-lowered by **both** dispatch strategies (switch → hard `duplicate case` gcc error even without `-Werror`; table → silent guard-ignoring event-drop, P0-1 silent-data-loss class). No shipped example trips it (so nothing currently-tested is broken), but tagging "full UML" while a core legal construct silently miscompiles would repeat the exact P0-1/submachine overstatement the project keeps re-learning. Fix lands ahead of W8. Detail: backlog `W7-FU-1`, Doc 00 §11.25, CHANGELOG.
+
 ### Integration features
 - **`fsm generate --import-header <path.h>`** — auto-extern from existing C header files. ✅ **COMPLETE 2026-05-15** (W5). Reduces friction for users with substantial existing C codebases who currently must hand-write each `extern` declaration. (OPAQUE-BUG-1, surfaced *by* this wave's honest scoping, then fixed in §11.23 — opaque pointer/struct HAL params now model end-to-end; relaxing W5's importer opaque-skip tracked as W5-FU-1.)
 - **`examples/integration/{make,cmake,cargo-rust,platformio}/`** — ✅ **COMPLETE 2026-05-15** (W6 `e74888a`). Four worked end-to-end integrations; each *genuinely* builds the generated C under `gcc -std=c99 -Wall -Wextra -Wpedantic -Werror` (make/cmake/cargo-rust run+assert the full lifecycle; platformio ships the real `pio` recipe + a verified host-gcc fallback since `pio` is absent on the box). No codegen defect surfaced — independent corroboration the pipeline holds under real ecosystems.
@@ -67,7 +69,7 @@ Adoption-blocking items first; UML completeness second.
 - `pub → pub(crate)` sweep across 9 crates (~340 over-exposed items per Audit B P2-A1).
 
 ### Release criteria for v1.1
-- 0 P0, ≤5 well-scoped P1s in pre-tag audit
+- 0 P0, ≤5 well-scoped P1s in pre-tag audit — **currently 1 open P0: W7-FU-1 (must be green before W8 runs)**
 - 600+ tests passing
 - One real-world customer-style integration example proven end-to-end on a representative embedded target — ✅ **SATISFIED 2026-05-15** (W6: four ecosystems, each gcc -Werror RUN-verified; platformio `native`+`uno` AVR target)
 
