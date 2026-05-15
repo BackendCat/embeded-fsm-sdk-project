@@ -11,6 +11,7 @@
 //! keep forward-looking sections (`[simulate]`, `[lsp]`, `[generate.cpp]`)
 //! in the same file without us screaming at them.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -23,6 +24,29 @@ pub struct FsmToml {
     pub compiler: CompilerSection,
     pub generate: GenerateSection,
     pub format: FormatSection,
+    /// Per-machine overrides keyed by machine name, e.g.
+    /// `[machine.MotorControl] strategy = "switch"`. `toml`/`serde` maps a
+    /// table-of-tables (`[machine.<Name>]`) onto a `BTreeMap`. `BTreeMap`
+    /// (not `HashMap`) keeps any future serialization byte-deterministic,
+    /// consistent with §11.10. Empty when no `[machine.*]` block is present
+    /// — the override map stays empty and codegen output is byte-identical
+    /// to pre-W7 (zero behavioural change when the feature is unused).
+    #[serde(default)]
+    pub machine: BTreeMap<String, MachineSection>,
+}
+
+/// One `[machine.<Name>]` table. Only `strategy` is modelled in v1.1-W7
+/// (per-machine dispatch override, Doc 00 §11.25). The struct is
+/// `#[serde(default)]` so a forward-looking key a future wave adds here
+/// does not break older configs, mirroring the other sections.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct MachineSection {
+    /// `"switch" | "table" | "auto"`. Validated (clean-reject) at the
+    /// generate call site, NOT here — the loader stays a pure parser; an
+    /// unknown value surfaces as a Doc 18 §3 exit-4 config error with a
+    /// message naming the offending machine.
+    pub strategy: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -149,5 +173,45 @@ mod tests {
         fs::write(td.path().join("fsm.toml"), "not = toml = at = all").unwrap();
         let err = load(td.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }));
+    }
+
+    #[test]
+    fn parses_per_machine_strategy_tables() {
+        let td = tempfile::tempdir().unwrap();
+        fs::write(
+            td.path().join("fsm.toml"),
+            "[generate]\nstrategy = \"auto\"\n\n\
+             [machine.MotorControl]\nstrategy = \"switch\"\n\n\
+             [machine.SensorPoll]\nstrategy = \"table\"\n",
+        )
+        .unwrap();
+        let (_, cfg) = load(td.path()).unwrap().expect("config loaded");
+        assert_eq!(
+            cfg.machine
+                .get("MotorControl")
+                .and_then(|m| m.strategy.as_deref()),
+            Some("switch")
+        );
+        assert_eq!(
+            cfg.machine
+                .get("SensorPoll")
+                .and_then(|m| m.strategy.as_deref()),
+            Some("table")
+        );
+        // Absent key → None, not an error (loader is a pure parser).
+        assert!(cfg.machine.get("Nope").is_none());
+    }
+
+    #[test]
+    fn no_machine_table_yields_empty_map() {
+        let td = tempfile::tempdir().unwrap();
+        fs::write(
+            td.path().join("fsm.toml"),
+            "[generate]\nstrategy = \"switch\"\n",
+        )
+        .unwrap();
+        let (_, cfg) = load(td.path()).unwrap().expect("config loaded");
+        // Empty map is the zero-behavioural-change baseline (no override).
+        assert!(cfg.machine.is_empty());
     }
 }

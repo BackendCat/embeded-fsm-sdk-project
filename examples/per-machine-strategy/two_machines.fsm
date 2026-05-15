@@ -1,0 +1,74 @@
+language fsm 2.0
+// v1.1-W7 behavioural fixture (Doc 00 section 11.25): ONE source file with
+// TWO top-level machines. The companion fsm.toml gives `Latch`
+// strategy="switch" and `Counter` strategy="table" so a single
+// `fsm generate` emits MIXED dispatch in one project. Both machines are
+// small (auto would pick switch for BOTH); the test therefore proves the
+// per-machine override genuinely forced `Counter` onto the table strategy,
+// not that auto coincidentally chose it. Each machine mutates context and
+// has a guarded transition so the gcc-compiled binary can assert real
+// behaviour, not just symbol presence (SUBAGENT_CONVENTIONS section 5.4).
+// ASCII-only on purpose: -Werror + embedded toolchains reject stray bytes.
+
+extern latch_engaged()
+
+machine Latch {
+    context {
+        toggles: u32 = 0
+        locked : u8  = 0
+    }
+
+    events {
+        ARM
+        RELEASE
+        LOCK
+    }
+
+    initial Open
+
+    state Open {
+        on ARM -> Armed : ctx.toggles = ctx.toggles + 1
+    }
+
+    state Armed {
+        on LOCK [ctx.toggles >= 1] -> Locked : ctx.locked = 1; latch_engaged()
+        on RELEASE                 -> Open
+    }
+
+    state Locked {
+        on RELEASE -> Open : ctx.locked = 0
+    }
+}
+
+machine Counter {
+    context {
+        value  : u16 = 0
+        cleared: u8  = 0
+    }
+
+    events {
+        INC
+        TRIP
+        CLEAR
+    }
+
+    initial Counting
+
+    // NOTE: distinct events per transition on purpose. The "two `on EVT`
+    // from one state distinguished only by guards" pattern is a SEPARATE
+    // pre-existing core dispatch defect (W7-FU-1, see Doc 00 section
+    // 11.25 / completion report) affecting BOTH strategies independently
+    // of W7 — switch emits duplicate `case` labels (gcc hard error),
+    // table selects first-by-(source,trigger) then drops on guard-fail.
+    // W7 only routes which strategy a machine uses; the fixture stays on
+    // the unambiguous one-event-per-transition form so it cleanly proves
+    // mixed dispatch without entangling that orthogonal bug.
+    state Counting {
+        on INC  -> Counting : ctx.value = ctx.value + 1
+        on TRIP -> Tripped  : ctx.value = ctx.value + 100
+    }
+
+    state Tripped {
+        on CLEAR -> Counting : ctx.value = 0; ctx.cleared = 1
+    }
+}

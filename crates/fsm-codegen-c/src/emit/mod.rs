@@ -127,7 +127,17 @@ pub fn emit(ir: &Ir, config: &CodegenConfig) -> Result<EmittedFiles, EmitError> 
         // recursion bottoms out and `Sub_t` is a finite struct (no runtime
         // cycle guard needed; FSM-E0502 already rejects static template
         // cycles at analysis).
-        emit_machine_recursive(machine, config, &mut files)?;
+        //
+        // v1.1-W7 (Doc 00 §11.25): the *unresolved* effective strategy for
+        // this top-level machine is `strategy_for(name)` — its per-machine
+        // override if registered, else the global strategy. It is threaded
+        // down so every submachine template of this logical machine shares
+        // the SAME dispatch family (a submachine has no user-facing
+        // `[machine.X]` name to target separately; mixing dispatch *within*
+        // one logical machine would be surprising). `Auto` is still resolved
+        // per emitted unit against that unit's own state count below.
+        let effective = config.strategy_for(&machine.name);
+        emit_machine_recursive(machine, config, effective, &mut files)?;
     }
 
     Ok(EmittedFiles { files })
@@ -137,9 +147,17 @@ pub fn emit(ir: &Ir, config: &CodegenConfig) -> Result<EmittedFiles, EmitError> 
 /// references. Submachines are emitted first so a parent that nests a
 /// `Sub_t` value member has the complete type available via
 /// `#include "Sub.h"`.
+///
+/// `effective` is the unresolved dispatch strategy for the *logical*
+/// machine being emitted (after per-machine-override resolution at the
+/// top-level call site, W7). It is constant across the submachine
+/// recursion so one logical machine emits one consistent dispatch family;
+/// `Auto` is resolved here against each emitted unit's own state count so
+/// the small-machine-readability heuristic still applies per unit.
 fn emit_machine_recursive(
     machine: &fsm_ir::MachineObject,
     config: &CodegenConfig,
+    effective: crate::config::DispatchStrategy,
     files: &mut Vec<EmittedFile>,
 ) -> Result<(), EmitError> {
     if machine.root.states.is_empty() {
@@ -148,9 +166,10 @@ fn emit_machine_recursive(
 
     // Emit referenced submachine templates first (post-order): the parent's
     // generated header includes theirs, and the nested value member needs
-    // their full struct definition.
+    // their full struct definition. They inherit the parent's `effective`
+    // strategy (W7) — same logical machine, same dispatch family.
     for sub in &machine.submachines {
-        emit_machine_recursive(sub, config, files)?;
+        emit_machine_recursive(sub, config, effective, files)?;
     }
 
     let index = crate::state_index::build_state_index(machine)?;
@@ -163,7 +182,7 @@ fn emit_machine_recursive(
     pre_flight_validate(machine, &index)?;
     let parents = crate::parent_table::build_parent_table(&index);
     let layout = crate::region_layout::build_region_layout(machine, &index);
-    let resolved_strategy = config.strategy.resolve(index.count());
+    let resolved_strategy = effective.resolve(index.count());
 
     let ctx = MachineEmitCtx {
         machine,

@@ -1,0 +1,20 @@
+# v1.1-W7 behavioural fixture config (Doc 00 section 11.25).
+#
+# Per-machine dispatch override. Both machines are tiny, so the global
+# `auto` heuristic would pick `switch` for BOTH. These `[machine.<Name>]`
+# tables force a MIXED build: `Latch` stays switch, `Counter` becomes
+# table-driven (a `.rodata` transition table) in the SAME `fsm generate`.
+#
+# Effective-strategy precedence, resolved per machine:
+#   fsm.toml [machine.M].strategy  (highest)
+#   > CLI --strategy flag
+#   > default `auto`
+
+[generate]
+target = "c99"
+
+[machine.Latch]
+strategy = "switch"
+
+[machine.Counter]
+strategy = "table"

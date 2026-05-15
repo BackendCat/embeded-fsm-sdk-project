@@ -1,5 +1,7 @@
 //! Codegen configuration. Mirrors the CLI-facing surface of `fsm generate`.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Top-level codegen knobs. Defaults match Doc 00 §10.3 / §10.4 (HAL
@@ -28,6 +30,17 @@ pub struct CodegenConfig {
     pub include_inline_actions: bool,
     /// Target build profile. Influences include set + assert macros.
     pub target_profile: TargetProfile,
+    /// Per-machine dispatch-strategy overrides keyed by machine name
+    /// (v1.1-W7, Doc 00 §11.25). When a machine's name is present here, its
+    /// value wins over [`CodegenConfig::strategy`] for that machine ONLY,
+    /// enabling mixed dispatch in one project (machine A `Switch`, machine B
+    /// `Table`). The CLI is responsible for resolving the source precedence
+    /// (fsm.toml `[machine.M]` > `--strategy` flag > default) and populating
+    /// this map; codegen just consults it per machine via
+    /// [`CodegenConfig::strategy_for`]. `BTreeMap` keeps it deterministic.
+    /// Empty by default → byte-identical output to pre-W7 when unused.
+    #[serde(default)]
+    pub machine_strategy_overrides: BTreeMap<String, DispatchStrategy>,
 }
 
 impl Default for CodegenConfig {
@@ -40,7 +53,25 @@ impl Default for CodegenConfig {
             include_simulator_hooks: false,
             include_inline_actions: false,
             target_profile: TargetProfile::Embedded,
+            machine_strategy_overrides: BTreeMap::new(),
         }
+    }
+}
+
+impl CodegenConfig {
+    /// The *unresolved* effective dispatch strategy for the named machine:
+    /// the per-machine override if one is registered, else the global
+    /// [`CodegenConfig::strategy`]. `Auto` is NOT resolved here — the caller
+    /// resolves it against that machine's own state count (an `Auto`
+    /// override and an `Auto` default must both pick the same per-machine
+    /// threshold). This is the single point that expresses "per-machine
+    /// override wins over the global strategy"; CLI precedence (fsm.toml >
+    /// flag > default) is resolved upstream when the map is built.
+    pub fn strategy_for(&self, machine_name: &str) -> DispatchStrategy {
+        self.machine_strategy_overrides
+            .get(machine_name)
+            .copied()
+            .unwrap_or(self.strategy)
     }
 }
 
