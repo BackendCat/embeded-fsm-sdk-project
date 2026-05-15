@@ -42,7 +42,9 @@ Adoption-blocking items first; UML completeness second.
 
 > ✅ **W7-FU-1 (P0) RESOLVED** (`d957d12`) — guard-disambiguated same-event dispatch fixed Doc-08-§4.1/§4.2-correct on **both** strategies (simulator independently spec-verified as the oracle; codegen-only bug; tripwire converted to a positive test; conformance CGEN-004). Detail: Doc 00 §11.26, CHANGELOG *Fixed*.
 >
-> ⛔ **v1.1 TAG remains gated on W7-FU-2 (P1, spec-conformance).** W7-FU-1 surfaced a pre-existing analyzer doc-vs-impl divergence: a `priority`-clause-less transition lowers to IR priority **0**, but Doc 04 §8.6 states the default is **100**. It is *consistently* applied by sim+codegen (so not a silent miscompile — P1, not P0) but doc≠impl on transition priority cannot ship under a "spec-conformant v1.1" claim. Reconcile (likely impl→100; verify full corpus) ahead of W8. Detail: backlog `W7-FU-2`, Doc 00 §11.26(e).
+> ✅ **W7-FU-2 (P1) RESOLVED** (`41b9e46`) — default transition priority reconciled to **100** (corpus-verified: Doc 04 §8.6, Doc 09 §6, the IR field's own doc-comment; the `unwrap_or(0)` impl was the bug). Class-of-issues: 8 materialization sites → one `DEFAULT_TRANSITION_PRIORITY` constant; byte-identity delta proven exactly `0→100` with no structural perturbation; no shipped-example runtime change. Detail: Doc 00 §11.27, CHANGELOG *Fixed*.
+>
+> 🟢 **All v1.1 correctness/conformance gates CLOSED.** v1.1 is in the **pre-tag audit** phase (W8). Remaining: pre-tag audit (read-only) → CHANGELOG `[1.1.0]` → **cold-from-source full-workspace quad** (§11.1/§11.22 — the release gate; done as a workspace-from-source rebuild keeping content-addressed registry deps, the conventional CI-cache practice, so it fits current disk without a full `cargo clean`) → `checkpoint/2026-05-15` + annotated `v1.1.0` (local, no push).
 
 ### Integration features
 - **`fsm generate --import-header <path.h>`** — auto-extern from existing C header files. ✅ **COMPLETE 2026-05-15** (W5). Reduces friction for users with substantial existing C codebases who currently must hand-write each `extern` declaration. (OPAQUE-BUG-1, surfaced *by* this wave's honest scoping, then fixed in §11.23 — opaque pointer/struct HAL params now model end-to-end; relaxing W5's importer opaque-skip tracked as W5-FU-1.)
@@ -71,7 +73,7 @@ Adoption-blocking items first; UML completeness second.
 - `pub → pub(crate)` sweep across 9 crates (~340 over-exposed items per Audit B P2-A1).
 
 ### Release criteria for v1.1
-- 0 P0, ≤5 well-scoped P1s in pre-tag audit — **0 open P0 (W7-FU-1 resolved); 1 open spec-conformance item W7-FU-2 must be green before W8 runs**
+- 0 P0, ≤5 well-scoped P1s in pre-tag audit — **0 open P0, 0 open spec-conformance items (W7-FU-1 + W7-FU-2 both resolved); pre-tag audit in progress; final gate = cold-from-source full-workspace quad**
 - 600+ tests passing
 - One real-world customer-style integration example proven end-to-end on a representative embedded target — ✅ **SATISFIED 2026-05-15** (W6: four ecosystems, each gcc -Werror RUN-verified; platformio `native`+`uno` AVR target)
 
