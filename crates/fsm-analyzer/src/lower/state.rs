@@ -13,6 +13,7 @@ use fsm_ir::{
     DeferDecl as IrDeferDecl, FinalState, ForkPseudo, GuardExpr, HistoryKind, HistoryObject,
     InitialPseudo, JoinPseudo, JunctionState, ParallelState, RegionObject, SimpleState, StateNode,
     Statement, SubmachineRef, TimerKind, TimerObject, TransitionKind, TransitionObject, Trigger,
+    DEFAULT_TRANSITION_PRIORITY,
 };
 use fsm_parser::ast::{self, AstNode, BranchHint as AstBranchHint};
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
@@ -440,7 +441,7 @@ fn lower_external(
     let priority = t
         .priority()
         .and_then(|p| extract_priority(p.syntax()))
-        .unwrap_or(0);
+        .unwrap_or(i64::from(DEFAULT_TRANSITION_PRIORITY));
     let guard = t.guard().map(|g| lower_guard_clause(ids, locs, &g));
     let actions = t
         .actions()
@@ -476,7 +477,7 @@ fn lower_internal(
     let priority = t
         .priority()
         .and_then(|p| extract_priority(p.syntax()))
-        .unwrap_or(0);
+        .unwrap_or(i64::from(DEFAULT_TRANSITION_PRIORITY));
     let guard = t.guard().map(|g| lower_guard_clause(ids, locs, &g));
     let actions = t
         .actions()
@@ -513,7 +514,7 @@ fn lower_local(
     let priority = t
         .priority()
         .and_then(|p| extract_priority(p.syntax()))
-        .unwrap_or(0);
+        .unwrap_or(i64::from(DEFAULT_TRANSITION_PRIORITY));
     let guard = t.guard().map(|g| lower_guard_clause(ids, locs, &g));
     let actions = t
         .actions()
@@ -548,7 +549,7 @@ fn lower_completion(
     let priority = c
         .priority()
         .and_then(|p| extract_priority(p.syntax()))
-        .unwrap_or(0);
+        .unwrap_or(i64::from(DEFAULT_TRANSITION_PRIORITY));
     let guard = c.guard().map(|g| lower_guard_clause(ids, locs, &g));
     let actions = c
         .actions()

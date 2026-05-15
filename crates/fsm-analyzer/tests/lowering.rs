@@ -161,8 +161,20 @@ fn ir_source_hash_is_content_addressed() {
     assert!(ir_a.source_hash.starts_with("sha256:"));
 }
 
+/// Regression anchor for W7-FU-2 (Doc 00 §11.27): a transition with **no
+/// `priority` clause** lowers to [`fsm_ir::DEFAULT_TRANSITION_PRIORITY`]
+/// (100), the value Doc 04 §8.6 and Doc 09 §6 specify.
+///
+/// This test previously asserted `0` (`ir_default_priority_is_zero`) — it
+/// was pinning the lowering *bug* (`lower/state.rs` `.unwrap_or(0)`), not a
+/// spec-correct expectation. Under min-wins selection (Doc 08 §4.2) the
+/// default must be LOW priority so an explicit small number can float a
+/// specific transition above the unprioritized herd; a `0` default made an
+/// unprioritized transition out-prioritise every explicitly-deprioritized
+/// one. Asserting `100` here makes this the FAILS-on-old / PASSES-on-new
+/// regression proof (§5.1) and the §5.4 unit pin.
 #[test]
-fn ir_default_priority_is_zero() {
+fn transition_without_priority_clause_lowers_to_spec_default_100() {
     let src = "language fsm 2.0\nmachine M { events { E } initial S state S { on E -> S } }";
     let pr = parse(src);
     let ir = analyze(&pr).ir.unwrap();
@@ -178,7 +190,13 @@ fn ir_default_priority_is_zero() {
             }
         })
         .unwrap();
-    assert_eq!(s.transitions[0].priority, 0);
+    assert_eq!(
+        s.transitions[0].priority,
+        fsm_ir::DEFAULT_TRANSITION_PRIORITY,
+        "an unprioritized transition must lower to the Doc 04 §8.6 / Doc 09 \
+         §6 default of 100, not 0"
+    );
+    assert_eq!(s.transitions[0].priority, 100);
 }
 
 #[test]

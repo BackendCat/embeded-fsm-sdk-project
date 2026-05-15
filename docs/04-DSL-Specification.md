@@ -707,7 +707,13 @@ No arithmetic. No function calls except extern pure references.
 priority_clause = "priority" , integer ;
 ```
 
-Lower number = higher priority. Default: `100`.
+Lower number = higher priority (transition selection is min-wins on
+`(priority, document_order)` — see Doc 08 §4.2). A transition that declares
+**no `priority_clause`** has priority **`100`** (the normative default; Doc
+09 §6 carries the same value, and the analyzer materializes exactly `100`
+when the clause is absent — Doc 00 §11.27). The value `100` is a deliberate
+*low* priority so that assigning a smaller explicit number floats a specific
+transition above the unprioritized default; it is **not** `0`.
 
 ## 8.7 Action List
 

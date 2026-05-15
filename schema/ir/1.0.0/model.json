@@ -484,7 +484,7 @@
           ]
         },
         "actions":  { "type": "array", "items": { "$ref": "#/$defs/Statement" } },
-        "priority": { "type": "integer", "minimum": 0 },
+        "priority": { "type": "integer", "minimum": 0, "default": 100, "description": "Doc 04 §8.6 / Doc 09 §6 — lower value = higher priority; default 100 when no priority clause is declared." },
         "kind": {
           "type": "string",
           "enum": ["external", "local", "internal", "completion"],

@@ -10,8 +10,12 @@
 //!   Completion);
 //! - resolves timer durations to a `u32` and rejects 0-duration entries via
 //!   the [`crate::checks::timer`] pass before lowering;
-//! - applies Doc 09 §1 defaults: `priority: 0`, `queue.capacity: 16`,
-//!   `overflow: Assert`;
+//! - applies spec defaults for clauses the source omits: a transition with
+//!   no `priority` clause lowers to [`fsm_ir::DEFAULT_TRANSITION_PRIORITY`]
+//!   (100, per Doc 04 §8.6 / Doc 09 §6 — *not* 0; see Doc 00 §11.27 /
+//!   W7-FU-2), `queue.capacity: 16`, `overflow: Assert`. (`RegionObject`'s
+//!   own `priority` field is a distinct concern — region dispatch order for
+//!   parallel states, Doc 09 §5 — and defaults to 0 separately.);
 //! - computes `effective_lca` on each transition via the [`crate::lca`]
 //!   helpers (the value is not stored in the IR — codegen recomputes it from
 //!   `(source, target, kind)`).

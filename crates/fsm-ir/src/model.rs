@@ -12,6 +12,28 @@
 use fsm_diagnostics::{Diagnostic, SourceLocation};
 use serde::{Deserialize, Serialize};
 
+/// Default `TransitionObject.priority` when a transition declares no
+/// `priority` clause.
+///
+/// Doc 04 §8.6 and Doc 09 §6 both specify **100**. Selection is min-wins on
+/// `(priority, document_order)` (Doc 08 §4.2): a *lower* number is *higher*
+/// priority. An unprioritized transition therefore sits at low priority so
+/// that assigning a small explicit number floats a specific/guarded
+/// transition above the default herd; a default of `0` would make every
+/// unprioritized transition out-prioritise an explicitly-deprioritized one
+/// and no transition could ever be placed below the default.
+///
+/// This is the single source of truth for the default; the analyzer's four
+/// `lower_*` arms and the serde fallback below both reference it. Doc 00
+/// §11.27 records the doc-vs-impl reconciliation (the lowering previously
+/// materialized `0`, contradicting the spec — W7-FU-2).
+pub const DEFAULT_TRANSITION_PRIORITY: u16 = 100;
+
+#[doc(hidden)]
+pub const fn default_transition_priority() -> u16 {
+    DEFAULT_TRANSITION_PRIORITY
+}
+
 // ---------------------------------------------------------------------------
 // Top-level IR document — Doc 09 §2 (with Doc 00 §7.4 additions).
 // ---------------------------------------------------------------------------
@@ -475,7 +497,12 @@ pub struct TransitionObject {
     #[serde(default)]
     pub guard: Option<GuardExpr>,
     pub actions: Vec<Statement>,
-    /// Doc 09 §6: lower value = higher priority. Default 100.
+    /// Doc 04 §8.6 / Doc 09 §6: lower value = higher priority; the default
+    /// when no `priority` clause is declared is
+    /// [`DEFAULT_TRANSITION_PRIORITY`] (100). `serde(default = …)` so IR
+    /// JSON omitting the key (and the analyzer's `lower_*` arms) materialize
+    /// the spec value, not `0` (Doc 00 §11.27 / W7-FU-2).
+    #[serde(default = "default_transition_priority")]
     pub priority: u16,
     /// New required discriminator per Doc 00 §7.4 item 8.
     pub kind: TransitionKind,

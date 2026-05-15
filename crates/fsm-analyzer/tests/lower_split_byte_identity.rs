@@ -129,7 +129,31 @@ fn ir_fingerprint(rel_fsm: &str) -> String {
 // and `Motor.h` is byte-identical. No traversal/id/loc/order perturbation
 // (the AD-3 regression class this guard exists for). Pre-W4 sha was
 // 0e9a7b1cfa074e1d45e4b3b09c50d32fe4518f00c3cb9ccec0a8be5cd492560e.
-const MOTOR_IR_SHA: &str = "fa1b7aefc7f2d5242288c446a054573808c0e5e0d8800becbf6bb23a63b7322a";
+//
+// ALL FOUR updated 2026-05-15 for v1.1-W7-FU-2 (default transition priority
+// 0 → 100). DELIBERATE, REVIEWED semantic change, not a refactor: a
+// transition with no `priority` clause now lowers to the Doc 04 §8.6 / Doc
+// 09 §6 normative default of 100 (was the buggy `.unwrap_or(0)`; Doc 00
+// §11.27). None of the four example `.fsm` files declares an explicit
+// `priority` clause, so every transition's IR `priority` flips 0 → 100;
+// the serialized IR (hence `sourceHash` + the fingerprint) changes for all
+// four. The delta was PROVEN to be *exactly and only* that, by building a
+// pre-fix binary and diffing the canonical `--emit-ir` JSON per example:
+// the ONLY differing lines are transition `"priority": 0` → `"priority":
+// 100` (motor 4, traffic-light 2, vending-machine 9, deferred 4) plus the
+// derived `sourceHash`; `RegionObject.priority` (a distinct field — region
+// dispatch order for parallel states, Doc 09 §5) correctly stays 0; ZERO
+// traversal/id/loc/order/structural perturbation (the exact AD-3
+// regression class this guard exists for — verified clean). Runtime
+// behaviour of the examples is unchanged (none has same-source same-event
+// priority competition — FSM-E0300 would reject that without explicit
+// priorities — so the absolute default value changes no selection). Pre-
+// W7-FU-2 shas: MOTOR fa1b7aefc7f2d5242288c446a054573808c0e5e0d8800becbf6\
+// bb23a63b7322a, TRAFFIC 1dc899b4ab61150c2ce06198fb790ebf689740f75c013506\
+// 6cde4d450a6e9399, VENDING 8d33d4c126d9e61114a4890e81e8e7ef810bdf40c3a8e\
+// 5f1f98ea0dce57d0df1, DEFERRED 46625337de6800016d44c2543fdcf4701dd52400c\
+// 8edcd9fa62d6a373d8bc1ce.
+const MOTOR_IR_SHA: &str = "d8f6dbc28a7cac786379a5437c65fd4db8a143fcae1cf6535d6203b56303fd87";
 
 #[test]
 fn motor_example_ir_unchanged() {
@@ -164,6 +188,6 @@ fn deferred_example_ir_unchanged() {
     assert_eq!(got, DEFERRED_IR_SHA, "deferred.fsm lowered IR changed");
 }
 
-const TRAFFIC_IR_SHA: &str = "1dc899b4ab61150c2ce06198fb790ebf689740f75c0135066cde4d450a6e9399";
-const VENDING_IR_SHA: &str = "8d33d4c126d9e61114a4890e81e8e7ef810bdf40c3a8e5f1f98ea0dce57d0df1";
-const DEFERRED_IR_SHA: &str = "46625337de6800016d44c2543fdcf4701dd52400c8edcd9fa62d6a373d8bc1ce";
+const TRAFFIC_IR_SHA: &str = "6919b62676a9037209d358d057ca70a9838f02c487966a83a3ca004187fa4bd4";
+const VENDING_IR_SHA: &str = "b456c765efde67c442368dcb4ba4a657658638f0859a76bf84200147c98a9b7c";
+const DEFERRED_IR_SHA: &str = "8889e7398a209b44ee31d4a8ffd66856e5669426fdbe509417c2f67684f9ac05";
