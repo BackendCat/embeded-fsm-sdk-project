@@ -35,21 +35,39 @@
 
 use std::path::{Path, PathBuf};
 
-use fsm_analyzer::analyze_with_source;
+use fsm_analyzer::{analyze_with_source, SymbolTable};
 use fsm_diagnostics::{Diagnostic, Span};
 use fsm_parser::ast::{AstNode, File as AstFile};
 use fsm_parser::import_resolver::{resolve_import, ImportError};
 use fsm_parser::{parse, ParseResult, SyntaxKind};
 
-/// The full diagnostic set for one buffer — parser + analyzer + import
-/// security, merged in `fsm check`'s exact order. This is the *only* value
-/// `publishDiagnostics` needs from the analysis step (Doc 26 §8 L1: L1
-/// consumes `.diagnostics`; symbol_table/ir are L2+).
+/// The result of **one** `fsm check` pipeline run over a buffer.
+///
+/// Doc 26 §3 / §8 L2: there is exactly **one** analysis per buffer and it
+/// feeds *both* consumers — diagnostics (L1) **and** the symbol table (L2
+/// `documentSymbol`). L1 discarded `result.symbol_table`; L2 threads it
+/// through here so `documentSymbol` reuses the SAME analysis the debounced
+/// `publishDiagnostics` already ran — no second analysis pass (Doc 26 §8
+/// L2: "One analysis feeds both"), no parallel symbol extraction.
+///
+/// This is an **additive, behaviour-neutral** change: `analyze()` makes the
+/// identical `analyze_with_source` call in the identical order and merges
+/// import diagnostics identically — it merely *keeps* the `symbol_table`
+/// field L1 dropped on the floor. The `.diagnostics` projection is
+/// byte-identical to L1 (the §11.32 reuse-seam invariant is intact).
 #[derive(Clone, Debug)]
 pub struct Analysis {
     /// Diagnostics in `fsm check` order: parse + symbol + checks (from
     /// `analyze_with_source`) then appended import-security diagnostics.
     pub diagnostics: Vec<Diagnostic>,
+    /// The analyzer's per-machine ordered symbol tables (events / externs /
+    /// consts / enums / context fields / states / regions, each with
+    /// `Span`s; `StateEntry` additionally carries `container_path` + a
+    /// coarse `shape`). Doc 26 §5's `documentSymbol` seam — the analyzer's
+    /// own doc-comment (`lower/mod.rs:66`) declares the LSP a sanctioned
+    /// consumer. Carried straight off the single `analyze_with_source`
+    /// result; the LSP re-runs no symbol extraction (Doc 26 §8 L2).
+    pub symbol_table: SymbolTable,
 }
 
 /// Run the **exact** `fsm check` pipeline over an in-memory buffer.
@@ -69,18 +87,25 @@ pub fn analyze(src: &str, uri_path: &Path) -> Analysis {
     //    the merge order matches the CLI exactly).
     let mut import_diags = security_check_imports(&pr, uri_path, &workspace_root);
 
-    // 4. semantic analysis — `check.rs:61`. We deliberately discard
-    //    `result.ir` / `result.symbol_table` here: L1 is publishDiagnostics
-    //    only (Doc 26 §8 L1 scope boundary). L2+ will keep them.
+    // 4. semantic analysis — `check.rs:61`. L2: we KEEP `result.symbol_table`
+    //    (L1 discarded it). `documentSymbol` consumes it from THIS single
+    //    run — there is no second analysis pass and no parallel symbol
+    //    extraction (Doc 26 §8 L2: "One analysis feeds both"). `result.ir`
+    //    is still discarded — it is an L3+ (hover/inlay) seam, not L2.
     let result = analyze_with_source(&pr, &uri_path.to_string_lossy(), src);
     let mut diagnostics = result.diagnostics;
+    let symbol_table = result.symbol_table;
 
     // 5. merge — `check.rs:65`: import diagnostics appended after the
     //    parse/analyze diagnostics, sharing the same downstream renderer
-    //    (here: the LSP Span->Range projection).
+    //    (here: the LSP Span->Range projection). This merge is byte-identical
+    //    to L1 — keeping `symbol_table` above does not perturb it.
     diagnostics.append(&mut import_diags);
 
-    Analysis { diagnostics }
+    Analysis {
+        diagnostics,
+        symbol_table,
+    }
 }
 
 /// Discover the workspace root for `path` by walking parent directories

@@ -7,6 +7,14 @@
 //! out-of-scope. A clear message tells the user it is unimplemented rather
 //! than silently ignoring the flag.
 
+// The project invariant is `#![forbid(unsafe_code)]` per **crate root**, and
+// a binary crate has two compilation roots (`lib.rs` + `main.rs`). `lib.rs`
+// already carries it; the bin root must too for the invariant to hold
+// per-root — the `fsm-cli` `main.rs:8` precedent. Inert here (there is no
+// `unsafe` in the 36-line arg parser) but makes the 10/10 forbid-unsafe
+// claim true at *both* of this crate's roots (P3-1, L1 phase audit).
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
 fn main() -> ExitCode {

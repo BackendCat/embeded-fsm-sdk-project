@@ -1,0 +1,14 @@
+language fsm 2.0
+
+feature hsm
+
+machine Sys {
+    events { GO }
+
+    initial Outer
+
+    state Outer {
+        initial Inner
+        /* 🚀 ы */ state Inner { on GO -> Outer }
+    }
+}

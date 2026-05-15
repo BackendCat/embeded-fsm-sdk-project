@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   multibyte-line fixture). `#![forbid(unsafe_code)]` (workspace now
   10/10). See `docs/26-LSP-Architecture.md` §8 L1 and
   `docs/00-Decisions-And-Reconciliation.md` §11.32.
+- **`fsm-lsp` — `documentSymbol` + `foldingRange`** (v1.2-LSP-L2): the
+  Doc 14 §13 hierarchical symbol tree (machine → context/events/externs/
+  states with composite/region nesting + `SymbolKind`s, name
+  `selectionRange`s) and Doc 14 §12 folding regions, both advertised in
+  `initialize`. `documentSymbol` reuses the **same** single `fsm check`
+  analysis the diagnostics path runs (the `symbol_table` is now threaded
+  through — one analysis feeds both, no second pass / no second position
+  converter, diagnostics byte-identical to L1); `foldingRange` is a pure
+  parse-tree walk. Proven by an in-process `tower-lsp` client test
+  asserting the full tree + every range + folds, byte-equal under both
+  UTF-8 and UTF-16 on a multibyte fixture. See
+  `docs/26-LSP-Architecture.md` §8 L2 and
+  `docs/00-Decisions-And-Reconciliation.md` §11.33.
 
 ### Changed
 

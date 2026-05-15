@@ -1,0 +1,51 @@
+language fsm 2.0
+
+feature parallel
+feature hsm
+
+machine Plant {
+    context {
+        level: u16 = 0
+    }
+
+    events {
+        TICK
+        STOP
+    }
+
+    initial Running
+
+    state Running {
+        on STOP -> Done
+
+        region Heater {
+            initial Cold
+
+            state Cold {
+                on TICK -> Hot
+            }
+
+            state Hot {
+                done -> HeaterDone
+            }
+
+            final HeaterDone
+        }
+
+        region Pump {
+            initial Off
+
+            state Off {
+                on TICK -> On
+            }
+
+            state On {
+                done -> PumpDone
+            }
+
+            final PumpDone
+        }
+    }
+
+    state Done { }
+}

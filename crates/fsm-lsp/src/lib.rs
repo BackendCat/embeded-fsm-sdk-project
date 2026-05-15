@@ -13,10 +13,20 @@
 //! `textDocument/publishDiagnostics` via the reused pipeline · the one
 //! correct byte-`Span` ↔ LSP-`Position` converter ([`position::LineIndex`]).
 //!
-//! L2+ capabilities (hover, definition, completion, references, rename,
-//! semanticTokens, codeAction, foldingRange, inlayHint) are out of L1
-//! scope and are NOT stubbed (a silent no-op handler is worse than an
-//! unadvertised capability).
+//! ## L2 scope (Doc 26 §8 L2 — read capabilities, no new analysis)
+//!
+//! `textDocument/documentSymbol` (Doc 14 §13 hierarchical tree) +
+//! `textDocument/foldingRange` (Doc 14 §12), advertised in `initialize`.
+//! Both are pure projections of the **single** analysis the spine already
+//! runs (Doc 26 §8 L2 "one analysis feeds both"): `documentSymbol`
+//! consumes the `symbol_table` threaded through [`analysis::Analysis`];
+//! `foldingRange` is a structural parse-tree walk. No second analysis
+//! pass, no second position converter.
+//!
+//! L3+ capabilities (hover, definition, completion, references, rename,
+//! semanticTokens, codeAction, inlayHint) are out of L2 scope and are NOT
+//! stubbed (a silent no-op handler is worse than an unadvertised
+//! capability).
 //!
 //! ## The reuse seam
 //!

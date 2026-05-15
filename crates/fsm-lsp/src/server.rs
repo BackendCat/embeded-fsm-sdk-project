@@ -2,13 +2,19 @@
 //!
 //! Implements the LSP lifecycle (`initialize`/`initialized`/`shutdown`),
 //! full-document sync (`didOpen`/`didChange`/`didClose`), a ~200ms debounce
-//! (Doc 14 §14 / Doc 26 §4.3), and `publishDiagnostics`. Every diagnostic
-//! comes from the exact `fsm check` pipeline ([`crate::analysis::analyze`])
-//! — this module never re-analyses (Doc 20 §9.4 / Doc 26 §3).
+//! (Doc 14 §14 / Doc 26 §4.3), `publishDiagnostics`, and the L2 read
+//! capabilities `documentSymbol` (Doc 14 §13) + `foldingRange` (Doc 14
+//! §12). Every diagnostic AND every symbol comes from the exact `fsm
+//! check` pipeline ([`crate::analysis::analyze`]) — this module never
+//! re-analyses (Doc 20 §9.4 / Doc 26 §3): `documentSymbol` consumes the
+//! `symbol_table` from the **same** `analyze()` the diagnostics path runs
+//! (Doc 26 §8 L2: "one analysis feeds both"); `foldingRange` is a pure
+//! parse-tree walk (no analysis at all).
 //!
-//! L1 scope boundary (Doc 26 §8): NO hover/definition/completion/rename/
-//! references/semanticTokens/codeAction/foldingRange/inlayHint. Those are
-//! L2+ and are deliberately neither implemented nor stubbed.
+//! L2 scope boundary (Doc 26 §8): NO hover/definition/completion/rename/
+//! references/semanticTokens/codeAction/inlayHint. Those are L3+ and are
+//! deliberately neither implemented nor stubbed (a silent no-op handler is
+//! worse than an unadvertised capability).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,13 +25,17 @@ use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    InitializeParams, InitializeResult, InitializedParams, MessageType, PositionEncodingKind,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+    FoldingRangeProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    MessageType, OneOf, PositionEncodingKind, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{Client, LanguageServer};
 
 use crate::analysis::analyze;
 use crate::capabilities::diagnostics::to_lsp_diagnostics;
+use crate::capabilities::document_symbol::document_symbols;
+use crate::capabilities::folding::folding_ranges;
 use crate::document_store::DocumentStore;
 use crate::position::OffsetEncoding;
 
@@ -163,6 +173,11 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
+                // L2 (Doc 26 §8 L2): both are honest, fully-implemented
+                // providers backed by the single reused analysis / a pure
+                // CST walk — NOT advertised-but-stubbed (the cardinal sin).
+                document_symbol_provider: Some(OneOf::Left(true)),
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -221,5 +236,65 @@ impl LanguageServer for Backend {
         // Clear diagnostics for the closed document (LSP convention: the
         // server owns the squiggles only while the doc is open).
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
+    }
+
+    /// `textDocument/documentSymbol` — Doc 14 §13 hierarchical tree.
+    ///
+    /// Reuses the **exact** `fsm check` analysis ([`analyze`]) and consumes
+    /// its `symbol_table`: this is the SAME pipeline call the debounced
+    /// `publishDiagnostics` makes, so the symbol tree can no more disagree
+    /// with `fsm check` than the diagnostics can (Doc 26 §3 / §8 L2 "one
+    /// analysis feeds both"). The CST (recovered from the same parse) is
+    /// used only to locate name tokens for `selectionRange`. A request for
+    /// a not-open document returns `None` (the spec-correct empty answer —
+    /// never a panic). The snapshot is released before the await-free
+    /// analysis, exactly as the debounce path does.
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> RpcResult<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        let path = Backend::uri_to_path(&uri);
+        // THE reuse seam — the identical `fsm check` pipeline whose
+        // `symbol_table` L1 discarded and L2 now threads through.
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        let symbols = document_symbols(&analysis.symbol_table, &cst, &line_index, &text, enc);
+        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+    }
+
+    /// `textDocument/foldingRange` — Doc 14 §12 folding regions.
+    ///
+    /// Pure structural projection: a single CST descendant walk of the
+    /// parse tree (no analysis, no symbol table — Doc 26 §5 `foldingRange`
+    /// row). Line numbers go through L1's `LineIndex` in the negotiated
+    /// encoding (no second position converter). Not-open document → `None`.
+    async fn folding_range(
+        &self,
+        params: FoldingRangeParams,
+    ) -> RpcResult<Option<Vec<FoldingRange>>> {
+        let uri = params.text_document.uri;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        let cst = fsm_parser::parse(&text).syntax();
+        Ok(Some(folding_ranges(&cst, &line_index, &text, enc)))
     }
 }
