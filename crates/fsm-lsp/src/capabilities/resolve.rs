@@ -137,8 +137,47 @@ fn ident_token_at(cst: &SyntaxNode, byte: u32) -> Option<SyntaxToken> {
 }
 
 /// First ancestor node (inclusive of the token's own parent) of `kind`.
-fn enclosing(tok: &SyntaxToken, kind: SyntaxKind) -> Option<SyntaxNode> {
+///
+/// `pub(crate)` because L4's completion-context classifier
+/// ([`crate::capabilities::complete`]) reuses the **exact same**
+/// node-ancestry walk this L3 resolver uses to classify a cursor — the two
+/// must agree on "what construct encloses this position" (Doc 26 §8 L4:
+/// "reuse/extend L3's classifier … do NOT build a parallel ad-hoc context
+/// detector"). Sharing the primitive is the seam, not a copy.
+pub(crate) fn enclosing(tok: &SyntaxToken, kind: SyntaxKind) -> Option<SyntaxNode> {
     tok.parent_ancestors().find(|n| n.kind() == kind)
+}
+
+/// The nearest **non-trivia** token at or strictly before `byte` — the
+/// "what did the user just type" anchor the completion-context classifier
+/// keys on (rust-analyzer's completion model). Skips whitespace / newlines
+/// / comments (a cursor in the indent after `on ` must still see `on`).
+///
+/// `pub(crate)`: this is a CST-traversal primitive in the same family as
+/// [`ident_token_at`] / [`enclosing`], reused by [`crate::capabilities::complete`]
+/// so the L4 classifier reads the SAME parse tree through the SAME
+/// traversal helpers as the L3 resolver (the Doc 26 §8 L4 reuse seam — one
+/// classifier substrate, not two).
+pub(crate) fn prev_significant_token(cst: &SyntaxNode, byte: u32) -> Option<SyntaxToken> {
+    let offset = rowan::TextSize::from(byte);
+    // The token the cursor sits in/at. At a boundary prefer the LEFT token
+    // (what precedes the cursor) — that is the just-typed context anchor.
+    let start = match cst.token_at_offset(offset) {
+        rowan::TokenAtOffset::None => return None,
+        rowan::TokenAtOffset::Single(t) => t,
+        rowan::TokenAtOffset::Between(a, _b) => a,
+    };
+    // If that token is itself a non-trivia token that *starts before* the
+    // cursor, it IS the preceding-significant token (e.g. a partial ident
+    // `on G|`, or `->|`). Otherwise walk left over trivia.
+    let mut cur = Some(start);
+    while let Some(t) = cur {
+        if !t.kind().is_trivia() && t.text_range().start() < offset {
+            return Some(t);
+        }
+        cur = t.prev_token();
+    }
+    None
 }
 
 /// Classify the ident by its CST context, mirroring `name_resolution.rs`.
@@ -465,9 +504,14 @@ fn is_call_callee(call: &SyntaxNode, name_ref: &SyntaxNode) -> bool {
 }
 
 /// Whether `tok` sits inside a `GUARD_CLAUSE` (so an extern call there must
-/// be `pure` — the analyzer's `in_guard`). Used only to colour hover; the
-/// decl jump is identical guard-or-not.
-fn in_guard(tok: &SyntaxToken) -> bool {
+/// be `pure` — the analyzer's `in_guard`). Used to colour hover; the decl
+/// jump is identical guard-or-not.
+///
+/// `pub(crate)`: L4's completion classifier reuses the SAME guard-context
+/// predicate so "is this a guard expression position?" is decided by one
+/// shared rule, identical to how L3 decides it (the Doc 26 §8 L4 reuse
+/// seam — guard-vs-action purity is a single source of truth).
+pub(crate) fn in_guard(tok: &SyntaxToken) -> bool {
     tok.parent_ancestors()
         .any(|n| n.kind() == SyntaxKind::GUARD_CLAUSE)
 }

@@ -1,0 +1,11 @@
+language fsm 2.0
+
+machine M {
+    events { GO }
+
+    initial Idle
+
+    state Idle {
+        
+    }
+}

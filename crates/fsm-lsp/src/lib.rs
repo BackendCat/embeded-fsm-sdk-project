@@ -37,9 +37,27 @@
 //! exact behaviour-neutral pattern L2 used for `symbol_table`; still one
 //! analysis, no second lowering, no second position converter.
 //!
-//! L4+ capabilities (completion, references, rename, semanticTokens,
-//! codeAction, inlayHint) are out of L3 scope and are NOT stubbed (a
-//! silent no-op handler is worse than an unadvertised capability).
+//! ## L4 scope (Doc 26 §8 L4 — context-aware completion, no new analysis)
+//!
+//! `textDocument/completion` (Doc 14 §4, **single-file**), advertised in
+//! `initialize` with the Doc 14 §2 trigger characters
+//! `[".", ":", "@", "[", " "]`. The trigger-context classifier
+//! ([`capabilities::complete`]) **reuses L3's [`capabilities::resolve`]
+//! CST substrate** — the SAME `enclosing` node-ancestry walk + `in_guard`
+//! predicate + a shared `prev_significant_token` primitive — to decide
+//! "what may legally be typed here" (the dual of L3's "what is the
+//! identifier here"); it is NOT a parallel ad-hoc context detector (Doc 26
+//! §8 L4). Every name candidate is sourced from the **same** single
+//! analysis's `symbol_table`; keywords are a verbatim transcription of
+//! Doc 04 §1.5 (the single normative registry), pinned to it by a test.
+//! Wrong-context candidates are *structurally* impossible (one context →
+//! one candidate-class set); an unclassifiable cursor yields an empty
+//! list, never a dump of every symbol. Still one analysis, no second
+//! position converter (no `TextEdit` ranges are emitted).
+//!
+//! L5+ capabilities (references, rename, semanticTokens, codeAction,
+//! inlayHint) are out of L4 scope and are NOT stubbed (a silent no-op
+//! handler is worse than an unadvertised capability).
 //!
 //! ## The reuse seam
 //!

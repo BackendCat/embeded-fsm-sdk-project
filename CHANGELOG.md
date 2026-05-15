@@ -54,6 +54,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **both** UTF-8 and UTF-16 on a multibyte fixture. See
   `docs/26-LSP-Architecture.md` §8 L3 and
   `docs/00-Decisions-And-Reconciliation.md` §11.34.
+- **`fsm-lsp` — context-aware `completion`** (v1.2-LSP-L4, single-file):
+  Doc 14 §4 `textDocument/completion` advertised with the exact Doc 14 §2
+  trigger characters `[".", ":", "@", "[", " "]`; a CST trigger-context
+  classifier that **reuses L3's `resolve` substrate** (the same ancestry
+  walk + `in_guard` predicate + a shared `prev_significant_token`
+  primitive — not a parallel detector) offers ONLY context-correct
+  candidates (transition target → state names; after `on `/`raise`/`defer`
+  → events; guard → context fields + `pure` externs; `ctx.` → context
+  fields; action → fields + all externs + statement keywords; structural
+  starts → Doc 04 §1.5 keywords + Doc 14 §4 snippets), every name sourced
+  from the single threaded `symbol_table` (one analysis, no second
+  converter) and keywords pinned verbatim to Doc 04 §1.5 by a test.
+  Wrong-context candidates are structurally impossible; an unclassifiable
+  cursor returns an empty list, never a symbol dump. Proven by in-process
+  `tower-lsp` client tests asserting, per context, the served set (labels
+  + kinds) equals the analysis oracle AND a wrong-context candidate is
+  absent, under **both** UTF-8 and UTF-16 on a multibyte fixture. See
+  `docs/26-LSP-Architecture.md` §8 L4 and
+  `docs/00-Decisions-And-Reconciliation.md` §11.35.
 
 ### Changed
 

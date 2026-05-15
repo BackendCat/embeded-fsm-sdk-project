@@ -1,0 +1,15 @@
+language fsm 2.0
+
+pure extern can_go(u8 n) : bool
+extern do_io() : bool
+
+machine M {
+    context { floor: u8 = 0 }
+    events { GO }
+
+    initial Idle
+
+    state Idle {
+        on GO [ 
+    }
+}

@@ -1491,3 +1491,586 @@ async fn doc26_l3_acceptance_sentence_verbatim() {
     .await;
     assert!(wr.is_null(), "hover in whitespace must be null: {wr:?}");
 }
+
+// ===========================================================================
+// L4 — `textDocument/completion` (Doc 26 §8 L4). §5.4-LSP behavioural
+// acceptance: an in-process tower-lsp client sends a real completion
+// request at each representative cursor context and asserts the returned
+// **set** (labels + CompletionItemKind) EQUALS the context-correct set the
+// analysis oracle (the SAME `completions()` code the server runs) computes,
+// AND that at least one wrong-context candidate that exists elsewhere in
+// scope is ABSENT. Both the positive set and the negative exclusion are
+// asserted. Symbol/route presence is NOT acceptance — the asserted
+// label+kind SET equality and the exclusion are.
+// ===========================================================================
+
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse};
+
+use fsm_lsp::capabilities::complete::completions;
+
+/// Decode a `textDocument/completion` result into items (the server always
+/// answers `CompletionResponse::Array` — an empty array is the valid
+/// "nothing here", never `null`/missing).
+fn decode_completions(result: &Value) -> Vec<CompletionItem> {
+    assert!(
+        !result.is_null(),
+        "completion must answer an array (possibly empty), never null"
+    );
+    match serde_json::from_value::<CompletionResponse>(result.clone())
+        .expect("decode completion response")
+    {
+        CompletionResponse::Array(v) => v,
+        CompletionResponse::List(l) => l.items,
+    }
+}
+
+/// `CompletionItemKind` has no `Ord`; its LSP wire value is a stable
+/// integer, so map to that for a deterministic comparable key.
+fn kind_num(k: Option<CompletionItemKind>) -> i64 {
+    k.map(|k| serde_json::to_value(k).unwrap().as_i64().unwrap())
+        .unwrap_or(0)
+}
+
+/// (label, kind-as-int) pairs, sorted by label (labels are unique within
+/// one context) — the comparable "set" for byte-exact assertions.
+fn label_kind_set(items: &[CompletionItem]) -> Vec<(String, i64)> {
+    let mut v: Vec<(String, i64)> = items
+        .iter()
+        .map(|i| (i.label.clone(), kind_num(i.kind)))
+        .collect();
+    v.sort();
+    v
+}
+
+fn labels_of(items: &[CompletionItem]) -> Vec<String> {
+    items.iter().map(|i| i.label.clone()).collect()
+}
+
+/// Build one comparable `(label, kind-as-int)` tuple matching
+/// [`label_kind_set`]'s element shape, for hard-coded expected sets.
+fn lk(label: &str, kind: CompletionItemKind) -> (String, i64) {
+    (label.to_string(), kind_num(Some(kind)))
+}
+
+/// (L4-init) `initialize` advertises `completionProvider` with the EXACT
+/// Doc 14 §2 trigger characters `[".", ":", "@", "[", " "]` (verified
+/// against the spec's ServerCapabilities block, not guessed), and
+/// `resolveProvider:false` (L4 returns fully-resolved items — advertising
+/// a resolve it does not implement would be the stub-a-no-op sin).
+#[tokio::test(flavor = "current_thread")]
+async fn completion_capability_advertised_with_doc14_trigger_chars() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    let init = do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+    let cp = &init["capabilities"]["completionProvider"];
+    assert!(
+        !cp.is_null(),
+        "completionProvider MUST be advertised (L4 genuinely implements it)"
+    );
+    assert_eq!(
+        cp["triggerCharacters"],
+        json!([".", ":", "@", "[", " "]),
+        "trigger chars MUST be the exact Doc 14 §2 set"
+    );
+    assert_eq!(
+        cp["resolveProvider"],
+        json!(false),
+        "no completionItem/resolve is implemented — must advertise false, \
+         not silently claim a resolve round-trip"
+    );
+}
+
+/// Drive `didOpen` then a `textDocument/completion` at the byte `cur`
+/// (mapped to a Position via the authoritative LineIndex, the same the
+/// server inverts), returning (served_items, oracle_items). The oracle is
+/// the SAME `completions()` the server runs over the SAME analysis — set
+/// equality proves the server wired it correctly; the hard-coded
+/// cross-checks below pin the *content* independently.
+async fn open_and_complete<S>(
+    service: &mut S,
+    fixture_name: &str,
+    cur: usize,
+    enc: OffsetEncoding,
+    id: i64,
+) -> (Vec<CompletionItem>, Vec<CompletionItem>, Url, String)
+where
+    S: Service<Request, Response = Option<tower_lsp::jsonrpc::Response>>,
+    S::Error: std::fmt::Debug,
+{
+    let (text, uri) = fixture(fixture_name);
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(&text, &path);
+    let cst = fsm_parser::parse(&text).syntax();
+    let idx = LineIndex::new(&text);
+    let cur_pos = idx.position(&text, cur as u32, enc);
+
+    // Oracle: the exact same code path the server's handler runs.
+    let oracle = completions(&analysis.symbol_table, &cst, cur as u32);
+
+    let result = call_request(
+        service,
+        "textDocument/completion",
+        pos_params(&uri, cur_pos.line, cur_pos.character),
+        id,
+    )
+    .await;
+    let served = decode_completions(&result);
+    (served, oracle, uri, text)
+}
+
+/// (L4-a) **transition-target** context (`on GO -> |`): the served set
+/// EQUALS exactly the in-scope **state names** as `CompletionItemKind::CLASS`
+/// (oracle parity) AND the event `GO` (which exists in scope) is ABSENT.
+#[tokio::test(flavor = "current_thread")]
+async fn completion_transition_target_is_states_excludes_events() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text0, _) = fixture("l4_transition_target.fsm");
+    // Cursor right after `on GO -> ` (the space following the arrow).
+    let cur = byte_of(&text0, "on GO -> ", "on GO -> ".len());
+    let (served, oracle, _uri, _t) = open_and_complete(
+        &mut service,
+        "l4_transition_target.fsm",
+        cur,
+        OffsetEncoding::Utf8,
+        80,
+    )
+    .await;
+
+    // Positive: served SET == oracle SET (labels + kinds), byte-exact.
+    assert_eq!(
+        label_kind_set(&served),
+        label_kind_set(&oracle),
+        "served completion set must equal the analysis oracle set"
+    );
+    // Independent hard-coded cross-check: the machine declares states
+    // `Idle` and `Running`; a transition target offers exactly those two
+    // as CLASS (kind 7). Computed-from-fixture, fails even if a bug
+    // corrupted oracle+server identically.
+    let mut want = vec![
+        lk("Idle", CompletionItemKind::CLASS),
+        lk("Running", CompletionItemKind::CLASS),
+    ];
+    want.sort();
+    assert_eq!(
+        label_kind_set(&served),
+        want,
+        "transition-target completion = exactly the in-scope state names \
+         as kind CLASS"
+    );
+    // NEGATIVE exclusion (as load-bearing as the positive): the event
+    // `GO` / `STOP` exist in this machine but a transition-target
+    // position must NEVER offer them.
+    let ls = labels_of(&served);
+    assert!(
+        !ls.contains(&"GO".to_string()) && !ls.contains(&"STOP".to_string()),
+        "event names MUST be absent from a transition-target completion \
+         (offering them is the wrong-context-noise sin): {ls:?}"
+    );
+}
+
+/// (L4-b) **`on `-trigger** context: the served set EQUALS exactly the
+/// machine's declared **event names** as `CompletionItemKind::EVENT`
+/// (oracle parity) AND a state name (in scope) is ABSENT.
+#[tokio::test(flavor = "current_thread")]
+async fn completion_after_on_is_events_excludes_states() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text0, _) = fixture("l4_trigger.fsm");
+    // Cursor right after `on ` (the space following the `on` keyword).
+    let cur = byte_of(&text0, "        on ", "        on ".len());
+    let (served, oracle, _uri, _t) = open_and_complete(
+        &mut service,
+        "l4_trigger.fsm",
+        cur,
+        OffsetEncoding::Utf8,
+        81,
+    )
+    .await;
+
+    assert_eq!(
+        label_kind_set(&served),
+        label_kind_set(&oracle),
+        "served set must equal the oracle set"
+    );
+    // Hard-coded: events { GO STOP } → exactly those two, kind 20 (EVENT).
+    let mut want = vec![
+        lk("GO", CompletionItemKind::EVENT),
+        lk("STOP", CompletionItemKind::EVENT),
+    ];
+    want.sort();
+    assert_eq!(
+        label_kind_set(&served),
+        want,
+        "after `on ` = exactly the declared event names as kind EVENT"
+    );
+    // NEGATIVE: states `Idle`/`Running` are in scope but a trigger
+    // position must NOT offer them.
+    let ls = labels_of(&served);
+    assert!(
+        !ls.contains(&"Idle".to_string()) && !ls.contains(&"Running".to_string()),
+        "state names MUST be absent from a trigger completion: {ls:?}"
+    );
+}
+
+/// (L4-c) **guard-expression** context (`on GO [ |`): the served set
+/// EQUALS the oracle's guard-legal values — context fields (kind FIELD) +
+/// **`pure`** externs (kind FUNCTION) — AND the IMPURE extern `do_io`
+/// (illegal in a guard, Doc 04 §2.5) and a state name are ABSENT.
+#[tokio::test(flavor = "current_thread")]
+async fn completion_in_guard_is_pure_externs_and_fields_excludes_impure_and_states() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text0, _) = fixture("l4_guard.fsm");
+    // Cursor right after `on GO [ ` (inside the guard bracket).
+    let cur = byte_of(&text0, "on GO [ ", "on GO [ ".len());
+    let (served, oracle, _uri, _t) =
+        open_and_complete(&mut service, "l4_guard.fsm", cur, OffsetEncoding::Utf8, 82).await;
+
+    assert_eq!(
+        label_kind_set(&served),
+        label_kind_set(&oracle),
+        "served guard set must equal the oracle set"
+    );
+    // Hard-coded content cross-check: the field `floor` (kind FIELD) and
+    // the PURE extern `can_go` (kind FUNCTION) must be present.
+    let set = label_kind_set(&served);
+    assert!(
+        set.contains(&lk("floor", CompletionItemKind::FIELD)),
+        "guard offers context field `floor` as FIELD: {set:?}"
+    );
+    assert!(
+        set.contains(&lk("can_go", CompletionItemKind::FUNCTION)),
+        "guard offers the PURE extern `can_go` as FUNCTION: {set:?}"
+    );
+    // NEGATIVE (load-bearing): the IMPURE extern `do_io` is illegal in a
+    // guard (Doc 04 §2.5 — guards may call only pure externs); a state
+    // name is also wrong-context. Both MUST be absent.
+    let ls = labels_of(&served);
+    assert!(
+        !ls.contains(&"do_io".to_string()),
+        "the IMPURE extern `do_io` MUST be absent from a guard completion \
+         (Doc 04 §2.5): {ls:?}"
+    );
+    assert!(
+        !ls.contains(&"Idle".to_string()),
+        "a state name MUST be absent from a guard completion: {ls:?}"
+    );
+}
+
+/// (L4-d) **statement-start** context (empty state body): the served set
+/// EQUALS the oracle's state-item keywords (kind KEYWORD) + the Doc 14 §4
+/// empty-body snippets (kind SNIPPET) AND no symbol (event/state name) is
+/// offered (those are not statement starters).
+#[tokio::test(flavor = "current_thread")]
+async fn completion_statement_start_is_keywords_and_snippets_excludes_symbols() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text0, _) = fixture("l4_stmt_start.fsm");
+    // The blank line inside `state Idle { … }` (after the 8-space indent).
+    let cur = byte_of(
+        &text0,
+        "state Idle {\n        ",
+        "state Idle {\n        ".len(),
+    );
+    let (served, oracle, _uri, _t) = open_and_complete(
+        &mut service,
+        "l4_stmt_start.fsm",
+        cur,
+        OffsetEncoding::Utf8,
+        83,
+    )
+    .await;
+
+    assert_eq!(
+        label_kind_set(&served),
+        label_kind_set(&oracle),
+        "served statement-start set must equal the oracle set"
+    );
+    let set = label_kind_set(&served);
+    // The state-item keyword `on` (kind 14) MUST be present.
+    assert!(
+        set.contains(&lk("on", CompletionItemKind::KEYWORD)),
+        "statement-start offers the `on` keyword: {set:?}"
+    );
+    // The Doc 14 §4 empty-body snippet MUST be present as kind SNIPPET
+    // (15) with the spec's verbatim insert text.
+    let on_snip = served
+        .iter()
+        .find(|i| i.label == "on EVENT -> TARGET")
+        .expect("the Doc 14 §4 `on EVENT -> TARGET` snippet is offered");
+    assert_eq!(on_snip.kind, Some(CompletionItemKind::SNIPPET));
+    assert_eq!(
+        on_snip.insert_text.as_deref(),
+        Some("on ${1:EVENT} -> ${2:Target}"),
+        "snippet body MUST be verbatim Doc 14 §4"
+    );
+    // NEGATIVE: the event `GO` exists in scope but it is a symbol, not a
+    // statement starter — it must be absent at a declaration-start.
+    let ls = labels_of(&served);
+    assert!(
+        !ls.contains(&"GO".to_string()),
+        "a symbol name MUST be absent from a statement-start completion \
+         (only keywords/snippets start a declaration): {ls:?}"
+    );
+}
+
+/// (L4-enc) **non-ASCII, BOTH `positionEncoding`s.** A 🚀 + Cyrillic block
+/// comment (lexer-valid trivia — Cyrillic *identifiers* would explode the
+/// ASCII-only lexer, prior-wave lesson) precedes a `on GO -> |`
+/// transition-target on the same line, so the cursor column DIVERGES
+/// between UTF-8 (bytes) and UTF-16 (code units). Under EACH negotiated
+/// encoding the test sends the per-encoding-correct cursor column and
+/// asserts the completion set is still the correct transition-target set
+/// (state names) — proving the completion request's position mapping is
+/// the ONE authoritative `LineIndex` inverse, not a naive byte/scalar
+/// shim (which would map the divergent cursor to the wrong token and
+/// mis-classify the context).
+#[tokio::test(flavor = "current_thread")]
+async fn completion_non_ascii_position_correct_under_utf8_and_utf16() {
+    let mut cursor_cols: Vec<u32> = Vec::new();
+    for (enc_kind, enc) in [
+        (PositionEncodingKind::UTF8, OffsetEncoding::Utf8),
+        (PositionEncodingKind::UTF16, OffsetEncoding::Utf16),
+    ] {
+        let (mut service, _socket) = LspService::new(Backend::new);
+        let init = do_initialize(&mut service, std::slice::from_ref(&enc_kind)).await;
+        assert_eq!(
+            init["capabilities"]["positionEncoding"],
+            json!(enc_kind.as_str())
+        );
+
+        let (text, uri) = fixture("l4_non_ascii.fsm");
+        let did_open = Request::build("textDocument/didOpen")
+            .params(did_open_params(&uri, &text))
+            .finish();
+        service.ready().await.unwrap().call(did_open).await.unwrap();
+
+        let path = uri.to_file_path().unwrap();
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        let idx = LineIndex::new(&text);
+
+        // Cursor right after `on GO -> ` (the byte is encoding-independent;
+        // the LSP `character` to send is NOT — compute via the same
+        // authoritative LineIndex the server inverts).
+        let cur_byte = byte_of(&text, "on GO -> ", "on GO -> ".len());
+        let cur_pos = idx.position(&text, cur_byte as u32, enc);
+        // It is on 0-based line 8 (the `… */ on GO -> ` line). Hard-coded
+        // divergent columns (computed-from-fixture; the comment is the
+        // SAME 🚀/ы/переход trivia as l3_non_ascii.fsm). The cursor sits
+        // right after `-> ` — the exact byte where the L3 fixture's
+        // `Target` ident begins, so the columns match L3's verified
+        // values: line 8 prefix = 8 spaces + "/* " + 🚀 + " " + ы +
+        // " переход */ on GO -> ". 🚀 is 1 Unicode scalar = 4 UTF-8 bytes
+        // / 2 UTF-16 units; each Cyrillic letter = 2 UTF-8 bytes / 1
+        // UTF-16 unit. → UTF-8 col 46, UTF-16 col 36 (10 fewer; the §4.1
+        // divergence). A byte- or scalar-counting shim computes the wrong
+        // one and the request maps to the wrong token / context.
+        assert_eq!(cur_pos.line, 8, "[{enc:?}] cursor is on line 8");
+        let expected_col = match enc {
+            OffsetEncoding::Utf8 => 46,
+            OffsetEncoding::Utf16 => 36,
+        };
+        assert_eq!(
+            cur_pos.character, expected_col,
+            "[{enc:?}] the cursor column after the multibyte comment must \
+             diverge by the byte/code-unit delta — a byte/scalar shim \
+             computes the wrong one"
+        );
+        cursor_cols.push(cur_pos.character);
+
+        // Oracle (same code the server runs).
+        let oracle = completions(&analysis.symbol_table, &cst, cur_byte as u32);
+        let result = call_request(
+            &mut service,
+            "textDocument/completion",
+            pos_params(&uri, cur_pos.line, cur_pos.character),
+            90,
+        )
+        .await;
+        let served = decode_completions(&result);
+
+        // The served set must equal the oracle AND be exactly the
+        // in-scope state names — proving the divergent cursor mapped to
+        // the right token and the context classified correctly under each
+        // encoding.
+        assert_eq!(
+            label_kind_set(&served),
+            label_kind_set(&oracle),
+            "[{enc:?}] served set must equal the oracle (divergent cursor \
+             mapped to the right token under this encoding)"
+        );
+        let mut want = vec![
+            lk("Start", CompletionItemKind::CLASS),
+            lk("Target", CompletionItemKind::CLASS),
+        ];
+        want.sort();
+        assert_eq!(
+            label_kind_set(&served),
+            want,
+            "[{enc:?}] transition-target after the multibyte line = exactly \
+             the state names `Start`,`Target` as CLASS"
+        );
+        // NEGATIVE under each encoding: the event `GO` must still be
+        // absent (the exclusion must hold regardless of position encoding).
+        assert!(
+            !labels_of(&served).contains(&"GO".to_string()),
+            "[{enc:?}] event `GO` MUST be absent from the transition-target \
+             completion under this encoding too"
+        );
+    }
+    // Cross-encoding sanity on REAL data: the UTF-8 cursor column MUST
+    // exceed the UTF-16 one by exactly 10 (🚀 4→2, ы 2→1, переход 7×2→7
+    // = 7 less; +1+2 = 10) — proving the encodings genuinely diverge on
+    // this line, so a single-encoding bug could not have passed both.
+    assert_eq!(cursor_cols.len(), 2, "both encodings exercised");
+    assert_eq!(
+        cursor_cols[0],
+        cursor_cols[1] + 10,
+        "UTF-8 col {} must exceed UTF-16 col {} by the multibyte delta (10)",
+        cursor_cols[0],
+        cursor_cols[1]
+    );
+}
+
+/// (L4-spec) The exact Doc 26 §8 L4 acceptance sentence, restated with
+/// byte assertions so the acceptance maps 1:1 to the doc clause and cannot
+/// silently drift: `completion` after `on ` → the item set equals exactly
+/// the machine's declared event names (kind 20); after `-> ` → exactly the
+/// state names; after `ctx.` → exactly the context fields with their type
+/// in `detail`; a keyword item's snippet text matches Doc 14 §4.
+#[tokio::test(flavor = "current_thread")]
+async fn doc26_l4_acceptance_sentence_verbatim() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    // "after `on ` → exactly the machine's declared event names (kind 20)"
+    let (t_trig, _) = fixture("l4_trigger.fsm");
+    let c1 = byte_of(&t_trig, "        on ", "        on ".len());
+    let (s1, _o1, _u1, _x1) =
+        open_and_complete(&mut service, "l4_trigger.fsm", c1, OffsetEncoding::Utf8, 95).await;
+    let mut ev = vec![
+        lk("GO", CompletionItemKind::EVENT),
+        lk("STOP", CompletionItemKind::EVENT),
+    ];
+    ev.sort();
+    assert_eq!(
+        label_kind_set(&s1),
+        ev,
+        "after `on ` = exact event set, kind 20"
+    );
+
+    // "after `-> ` → exactly the state names"
+    let (t_tt, _) = fixture("l4_transition_target.fsm");
+    let c2 = byte_of(&t_tt, "on GO -> ", "on GO -> ".len());
+    let (s2, _o2, _u2, _x2) = open_and_complete(
+        &mut service,
+        "l4_transition_target.fsm",
+        c2,
+        OffsetEncoding::Utf8,
+        96,
+    )
+    .await;
+    let mut st = vec![
+        lk("Idle", CompletionItemKind::CLASS),
+        lk("Running", CompletionItemKind::CLASS),
+    ];
+    st.sort();
+    assert_eq!(label_kind_set(&s2), st, "after `-> ` = exact state set");
+
+    // "after `ctx.` → exactly the context fields with their type in detail"
+    let (t_basic, uri_b) = fixture("l4_basic.fsm");
+    service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(did_open_params(&uri_b, &t_basic))
+                .finish(),
+        )
+        .await
+        .unwrap();
+    let idx_b = LineIndex::new(&t_basic);
+    // `ctx.floor = ctx.floor + 1` — cursor right after the first `ctx.`.
+    let c3 = byte_of(&t_basic, "ctx.", "ctx.".len());
+    let p3 = idx_b.position(&t_basic, c3 as u32, OffsetEncoding::Utf8);
+    let r3 = call_request(
+        &mut service,
+        "textDocument/completion",
+        pos_params(&uri_b, p3.line, p3.character),
+        97,
+    )
+    .await;
+    let s3 = decode_completions(&r3);
+    // Exactly the two context fields, kind FIELD, with type in `detail`.
+    let mut got: Vec<(String, i64, Option<String>)> = s3
+        .iter()
+        .map(|i| (i.label.clone(), kind_num(i.kind), i.detail.clone()))
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (
+                "floor".to_string(),
+                kind_num(Some(CompletionItemKind::FIELD)),
+                Some("u8".to_string())
+            ),
+            (
+                "moving".to_string(),
+                kind_num(Some(CompletionItemKind::FIELD)),
+                Some("bool".to_string())
+            ),
+        ],
+        "after `ctx.` = exactly the context fields, kind FIELD, type in detail"
+    );
+
+    // "Assert a keyword item's snippet text matches Doc 14 §4." — the
+    // `machine` keyword at file top level carries the Doc 14 §4 verbatim
+    // snippet body. File top-level start: a fresh blank line after the
+    // `language` decl.
+    let top_src = "language fsm 2.0\n\n";
+    let top_uri = Url::from_file_path("/tmp/l4_top.fsm").unwrap();
+    service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(did_open_params(&top_uri, top_src))
+                .finish(),
+        )
+        .await
+        .unwrap();
+    let idx_t = LineIndex::new(top_src);
+    let c_top = top_src.len(); // EOF (the blank line after `language`)
+    let p_top = idx_t.position(top_src, c_top as u32, OffsetEncoding::Utf8);
+    let r_top = call_request(
+        &mut service,
+        "textDocument/completion",
+        pos_params(&top_uri, p_top.line, p_top.character),
+        98,
+    )
+    .await;
+    let s_top = decode_completions(&r_top);
+    let machine_kw = s_top
+        .iter()
+        .find(|i| i.label == "machine")
+        .expect("file top level offers the `machine` keyword");
+    assert_eq!(machine_kw.kind, Some(CompletionItemKind::KEYWORD));
+    assert_eq!(
+        machine_kw.insert_text.as_deref(),
+        Some("machine ${1:Name} {\n    $0\n}"),
+        "the `machine` keyword snippet MUST be verbatim Doc 14 §4"
+    );
+}

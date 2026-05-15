@@ -1,22 +1,26 @@
-//! The `tower-lsp` backend — Doc 26 §2.3 / §5 (L1+L2+L3 capabilities).
+//! The `tower-lsp` backend — Doc 26 §2.3 / §5 (L1+L2+L3+L4 capabilities).
 //!
 //! Implements the LSP lifecycle (`initialize`/`initialized`/`shutdown`),
 //! full-document sync (`didOpen`/`didChange`/`didClose`), a ~200ms debounce
 //! (Doc 14 §14 / Doc 26 §4.3), `publishDiagnostics`, the L2 read
 //! capabilities `documentSymbol` (Doc 14 §13) + `foldingRange` (Doc 14
-//! §12), and the L3 capabilities `hover` (Doc 14 §5) + `definition` (Doc
-//! 14 §6, single-file). Every diagnostic, symbol, hover and goto comes
-//! from the exact `fsm check` pipeline ([`crate::analysis::analyze`]) —
-//! this module never re-analyses (Doc 20 §9.4 / Doc 26 §3):
-//! `documentSymbol`/`hover`/`definition` consume the `symbol_table` (and,
-//! for hover, the additively threaded `ir`) from the **same** `analyze()`
-//! the diagnostics path runs (Doc 26 §8 L2/L3: "one analysis feeds all");
-//! `foldingRange` is a pure parse-tree walk (no analysis at all).
+//! §12), the L3 capabilities `hover` (Doc 14 §5) + `definition` (Doc 14
+//! §6, single-file), and the L4 capability `completion` (Doc 14 §4,
+//! context-aware, single-file). Every diagnostic, symbol, hover, goto and
+//! completion comes from the exact `fsm check` pipeline
+//! ([`crate::analysis::analyze`]) — this module never re-analyses (Doc 20
+//! §9.4 / Doc 26 §3): `documentSymbol`/`hover`/`definition`/`completion`
+//! consume the `symbol_table` (and, for hover, the additively threaded
+//! `ir`) from the **same** `analyze()` the diagnostics path runs (Doc 26
+//! §8 L2/L3/L4: "one analysis feeds all"); `foldingRange` is a pure
+//! parse-tree walk (no analysis at all). `completion` additionally reuses
+//! L3's `resolve` CST substrate for trigger-context classification — no
+//! parallel context detector (Doc 26 §8 L4).
 //!
-//! L3 scope boundary (Doc 26 §8): NO completion/rename/references/
-//! semanticTokens/codeAction/inlayHint. Those are L4+ and are deliberately
-//! neither implemented nor stubbed (a silent no-op handler is worse than
-//! an unadvertised capability).
+//! L4 scope boundary (Doc 26 §8): NO rename/references/semanticTokens/
+//! codeAction/inlayHint. Those are L5+ and are deliberately neither
+//! implemented nor stubbed (a silent no-op handler is worse than an
+//! unadvertised capability).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -26,16 +30,18 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
-    FoldingRangeProviderCapability, GotoDefinitionParams, GotoDefinitionResponse, Hover,
-    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-    MessageType, OneOf, PositionEncodingKind, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
+    DocumentSymbolResponse, FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf,
+    PositionEncodingKind, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Url,
 };
 use tower_lsp::{Client, LanguageServer};
 
 use crate::analysis::analyze;
+use crate::capabilities::complete::completions;
 use crate::capabilities::definition::goto_definition;
 use crate::capabilities::diagnostics::to_lsp_diagnostics;
 use crate::capabilities::document_symbol::document_symbols;
@@ -189,6 +195,28 @@ impl LanguageServer for Backend {
                 // because they genuinely work, NOT stubbed.
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                // L4 (Doc 26 §8 L4): context-aware completion. An honest,
+                // fully-implemented provider whose trigger-context
+                // classifier reuses L3's `resolve` CST substrate (one
+                // analysis feeds it) — advertised because it genuinely
+                // works, NOT stubbed. Trigger characters are the EXACT
+                // Doc 14 §2 set `[".", ":", "@", "[", " "]` (verified
+                // against the spec's `ServerCapabilities` block, not
+                // guessed). `resolve_provider: false` — L4 returns fully
+                // resolved items (no `completionItem/resolve` round-trip;
+                // advertising a resolve we do not implement would be the
+                // stub-a-no-op sin).
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![
+                        ".".to_owned(),
+                        ":".to_owned(),
+                        "@".to_owned(),
+                        "[".to_owned(),
+                        " ".to_owned(),
+                    ]),
+                    resolve_provider: Some(false),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -394,5 +422,49 @@ impl LanguageServer for Backend {
             enc,
         )
         .map(GotoDefinitionResponse::Scalar))
+    }
+
+    /// `textDocument/completion` — Doc 14 §4 / Doc 26 §8 L4 (single-file).
+    ///
+    /// Classifies the trigger context at the cursor by **reusing L3's
+    /// `resolve` CST substrate** (the SAME `enclosing` ancestry walk +
+    /// `in_guard` predicate + the shared `prev_significant_token`
+    /// primitive — Doc 26 §8 L4: reuse/extend the classifier, do NOT build
+    /// a parallel detector) and returns ONLY context-correct candidates,
+    /// every name sourced from the threaded `symbol_table` of the **same**
+    /// single `analyze()` the diagnostics path runs (Doc 26 §3/§8 — no
+    /// second analysis, no parallel context detector). The cursor
+    /// `Position` → byte uses the ONE authoritative `LineIndex` inverse
+    /// (no second converter — Doc 26 §4.1 / §11.32 boundary). An
+    /// unclassifiable cursor → an empty list (the spec-correct "nothing
+    /// meaningful here", never a dump of every symbol — the
+    /// wrong-context-noise sin). The snapshot is released before the
+    /// await-free analysis, exactly as the L2/L3 paths do.
+    async fn completion(&self, params: CompletionParams) -> RpcResult<Option<CompletionResponse>> {
+        let pos = params.text_document_position;
+        let uri = pos.text_document.uri;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        // Cursor Position -> byte via the ONE authoritative LineIndex
+        // inverse (the L3 seam — NOT a second converter).
+        let byte = line_index.offset(&text, pos.position, enc);
+        let path = Backend::uri_to_path(&uri);
+        // THE reuse seam — the identical `fsm check` pipeline; completion
+        // reads the threaded `symbol_table` from this single run.
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        let items = completions(&analysis.symbol_table, &cst, byte);
+        // An empty list is a valid LSP response meaning "no suggestions
+        // here" — that is the deliberate degradation for an
+        // unclassifiable / wrong context, NOT a missing capability.
+        Ok(Some(CompletionResponse::Array(items)))
     }
 }
