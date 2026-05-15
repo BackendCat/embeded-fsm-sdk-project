@@ -79,6 +79,13 @@ pub fn machine_has_transitions(ctx: &MachineEmitCtx<'_>) -> bool {
             StateNode::Parallel(p) => {
                 !p.transitions.is_empty() || p.regions.iter().any(|r| walk(&r.states))
             }
+            // v1.1-W2d: a submachine ref-state carries the parent's own
+            // `on EVT` / `done ->` transitions (Doc 09 §4.11). They emit a
+            // per-state case like any other state's, so a machine whose
+            // only transitions live on a ref-state is NOT transition-free
+            // (otherwise the spurious `(void)m;(void)ev;` cast would shadow
+            // a used param and the ref-state cases would be unreachable).
+            StateNode::Submachine(sm) => !sm.transitions.is_empty(),
             _ => false,
         })
     }
@@ -136,6 +143,14 @@ impl<'a, 'm> IrVisitor for SwitchEmitter<'a, 'm> {
             StateNode::Simple(ss) => (&ss.id, &ss.transitions),
             StateNode::Composite(c) => (&c.id, &c.transitions),
             StateNode::Parallel(p) => (&p.id, &p.transitions),
+            // v1.1-W2d: a `state X is Sub` ref-state's own transitions
+            // (`SubmachineRef.transitions` — parent-level `on EVT` /
+            // `done -> Target`, Doc 09 §4.11) dispatch exactly like any
+            // other state's. Emitting them as a normal per-state case is
+            // what makes transition-wins observable (a ref-state `on EVT`
+            // beats delegation) and what fires `done -> Target` when the
+            // sub-completion synthesises `EVENT__COMPLETION`.
+            StateNode::Submachine(sm) => (&sm.id, &sm.transitions),
             _ => {
                 // Pseudo-states have no per-state switch case. Still descend
                 // so any future regions inside (currently none) are visited.
@@ -218,18 +233,58 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
     let prefix = ctx.type_prefix();
     let macro_prefix = ctx.macro_prefix();
     let has_defer = super::defer::machine_has_defer(ctx);
+    let sub_refs = super::submachine::collect_sub_refs(ctx);
+
+    // v1.1-W2d: submachine delegation + completion sweep, emitted AFTER the
+    // parent leaf-to-root walk (so a parent-level ref-state transition wins
+    // — transition-wins, mirroring W2c's `select_transitions` before
+    // `try_delegate_to_submachine`) and BEFORE the defer hook (a delegated
+    // event was consumed by the sub; it is neither held nor discarded —
+    // W2c's `try_delegate_to_submachine` returns the consumed records). The
+    // completion sweep recursively re-enters `..._dispatch` with a
+    // synthetic `EVENT__COMPLETION`, where the parent walk fires the
+    // ref-state `done -> Target` through the EXISTING machinery — exactly
+    // W2c enqueuing `Completion(ref_id)` and letting the existing R1 path
+    // fire it (the `_completion_depth` watchdog already bounds §9.4).
+    let delegation = if sub_refs.is_empty() {
+        String::new()
+    } else {
+        let mut d = String::new();
+        // Event routing — `__delegated_any` write is only consumed by the
+        // defer hook, so emit it only when this machine declares `defer`
+        // (else an unread bool trips -Werror=unused-but-set-variable —
+        // TD-BUG-1). Then the completion sweep (sub Final → synthetic
+        // `EVENT__COMPLETION` → existing `done ->` machinery). The switch
+        // strategy executes transitions inline during the parent walk, so
+        // sweeping here (post-walk) is recursion-safe — a fired `done`
+        // already exited the ref-state.
+        super::submachine::emit_delegation_block(ctx, &sub_refs, "    ", has_defer, &mut d);
+        super::submachine::emit_completion_sweep(ctx, &sub_refs, "    ", &mut d);
+        d
+    };
 
     // v1.1 deferral hook A: an unconsumed event whose id is deferred by the
     // active configuration is HELD (not discarded). Checked AFTER the
     // leaf-to-root search fails for every region, so an enabled transition
     // always wins (transition-wins, UML 2.5.1 §14.2.3.9.1 / Doc 08 §10.1).
+    // `fired_in_region[r]` is also set by a delegated-and-consumed event, so
+    // gating on "no region fired" keeps a delegated event from being held
+    // (W2c treats a delegated event as consumed, not deferred).
     let defer_hold = if has_defer {
+        let sub_guard = if sub_refs.is_empty() {
+            String::new()
+        } else {
+            // A delegated-and-consumed event marks its region fired; do not
+            // also defer it (it was handled inside the sub).
+            String::from(" && !__delegated_any")
+        };
         format!(
-            "    if (!fired_any && {prefix}_active_config_defers(m, ev->id)) {{\n\
+            "    if (!fired_any{sub_guard} && {prefix}_active_config_defers(m, ev->id)) {{\n\
              \x20       {prefix}_defer_push(m, ev);\n\
              \x20       return;\n\
              \x20   }}\n",
             prefix = prefix,
+            sub_guard = sub_guard,
         )
     } else {
         String::new()
@@ -287,7 +342,7 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
      * exact code they did before. */
     bool fired_any = false;
     bool fired_in_region[{macro}_MAX_PARALLEL_REGIONS] = {{ false }};
-    /* Snapshot active region count up front so transition side effects
+{delegated_decl}    /* Snapshot active region count up front so transition side effects
      * that change `_active_count` (e.g. cross-out-of-parallel) do not
      * shrink the iteration mid-walk. Doc 08 §4.1: process innermost
      * leaves first (slots 1..N are nested below slot 0), so iterate
@@ -310,7 +365,7 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
             s = {prefix}_parent_table[s];
         }}
     }}
-{defer_hold}    if (fired_any) {{
+{delegation}{defer_hold}    if (fired_any) {{
 {release_call}        {prefix}_handle_completion(m);
 {drain_released}    }}
     /* Otherwise: no ancestor handled the event — discard per Doc 08 §3.1. */
@@ -318,6 +373,19 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
 "#,
         prefix = prefix,
         macro = macro_prefix,
+        delegated_decl = if sub_refs.is_empty() || !has_defer {
+            // Only the defer hook reads `__delegated_any`; with no `defer`
+            // it would be an unread bool (-Werror=unused-but-set-variable).
+            String::new()
+        } else {
+            String::from(
+                "    /* v1.1-W2d: set by a delegated-and-consumed event so the\n\
+                 \x20    * defer hook does not also hold it (W2c treats a delegated\n\
+                 \x20    * event as consumed). */\n\
+                 \x20   bool __delegated_any = false;\n",
+            )
+        },
+        delegation = delegation,
         defer_hold = defer_hold,
         release_call = release_call,
         drain_released = drain_released,

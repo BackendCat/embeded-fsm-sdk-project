@@ -28,6 +28,7 @@ pub mod impl_header;
 pub mod license;
 pub mod queue;
 pub mod source;
+pub mod submachine;
 pub mod timer;
 pub mod transition;
 
@@ -115,38 +116,69 @@ pub fn emit(ir: &Ir, config: &CodegenConfig) -> Result<EmittedFiles, EmitError> 
     let _event_seen: BTreeSet<String> = BTreeSet::new();
 
     for machine in &ir.machines {
-        if machine.root.states.is_empty() {
-            return Err(EmitError::EmptyMachine(machine.name.clone()));
-        }
-
-        let index = crate::state_index::build_state_index(machine)?;
-        // Audit P1-8 (2026-05-14): walk every transition source / target
-        // through the index BEFORE any emitter dereferences via
-        // `must_lookup`. The analyzer is the authoritative gate (FSM-E0002
-        // unresolved-name), but defending in codegen turns "analyzer
-        // regression slipped through" from a `panic!` + backtrace into a
-        // clean `EmitError::UnknownStateId` propagated to CLI exit code 2.
-        pre_flight_validate(machine, &index)?;
-        let parents = crate::parent_table::build_parent_table(&index);
-        let layout = crate::region_layout::build_region_layout(machine, &index);
-        let resolved_strategy = config.strategy.resolve(index.count());
-
-        let ctx = MachineEmitCtx {
-            machine,
-            index: &index,
-            parents: &parents,
-            layout: &layout,
-            config,
-            strategy: resolved_strategy,
-        };
-
-        files.push(conf_header::emit(&ctx));
-        files.push(impl_header::emit(&ctx));
-        files.push(header::emit(&ctx));
-        files.push(source::emit(&ctx));
+        // v1.1-W2d: a `state X is Sub` ref-state owns a nested value-member
+        // sub-instance of `Sub`'s machine struct (heap-free G2). The
+        // template is its own self-contained codegen unit, carried in
+        // `machine.submachines` (Doc 09 §3 / §4.11). Emit every submachine
+        // template BEFORE the parent so the parent header's
+        // `#include "Sub.h"` resolves and the nested `Sub_t` member is a
+        // complete type. W2b sets `include_submachines:false` on the nested
+        // lower, so `machine.submachines` of a submachine is empty — the
+        // recursion bottoms out and `Sub_t` is a finite struct (no runtime
+        // cycle guard needed; FSM-E0502 already rejects static template
+        // cycles at analysis).
+        emit_machine_recursive(machine, config, &mut files)?;
     }
 
     Ok(EmittedFiles { files })
+}
+
+/// Emit one machine unit plus, depth-first, every submachine template it
+/// references. Submachines are emitted first so a parent that nests a
+/// `Sub_t` value member has the complete type available via
+/// `#include "Sub.h"`.
+fn emit_machine_recursive(
+    machine: &fsm_ir::MachineObject,
+    config: &CodegenConfig,
+    files: &mut Vec<EmittedFile>,
+) -> Result<(), EmitError> {
+    if machine.root.states.is_empty() {
+        return Err(EmitError::EmptyMachine(machine.name.clone()));
+    }
+
+    // Emit referenced submachine templates first (post-order): the parent's
+    // generated header includes theirs, and the nested value member needs
+    // their full struct definition.
+    for sub in &machine.submachines {
+        emit_machine_recursive(sub, config, files)?;
+    }
+
+    let index = crate::state_index::build_state_index(machine)?;
+    // Audit P1-8 (2026-05-14): walk every transition source / target
+    // through the index BEFORE any emitter dereferences via
+    // `must_lookup`. The analyzer is the authoritative gate (FSM-E0002
+    // unresolved-name), but defending in codegen turns "analyzer
+    // regression slipped through" from a `panic!` + backtrace into a
+    // clean `EmitError::UnknownStateId` propagated to CLI exit code 2.
+    pre_flight_validate(machine, &index)?;
+    let parents = crate::parent_table::build_parent_table(&index);
+    let layout = crate::region_layout::build_region_layout(machine, &index);
+    let resolved_strategy = config.strategy.resolve(index.count());
+
+    let ctx = MachineEmitCtx {
+        machine,
+        index: &index,
+        parents: &parents,
+        layout: &layout,
+        config,
+        strategy: resolved_strategy,
+    };
+
+    files.push(conf_header::emit(&ctx));
+    files.push(impl_header::emit(&ctx));
+    files.push(header::emit(&ctx));
+    files.push(source::emit(&ctx));
+    Ok(())
 }
 
 /// Verify that every state id referenced from a transition, trigger, or

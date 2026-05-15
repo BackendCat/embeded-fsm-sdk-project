@@ -62,6 +62,17 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
             // completion immediately).
             continue;
         }
+        // v1.1-W2d: a submachine ref-state (`state X is Sub`) has NO user
+        // entry/exit action — the `is Sub { … }` grammar carries only
+        // transitions, and the sub-instance lifecycle (init on entry, fresh
+        // re-init on self-transition) is codegen's job, NOT a user extern.
+        // This mirrors the merged W2c simulator, which runs no ref-state
+        // entry action and instead builds the sub-`RuntimeState`. Emitting
+        // a `_entry_X` prototype would force the user to implement a
+        // meaningless stub and risk a link error.
+        if super::submachine::is_submachine_record(rec.kind) {
+            continue;
+        }
         body.push_str(&format!(
             "void {prefix}_entry_{name}({prefix}_t *m);\n",
             prefix = prefix,
@@ -72,6 +83,9 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
     body.push_str("\n/* ── Exit actions ─────────────────────────────────────────────────── */\n");
     for rec in &ctx.index.records {
         if !rec.kind.is_active_at_rest() || rec.kind == StateRecordKind::Final {
+            continue;
+        }
+        if super::submachine::is_submachine_record(rec.kind) {
             continue;
         }
         body.push_str(&format!(

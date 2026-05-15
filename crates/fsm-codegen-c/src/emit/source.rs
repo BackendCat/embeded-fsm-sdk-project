@@ -138,11 +138,19 @@ fn emit_init(ctx: &MachineEmitCtx<'_>) -> String {
             }
             let rec = ctx.index.get(*anc);
             if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
-                s.push_str(&format!(
-                    "    {prefix}_entry_{name}(m);\n",
-                    prefix = prefix,
-                    name = rec.c_name,
-                ));
+                // v1.1-W2d: an ancestor that is a submachine ref-state has
+                // no user `_entry_X` — instantiate its sub-instance instead
+                // (Doc 08 §12.2; mirrors W2c's `sync_submachines` on a
+                // freshly-entered ref-state).
+                if let Some(sr) = super::submachine::ref_state_member(ctx, &rec.ir_id) {
+                    super::submachine::emit_sub_init(&sr, "    ", &mut s);
+                } else {
+                    s.push_str(&format!(
+                        "    {prefix}_entry_{name}(m);\n",
+                        prefix = prefix,
+                        name = rec.c_name,
+                    ));
+                }
             }
         }
         let leaf = ctx.index.get(e.leaf);
@@ -154,11 +162,19 @@ fn emit_init(ctx: &MachineEmitCtx<'_>) -> String {
             slot = slot,
         ));
         if leaf.kind.is_active_at_rest() && leaf.kind != StateRecordKind::Final {
-            s.push_str(&format!(
-                "    {prefix}_entry_{name}(m);\n",
-                prefix = prefix,
-                name = leaf.c_name,
-            ));
+            if let Some(sr) = super::submachine::ref_state_member(ctx, &leaf.ir_id) {
+                // Root-initial lands directly on the ref-state (the Device
+                // example: `initial Connecting`). Instantiate the
+                // sub-instance — exactly what W2c's post-init
+                // `drain_queue_rt`→`sync_submachines` does.
+                super::submachine::emit_sub_init(&sr, "    ", &mut s);
+            } else {
+                s.push_str(&format!(
+                    "    {prefix}_entry_{name}(m);\n",
+                    prefix = prefix,
+                    name = leaf.c_name,
+                ));
+            }
         }
         leaf_count += 1;
     }

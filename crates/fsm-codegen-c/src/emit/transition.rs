@@ -93,12 +93,19 @@ pub fn emit_transition_body(
     for exit_idx in &exits {
         let rec = ctx.index.get(*exit_idx);
         if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
-            out.push_str(&format!(
-                "{pad}{prefix}_exit_{name}(m);\n",
-                pad = pad,
-                prefix = prefix,
-                name = rec.c_name,
-            ));
+            // v1.1-W2d: a submachine ref-state has no user `_exit_X`. Its
+            // sub-instance is a value member — teardown is implicit (no
+            // free), and a fresh re-init happens on the next entry (the
+            // ref-state self-transition case), mirroring W2c's `run_exit`
+            // teardown→re-instantiate. So emit nothing on exit here.
+            if super::submachine::ref_state_member(ctx, &rec.ir_id).is_none() {
+                out.push_str(&format!(
+                    "{pad}{prefix}_exit_{name}(m);\n",
+                    pad = pad,
+                    prefix = prefix,
+                    name = rec.c_name,
+                ));
+            }
         }
         for timer in &all_timers {
             if timer.owner_state == *exit_idx {
@@ -155,12 +162,21 @@ pub fn emit_transition_body(
     for entry_idx in entry_path(t, ctx.index, ctx.parents) {
         let rec = ctx.index.get(entry_idx);
         if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
-            out.push_str(&format!(
-                "{pad}{prefix}_entry_{name}(m);\n",
-                pad = pad,
-                prefix = prefix,
-                name = rec.c_name,
-            ));
+            // v1.1-W2d: entering a submachine ref-state instantiates its
+            // sub-instance fresh (Doc 08 §12.2) instead of calling a user
+            // `_entry_X`. For a ref-state self-transition
+            // (`Connecting --RECONNECT--> Connecting`) this is the
+            // re-init-on-re-entry that mirrors W2c's teardown→re-sync.
+            if let Some(sr) = super::submachine::ref_state_member(ctx, &rec.ir_id) {
+                super::submachine::emit_sub_init(&sr, &pad, out);
+            } else {
+                out.push_str(&format!(
+                    "{pad}{prefix}_entry_{name}(m);\n",
+                    pad = pad,
+                    prefix = prefix,
+                    name = rec.c_name,
+                ));
+            }
         }
         for timer in &all_timers {
             if timer.owner_state == entry_idx {
@@ -359,12 +375,20 @@ fn emit_enter_chain(ctx: &MachineEmitCtx<'_>, state_idx: u8, pad: &str, out: &mu
                 name = rec.c_name,
             ));
             if rec.kind != StateRecordKind::Final {
-                out.push_str(&format!(
-                    "{pad}{prefix}_entry_{name}(m);\n",
-                    pad = pad,
-                    prefix = prefix,
-                    name = rec.c_name,
-                ));
+                // v1.1-W2d: a ref-state reached via an initial-chain
+                // expansion (a `state X is Sub` as a composite's initial)
+                // instantiates its sub-instance instead of a user
+                // `_entry_X`.
+                if let Some(sr) = super::submachine::ref_state_member(ctx, &rec.ir_id) {
+                    super::submachine::emit_sub_init(&sr, pad, out);
+                } else {
+                    out.push_str(&format!(
+                        "{pad}{prefix}_entry_{name}(m);\n",
+                        pad = pad,
+                        prefix = prefix,
+                        name = rec.c_name,
+                    ));
+                }
                 arm_timers(state_idx, out);
             }
         }

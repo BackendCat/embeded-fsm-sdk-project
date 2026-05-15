@@ -116,6 +116,11 @@ impl<'a, 'm> IrVisitor for TransRowCollector<'a, 'm> {
             StateNode::Simple(ss) => &ss.transitions[..],
             StateNode::Composite(c) => &c.transitions[..],
             StateNode::Parallel(p) => &p.transitions[..],
+            // v1.1-W2d: emit the submachine ref-state's own transitions
+            // (`on EVT` / `done -> Target`, Doc 09 §4.11) as table rows so
+            // the table strategy fires them identically to the switch
+            // strategy — same transition-wins + `done` semantics.
+            StateNode::Submachine(sm) => &sm.transitions[..],
             _ => {
                 // Pseudo-states host no transitions; still descend so any
                 // nested regions (none today, but future-proof) are walked.
@@ -320,6 +325,41 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
     let prefix = ctx.type_prefix();
     let macro_prefix = ctx.macro_prefix();
     let has_defer = super::defer::machine_has_defer(ctx);
+    let sub_refs = super::submachine::collect_sub_refs(ctx);
+
+    // v1.1-W2d: table-strategy submachine delegation + completion sweep.
+    // Emitted AFTER the collect loop (so a selected parent row wins —
+    // transition-wins) and BEFORE the `selected_count == 0` early return
+    // (so a delegated event still advances the sub when no parent row
+    // matched). Mirrors W2c's `select_transitions` → `try_delegate` order.
+    // Event-routing block (delegate the event into the sub for any
+    // ref-state region with no selected parent row — transition-wins). The
+    // completion sweep is NOT here: it must run AFTER the execute phase so
+    // the selected `done` row is applied before any re-sweep (otherwise the
+    // recursive synthetic-completion dispatch loops forever — the table
+    // strategy collects-then-executes). This matches W2c's `rtc_step`
+    // (selection+execution) → `sync_submachines` (completion) order.
+    let delegation = if sub_refs.is_empty() {
+        String::new()
+    } else {
+        let mut d = String::new();
+        super::submachine::emit_delegation_block_table(ctx, &sub_refs, "    ", true, &mut d);
+        d
+    };
+    let sub_pending_check = if sub_refs.is_empty() {
+        String::new()
+    } else {
+        let mut p = String::new();
+        super::submachine::emit_sub_pending_check(ctx, &sub_refs, "    ", &mut p);
+        p
+    };
+    let completion_sweep = if sub_refs.is_empty() {
+        String::new()
+    } else {
+        let mut c = String::new();
+        super::submachine::emit_completion_sweep(ctx, &sub_refs, "    ", &mut c);
+        c
+    };
 
     // v1.1 deferral hook A — unconsumed-but-deferred event is HELD, not
     // discarded. `selected_count == 0` is the table strategy's "no
@@ -362,6 +402,70 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
         String::new()
     };
 
+    // Submachine-bearing machines need to record, per region, whether a
+    // parent row was selected (so delegation only runs for ref-state
+    // regions with no row — transition-wins). Non-submachine machines emit
+    // the byte-identical pre-W2d body (no `__region_selected[]`, no
+    // `__delegated_any`, no delegation block).
+    let has_subs = !sub_refs.is_empty();
+    let region_sel_decl = if has_subs {
+        format!(
+            "    bool __region_selected[{macro}_MAX_PARALLEL_REGIONS] = {{ false }};\n\
+             \x20   /* v1.1-W2d: __delegated_any — a delegated-and-consumed event\n\
+             \x20    * must not also be discarded/deferred (W2c treats it as\n\
+             \x20    * consumed). __sub_pending — a sub reached its Final, so the\n\
+             \x20    * parent must process the synthetic completion even when no\n\
+             \x20    * parent row was selected (mirrors W2c's unconditional\n\
+             \x20    * post-step `sync_submachines`). */\n\
+             \x20   bool __delegated_any = false;\n\
+             \x20   bool __sub_pending = false;\n",
+            macro = macro_prefix,
+        )
+    } else {
+        String::new()
+    };
+    let collect_loop = if has_subs {
+        format!(
+            "    for (int8_t r = (int8_t)initial_active - 1; r >= 0; r--) {{\n\
+             \x20       const {prefix}_TransRow_t *row = {prefix}_select_for_region(m, m->_active[r], ev);\n\
+             \x20       if (row) {{ selected[selected_count++] = row; __region_selected[r] = true; }}\n\
+             \x20   }}\n",
+            prefix = prefix,
+        )
+    } else {
+        format!(
+            "    for (int8_t r = (int8_t)initial_active - 1; r >= 0; r--) {{\n\
+             \x20       const {prefix}_TransRow_t *row = {prefix}_select_for_region(m, m->_active[r], ev);\n\
+             \x20       if (row) selected[selected_count++] = row;\n\
+             \x20   }}\n",
+            prefix = prefix,
+        )
+    };
+    // The no-row branch: a delegated-and-consumed event must NOT fall into
+    // the defer/discard path (W2c treats it as consumed). With submachines,
+    // skip the early return when the sub consumed the event; the completion
+    // it may have triggered already ran inside the delegation block.
+    let no_row_branch = if has_subs {
+        // Discard/defer ONLY when nothing was consumed AND no sub completed.
+        // A delegated-and-consumed event (W2c: consumed, not deferred) or a
+        // pending sub-completion (W2c: `sync_submachines` enqueues
+        // `Completion(ref_id)` post-step regardless) must fall through to
+        // the (no-op) execute loop + the post-execute completion sweep.
+        format!(
+            "    if (selected_count == 0 && !__delegated_any && !__sub_pending) {{\n\
+             {defer_hold}        return; /* No row, nothing delegated, no sub completed. */\n\
+             \x20   }}\n",
+            defer_hold = defer_hold,
+        )
+    } else {
+        format!(
+            "    if (selected_count == 0) {{\n\
+             {defer_hold}        return; /* No region had an enabled transition. */\n\
+             \x20   }}\n",
+            defer_hold = defer_hold,
+        )
+    };
+
     format!(
         r#"
 void {prefix}_dispatch({prefix}_t *m, const {prefix}_Event_t *ev) {{
@@ -376,27 +480,24 @@ void {prefix}_dispatch({prefix}_t *m, const {prefix}_Event_t *ev) {{
 
     const {prefix}_TransRow_t *selected[{macro}_MAX_PARALLEL_REGIONS];
     uint8_t selected_count = 0;
-    /* Iterate innermost-first (Doc 08 §4.1). */
+{region_sel_decl}    /* Iterate innermost-first (Doc 08 §4.1). */
     uint8_t initial_active = m->_active_count;
-    for (int8_t r = (int8_t)initial_active - 1; r >= 0; r--) {{
-        const {prefix}_TransRow_t *row = {prefix}_select_for_region(m, m->_active[r], ev);
-        if (row) selected[selected_count++] = row;
-    }}
-
-    if (selected_count == 0) {{
-{defer_hold}        return; /* No region had an enabled transition. */
-    }}
-
+{collect_loop}{delegation}{sub_pending_check}{no_row_branch}
     /* Execute phase: at most one transition per region. */
     for (uint8_t i = 0; i < selected_count; i++) {{
         {prefix}_execute_transition(m, selected[i], ev);
     }}
-{release_call}    {prefix}_handle_completion(m);
+{completion_sweep}{release_call}    {prefix}_handle_completion(m);
 {drain_released}}}
 "#,
         prefix = prefix,
         macro = macro_prefix,
-        defer_hold = defer_hold,
+        region_sel_decl = region_sel_decl,
+        collect_loop = collect_loop,
+        delegation = delegation,
+        sub_pending_check = sub_pending_check,
+        no_row_branch = no_row_branch,
+        completion_sweep = completion_sweep,
         release_call = release_call,
         drain_released = drain_released,
     )

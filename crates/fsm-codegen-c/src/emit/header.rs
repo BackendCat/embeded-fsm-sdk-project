@@ -20,8 +20,21 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
     let mut body = String::new();
     body.push_str(&format!("#ifndef {}\n#define {}\n\n", guard, guard));
     body.push_str("#include <stdint.h>\n#include <stdbool.h>\n");
-    body.push_str(&format!("#include \"{}_conf.h\"\n\n", stem));
-    body.push_str("#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
+    body.push_str(&format!("#include \"{}_conf.h\"\n", stem));
+    // v1.1-W2d: a `state X is Sub` ref-state nests a `Sub_t` value member
+    // (Doc 08 §12 / Doc 09 §4.11). The template is its own codegen unit
+    // (emitted first by `emit_machine_recursive`); include its header so the
+    // nested member is a complete type. De-duplicated by include name so
+    // two ref-states pointing at the same template include it once.
+    {
+        let mut included: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for sr in super::submachine::collect_sub_refs(ctx) {
+            if included.insert(sr.sub_type.clone()) {
+                body.push_str(&format!("#include \"{}.h\"\n", sr.sub_type));
+            }
+        }
+    }
+    body.push_str("\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
 
     body.push_str(&emit_state_enum(ctx));
     body.push_str("\n");
@@ -266,6 +279,20 @@ fn emit_machine_struct(ctx: &MachineEmitCtx<'_>) -> String {
         macro = macro_prefix,
     ));
     s.push_str("    uint8_t _deferred_count;\n");
+    // v1.1-W2d: submachine ref-state sub-instances. Each `state X is Sub`
+    // owns a nested `Sub_t` value member (Doc 08 §12, heap-free per Doc 02
+    // G2 — exactly how `_active[]`/timers/defer buffer nest). Always
+    // present so the struct layout is stable; `Sub_init` is called on
+    // ref-state entry (and re-entry resets it fresh). One member per
+    // ref-state (a template referenced twice ⇒ two independent instances).
+    for sr in super::submachine::collect_sub_refs(ctx) {
+        s.push_str(&format!(
+            "    {ty} {member}; /* `{name}` submachine sub-instance (Doc 08 §12) */\n",
+            ty = sr.member_type(),
+            member = sr.member,
+            name = sr.parent_state_c,
+        ));
+    }
     s.push_str(&format!("}} {prefix}_t;\n", prefix = prefix));
     s
 }
