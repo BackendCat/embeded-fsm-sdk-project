@@ -1,3 +1,15 @@
+//! ## Test classification (v1.1-W0 / SUBAGENT_CONVENTIONS §5.4, PD-2)
+//!
+//! `timer_path_and_event_path_produce_different_final_states` IS the §5.4
+//! behavioural guard: compiles with `gcc -…-Werror`, RUNS, and asserts
+//! the timer path reaches TIMEOUT while the event path reaches DONE (two
+//! distinct observable outcomes from the same state). The `.contains()`
+//! in `timer_event_is_distinct_from_completion_in_codegen` are a
+//! **secondary structural check** (§5.4 last paragraph): they pin that a
+//! distinct `case MOTOR_EVENT_TIMER_*_FIRED` label is emitted, separate
+//! from `EVENT__COMPLETION` — the precise emission-shape invariant the
+//! P0-4 fix established. Not converted — behavioural guard co-located.
+//!
 //! P0-4 regression — `after N ms -> X` and `done -> Y` declared in the
 //! same state MUST resolve to distinct events. Pre-fix, both lowered to
 //! `Trigger::None` and both fired on `EVENT__COMPLETION`, producing

@@ -156,3 +156,63 @@ fn schema_rejects_document_missing_ir_version() {
         "document missing `irVersion` MUST be rejected"
     );
 }
+
+/// Regression for v1.1-W0 / plan PD-3: the schema MUST accept the *exact*
+/// serde wire shape model.rs emits for the timer triggers — `after`/`every`
+/// use snake_case `duration_ms`/`period_ms` plus the post-P0-4 optional
+/// `timer_id` (the enum's `rename_all="camelCase"` renames variant tags,
+/// NOT struct-variant fields). The pre-W0 schema required `durationMs` and
+/// forbade `timer_id`, so the gate rejected every shipped timer machine.
+#[test]
+fn schema_accepts_timer_trigger_wire_shape_from_model_rs() {
+    use fsm_ir::{TimerKind, TimerObject, Trigger};
+
+    // Build the precise JSON serde produces — go through the real types so
+    // this test breaks if model.rs changes the wire form.
+    let after = Trigger::After {
+        duration_ms: 5000,
+        timer_id: "tm-0".into(),
+    };
+    let after_json: serde_json::Value = serde_json::from_str(&to_json_value(&after)).unwrap();
+    assert_eq!(after_json["kind"], "after");
+    assert_eq!(after_json["duration_ms"], 5000);
+    assert_eq!(after_json["timer_id"], "tm-0");
+
+    // Embed it on a transition inside an otherwise-valid Motor and validate
+    // the whole document end-to-end against the schema.
+    let mut ir = small_motor();
+    let timer = TimerObject {
+        id: "tm-0".into(),
+        stable_id: "Motor:timer:0".into(),
+        kind: TimerKind::After,
+        duration_ms: 5000,
+        owner_state_id: "s-idle".into(),
+        target: Some("s-idle".into()),
+        actions: vec![],
+        loc: loc(),
+    };
+    if let StateNode::Simple(s) = &mut ir.machines[0].root.states[1] {
+        s.timers.push(timer);
+        s.transitions[0].trigger = Some(after);
+    } else {
+        panic!("fixture shape changed");
+    }
+
+    let schema = load_schema();
+    let json = to_json(&ir).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let errs: Vec<String> = match schema.validate(&value) {
+        Ok(()) => Vec::new(),
+        Err(errors) => errors.map(|e| format!("{e}")).collect(),
+    };
+    assert!(
+        errs.is_empty(),
+        "timer-trigger IR rejected — schema drifted from model.rs again \
+         (PD-3 class):\n{}\n\nJSON:\n{json}",
+        errs.join("\n")
+    );
+}
+
+fn to_json_value<T: serde::Serialize>(v: &T) -> String {
+    serde_json::to_string(v).unwrap()
+}

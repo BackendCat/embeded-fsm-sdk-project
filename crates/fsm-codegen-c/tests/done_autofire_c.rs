@@ -1,5 +1,18 @@
 //! Audit 2026-05-14 — generated C must auto-fire `done` on non-final states.
 //!
+//! ## Test classification (v1.1-W0 / SUBAGENT_CONVENTIONS §5.4, PD-2)
+//!
+//! This file ALREADY carries its §5.4 behavioural guard:
+//! `done_on_simple_state_drives_runtime_in_gcc_built_binary` compiles the
+//! generated C with `gcc -…-Werror`, RUNS it, and asserts the machine
+//! auto-advances Start→Middle on init (no caller dispatch) then →Stop on
+//! GO. The `.contains()` in `done_on_simple_state_appears_in_generated_\
+//! handle_completion` are a **secondary structural check** (§5.4 last
+//! paragraph): they pin that the auto-fire dispatch sits *inside the Start
+//! case* of `handle_completion` (a precise emission-shape invariant) and
+//! localize a regression faster than the slower gcc test. Not converted —
+//! the behavioural guard already exists in this same file.
+//!
 //! Sibling test to `crates/fsm-simulator/tests/done_autofire.rs`: proves
 //! the codegen-c emission produces gcc-compilable C that, when run, makes
 //! a Simple state with `done -> Target` move to `Target` *without* the

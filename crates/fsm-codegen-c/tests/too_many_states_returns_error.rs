@@ -1,5 +1,18 @@
 //! Audit P1-8 (2026-05-14) — codegen-c must NOT panic on >255 states.
 //!
+//! ## Test classification (v1.1-W0 / SUBAGENT_CONVENTIONS §5.4, PD-2)
+//!
+//! The `.contains()` here are on the **`EmitError` Display string**
+//! (`msg.contains("255")`, `msg.contains("state")`,
+//! `!msg.contains("panicked")`), NOT on generated C. They are the correct
+//! tool: this asserts a *user-facing error-message API contract* (the
+//! exact wording `fsm generate` surfaces to the terminal, replacing the
+//! pre-fix panic backtrace). The actual *behaviour* — `emit()` returns
+//! `Err(TooManyStates)` / `Err(UnknownStateId)` instead of aborting, and
+//! succeeds under the 255-state cap — is asserted via real
+//! `match emit(...)` on the typed error, which IS behavioural. No
+//! symbol-presence-of-C-text proxy exists in this file; not converted.
+//!
 //! Pre-fix, `state_index::IndexBuilder::push` called
 //! `u8::try_from(...).expect("…")` and aborted the process when a machine
 //! exceeded the `M_StateId_t` u8 cap. `fsm generate` would print a stderr

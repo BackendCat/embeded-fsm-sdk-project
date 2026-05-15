@@ -68,8 +68,7 @@ pub fn from_json(s: &str) -> Result<Ir, IrJsonError> {
 /// schema that shipped with the binary. The path climbs out of
 /// `crates/fsm-ir/src/` to the repo root, then down into `schema/`.
 #[cfg(feature = "schema-validate")]
-pub const IR_SCHEMA_JSON: &str =
-    include_str!("../../../schema/ir/1.0.0/model.json");
+pub const IR_SCHEMA_JSON: &str = include_str!("../../../schema/ir/1.0.0/model.json");
 
 /// Validate a fully-lowered [`Ir`] against the canonical JSON Schema
 /// (`schema/ir/1.0.0/model.json`).

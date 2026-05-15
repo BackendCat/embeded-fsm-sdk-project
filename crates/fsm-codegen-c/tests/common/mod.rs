@@ -206,7 +206,16 @@ pub fn motor_ir() -> Ir {
 pub fn hierarchical_motor_ir() -> Ir {
     let mut ir = motor_ir();
     let machine = &mut ir.machines[0];
-    machine.events.push(motor_event("e-fault", "FAULT", vec![]));
+    // NOTE (v1.1-W0 / PD-2): do NOT re-push `e-fault` here. `motor_ir()`
+    // already declares the FAULT event (see its `events` vec). The previous
+    // extra `machine.events.push(motor_event("e-fault", "FAULT", vec![]))`
+    // produced an IR with a *duplicate* event id, which codegen faithfully
+    // lowered to a duplicate C enumerator (`MOTOR_EVENT_FAULT = 2` and
+    // `= 4`) — uncompilable C. The defect stayed invisible for the life of
+    // this fixture because the only B-10 tests were symbol-presence
+    // `.contains()` checks that never invoked gcc (exactly the P0-1-class
+    // masking PD-2 pays down). The new gcc-compile-RUN test below would not
+    // even compile with the duplicate, so it is removed here.
 
     let running = StateNode::Simple(SimpleState {
         id: "s-op-running".into(),

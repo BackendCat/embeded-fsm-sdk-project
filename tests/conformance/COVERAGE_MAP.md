@@ -113,3 +113,11 @@ The COVERAGE_MAP is markdown-only in v1.0. v1.1 plans to derive the
 `DiagnosticCode::EXXXX` references across the workspace so the row can
 never drift from reality. v1.0 keeps it hand-curated to avoid pulling
 in a build-time analyzer.
+
+## Related: behavioural test-debt
+
+This map tracks *diagnostic-code* coverage. The separate concern of
+*symbol-presence vs behavioural* assertions (the P0-1-class hazard:
+`.contains()` masking behaviourally-empty codegen) is tracked in
+`docs/processes/TEST_DEBT.md` — opened by v1.1-W0, which paid down the
+highest-risk `fsm-codegen-c` subset and catalogued the deferred remainder.
