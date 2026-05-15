@@ -10,6 +10,7 @@ members = [
     "crates/fsm-simulator",
     "crates/fsm-formatter",
     "crates/fsm-cli",
+    "crates/fsm-lsp",
 ]
 
 [workspace.package]
@@ -24,9 +25,17 @@ repository = "https://github.com/BackendCat/embeded-fsm-sdk-project"
 # Crates opt in by writing `dep = { workspace = true }` in their own Cargo.toml.
 #
 # Intentionally NOT included for v1.0:
-#   - tower-lsp  (LSP deferred to v1.1+)
-#   - tokio      (no WebSocket simulator server in v1.0)
 #   - wasm-bindgen (WASM deferred to v1.1+)
+#
+# v1.2 LSP epic (Doc 26 §2.1/§2.2): `tower-lsp` + `tokio` enter here for
+# the new host-side `fsm-lsp` crate. They are NOT in the embedded runtime
+# path (the generated G2 firmware stays heap-free); they are developer-
+# host deps exactly like `clap`/`miette`. Version pins (Doc 23 §2 MSRV
+# 1.75; rationale in Doc 00 §11.32): `tower-lsp` 0.20.x is the newest line
+# whose dependency closure (incl. its `lsp-types` 0.94.x re-export and
+# `async-trait`) still compiles on Rust 1.75 — 0.21+ pulls a `lsp-types`
+# 0.95+ / toolchain combo that raises the MSRV. `tokio` 1.x is already in
+# the local cargo cache (1.52.x); the `=`-free caret keeps the cache warm.
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -35,6 +44,8 @@ miette = { version = "7", features = ["fancy"] }
 rowan = "0.15"
 anyhow = "1.0"
 thiserror = "1.0"
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["rt-multi-thread", "io-std", "macros", "sync", "time"] }
 
 # Internal foundation crate — zero workspace deps; owns Span, SourceLocation,
 # Severity, DiagnosticCode, Diagnostic. Every pipeline crate consumes this

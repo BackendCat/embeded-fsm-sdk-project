@@ -1,0 +1,51 @@
+[package]
+name = "fsm-lsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "FSM Studio Language Server (LSP) — the `fsm-lang-server` binary"
+
+[lib]
+name = "fsm_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fsm-lang-server"
+path = "src/main.rs"
+
+[dependencies]
+# The LSP reuses the EXACT `fsm check` pipeline (Doc 26 §3): it calls the
+# same parser + analyzer + import-resolver functions the CLI calls and
+# never re-implements analysis. `fsm-diagnostics` is pulled with `serde`
+# (the LSP serialises diagnostics over JSON-RPC) but NOT `miette` — there
+# is no terminal rendering server-side (Doc 26 §2.1 dependency table).
+fsm-diagnostics = { workspace = true, features = ["serde"] }
+fsm-parser = { path = "../fsm-parser" }
+fsm-analyzer = { path = "../fsm-analyzer" }
+
+# LSP framework + async runtime. Sanctioned by Doc 26 §2.1 — `fsm-lsp` is
+# a developer-host tool, never compiled into firmware, so the embedded G2
+# heap-free promise is unaffected (`std` + `tokio` are fine here exactly
+# as in `fsm-cli`). Versions pinned in `[workspace.dependencies]` per the
+# Doc 23 §2 MSRV-1.75 rule (rationale recorded in Doc 00 §11.32).
+tower-lsp = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# The §5.4 behavioural-acceptance harness drives the server in-process via
+# `LspService::call` (the canonical tower-lsp test pattern) and drains the
+# `ClientSocket` for the server→client `publishDiagnostics` notification.
+# `tokio` test macro runs the async client; `futures` `StreamExt` polls the
+# outgoing-message stream. `serde_json` decodes the notification params.
+tokio = { workspace = true, features = ["macros", "rt", "io-util", "time"] }
+futures = "0.3"
+serde_json = { workspace = true }
+# `tower::Service`/`ServiceExt` drive the in-process `LspService` exactly
+# as tower-lsp's own service tests do. Pinned to tower-lsp 0.20's `tower`
+# major (0.4) so the `Service` trait object is the same one `LspService`
+# implements.
+tower = "0.4"

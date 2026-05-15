@@ -1,0 +1,55 @@
+//! `fsm-lsp` — the FSM Studio Language Server (Doc 26).
+//!
+//! Wraps the **exact** `fsm check` analysis pipeline behind LSP. This
+//! crate is a developer-host tool: it pulls `tokio`/`tower-lsp` (Doc 26
+//! §2.1) and is *never* compiled into firmware, so the embedded G2
+//! heap-free promise is unaffected.
+//!
+//! ## L1 scope (Doc 26 §8 L1 — the spine)
+//!
+//! `initialize` (with UTF-8/UTF-16 `positionEncoding` negotiation, Doc 26
+//! §4.1) · `initialized` · `shutdown` · full-document sync
+//! (`didOpen`/`didChange`/`didClose`) · ~200ms debounce ·
+//! `textDocument/publishDiagnostics` via the reused pipeline · the one
+//! correct byte-`Span` ↔ LSP-`Position` converter ([`position::LineIndex`]).
+//!
+//! L2+ capabilities (hover, definition, completion, references, rename,
+//! semanticTokens, codeAction, foldingRange, inlayHint) are out of L1
+//! scope and are NOT stubbed (a silent no-op handler is worse than an
+//! unadvertised capability).
+//!
+//! ## The reuse seam
+//!
+//! [`analysis::analyze`] calls `fsm_parser::parse` +
+//! `fsm_analyzer::analyze_with_source` + the import-security pass
+//! (`resolve_import`) in `fsm check`'s exact order — so an editor squiggle
+//! can never disagree with `fsm check --json`. The LSP re-implements no
+//! analysis and shells out to no binary (Doc 20 §9.4 / Doc 26 §3).
+
+// The project invariant is `#![forbid(unsafe_code)]` in every crate.
+// `tower-lsp`/`tokio` require NO consumer-side `unsafe`, so `fsm-lsp`
+// upholds it — taking the workspace to 10/10 forbid-unsafe crates.
+#![forbid(unsafe_code)]
+#![deny(missing_debug_implementations)]
+
+pub mod analysis;
+pub mod capabilities;
+pub mod document_store;
+pub mod position;
+pub mod server;
+
+use tower_lsp::{LspService, Server};
+
+pub use server::Backend;
+
+/// Run the language server over stdio (the Doc 14 §1 default transport).
+///
+/// Blocks until the client closes stdin / the LSP `exit` notification is
+/// received. `tower-lsp` drives the JSON-RPC framing; [`Backend`] supplies
+/// the L1 capability behaviour.
+pub async fn run_stdio() {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    let (service, socket) = LspService::new(Backend::new);
+    Server::new(stdin, stdout, socket).serve(service).await;
+}

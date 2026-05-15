@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fsm-lsp` — Language Server (LSP) spine** (v1.2-LSP-L1): a new
+  `fsm-lang-server` binary speaking LSP over stdio with `initialize`
+  (UTF-8/UTF-16 `positionEncoding` negotiation, UTF-8-preferred),
+  full-document sync, a 200ms debounce, and `textDocument/publishDiagnostics`
+  that reuses the **exact** `fsm check` analysis pipeline (parser +
+  analyzer + import-security) — editor squiggles can never disagree with
+  `fsm check --json` (byte-exact Range + code parity proven by an
+  in-process `tower-lsp` client test under both encodings, incl. a
+  multibyte-line fixture). `#![forbid(unsafe_code)]` (workspace now
+  10/10). See `docs/26-LSP-Architecture.md` §8 L1 and
+  `docs/00-Decisions-And-Reconciliation.md` §11.32.
+
 ### Changed
 
 - Internal API hygiene: 170 accidentally-`pub` items across `fsm-parser`,
