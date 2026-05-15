@@ -50,8 +50,13 @@ pub const TOP_LEVEL_STARTS: TokenSet = TokenSet::new(&[
 pub fn parse_file(p: &mut Parser) {
     p.start_node(SyntaxKind::FILE);
 
-    // 0. Optional leading trivia (handled implicitly by Parser::bump). The
-    //    language header is the first non-trivia construct.
+    // 0. File-leading trivia. The parser ctor advanced past it without
+    //    emitting (no node was open then — emitting pre-root trips rowan's
+    //    single-root assertion, PARSE-BUG-1). Now that FILE is open, flush
+    //    those banner/license comments + whitespace inside it so the CST
+    //    stays byte-exact. Trivia *between* later tokens is handled by
+    //    Parser::bump's own skip_trivia.
+    p.flush_leading_trivia();
     if p.at(TokenKind::KwLanguage) {
         parse_language_decl(p);
     } else if !p.at(TokenKind::Eof) {

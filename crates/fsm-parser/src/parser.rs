@@ -50,6 +50,18 @@ pub struct Parser<'src> {
     /// the same diagnostic on every descent. Caller-facing diagnostics
     /// remain "one per limit-hit nest", not "one per descended frame".
     depth_limit_reported: bool,
+    /// Exclusive end index of file-leading trivia. The constructor advances
+    /// `pos` past any whitespace/comment tokens that precede the first real
+    /// token so lookahead works immediately, but it must NOT emit them into
+    /// the green builder yet — no node is open at construction time, and
+    /// rowan asserts a single root (a token emitted before the first
+    /// `start_node` becomes a stray root-level child and trips
+    /// `builder.rs:113 left == right`, the PARSE-BUG-1 panic). The grammar
+    /// driver flushes `tokens[0..leading_trivia_end]` via
+    /// [`Parser::flush_leading_trivia`] *after* opening the root `FILE`
+    /// node, so leading banner/license comments land inside the file node
+    /// and the CST stays byte-exact lossless.
+    leading_trivia_end: usize,
 }
 
 impl std::fmt::Debug for Parser<'_> {
@@ -116,11 +128,17 @@ impl<'src> Parser<'src> {
             limits,
             current_depth: 0,
             depth_limit_reported: false,
+            leading_trivia_end: 0,
         };
-        // Position at first non-trivia token. Trivia at the start of the
-        // file is auto-attached to the first declaration's CST subtree by
-        // `bump()`.
-        p.skip_trivia();
+        // Advance `pos` past file-leading trivia so `current()`/`peek_n()`
+        // see the first real token, but DON'T emit those tokens yet — no
+        // green node is open at construction time. The grammar driver
+        // opens the root `FILE` node and then calls
+        // `flush_leading_trivia()` to attach `tokens[0..leading_trivia_end]`
+        // inside it (PARSE-BUG-1: emitting before the first `start_node`
+        // leaves stray root children and trips rowan's single-root
+        // assertion at builder.rs:113).
+        p.skip_leading_trivia_no_emit();
         p
     }
 
@@ -321,6 +339,38 @@ impl<'src> Parser<'src> {
             }
         }
         self.finish_node();
+    }
+
+    /// Constructor-only: advance `pos` past file-leading trivia **without**
+    /// emitting into the green builder, recording the boundary in
+    /// [`Self::leading_trivia_end`]. Used because no node is open at
+    /// construction time (see the field doc / PARSE-BUG-1). Lookahead is
+    /// correct immediately after; the deferred tokens are flushed by
+    /// [`Self::flush_leading_trivia`] once the root node is open.
+    fn skip_leading_trivia_no_emit(&mut self) {
+        while let Some(tok) = self.tokens.get(self.pos) {
+            if tok.kind == TokenKind::Eof || !tok.kind.is_trivia() {
+                break;
+            }
+            self.pos += 1;
+        }
+        self.leading_trivia_end = self.pos;
+    }
+
+    /// Emit the file-leading trivia tokens (recorded by
+    /// [`Self::skip_leading_trivia_no_emit`]) into the currently-open node.
+    /// MUST be called by the grammar driver immediately after opening the
+    /// root `FILE` node and before any other token, so leading
+    /// banner/license comments + whitespace are captured inside the file
+    /// node and the CST round-trips the source byte-for-byte. Idempotent:
+    /// a second call is a no-op (the range is emitted exactly once).
+    pub fn flush_leading_trivia(&mut self) {
+        for i in 0..self.leading_trivia_end {
+            self.emit_token_at(i);
+        }
+        // Mark as flushed so a defensive double-call can't duplicate the
+        // tokens (would break the byte-exact round-trip).
+        self.leading_trivia_end = 0;
     }
 
     /// Helper: skip over trivia tokens, emitting them as the parent node's
