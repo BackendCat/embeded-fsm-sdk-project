@@ -110,6 +110,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **both** UTF-8 and UTF-16 on a multibyte fixture. See
   `docs/26-LSP-Architecture.md` §8 L5 and
   `docs/00-Decisions-And-Reconciliation.md` §11.36.
+- **`fsm-lsp` — `semanticTokens` (`full` + `range`)** (v1.2-LSP-L6,
+  single-file): Doc 14 §10 `textDocument/semanticTokens/full` and
+  `textDocument/semanticTokens/range` advertised in `initialize` with the
+  Doc 14 §2/§10 `legend` (11 token types + 4 modifiers) declared **once**
+  and reused for both the advertisement and the encoder, so the advertised
+  indices and the encoded `tokenType`/`tokenModifiers` can never diverge.
+  Semantic tokens are *more precise* than the Doc 21 TextMate grammar: a
+  bare `Ident` is one TextMate scope everywhere, but this layer knows —
+  from the **same** single `fsm check` analysis the LSP already runs —
+  whether it is a state / event / extern / context field / machine and
+  whether it is a *declaration* or a *reference*. The decl-vs-ref +
+  entity-type split **reuses** L3's `resolve` classifier (use sites) and
+  L5's `ReferenceIndex` declaration-name discovery / `SymbolKey` taxonomy
+  (declaration sites) through one shared entity model — **no new analysis,
+  no parallel classifier** (Doc 26 §8 L6); a declaration and a use of the
+  same symbol get the identical legend type and differ only by the
+  `declaration` modifier. Non-`Ident` tokens get their lexical `fsm-lexer`
+  `SyntaxKind` type (keyword / operator / number / string / comment / `@id`
+  decorator); structural punctuation Doc 14 §10 has no legend slot for is
+  not emitted (the client uses the Doc 21 TextMate scope — Doc 21 §6
+  coexistence). Emitted as the LSP relative delta array
+  (`[deltaLine, deltaStartChar, length, tokenType, tokenModifiers]`,
+  sorted, deltas relative to the previous token, `deltaStartChar` reset on
+  a new line) with `deltaStartChar`/`length` in the negotiated
+  `positionEncoding` via L1's one authoritative `LineIndex` (no second
+  converter); a multi-line comment is split into one token per line (LSP
+  `multilineTokenSupport` defaults off), and `range` is a self-contained
+  substream (its first token's deltas relative to the response start).
+  Cross-file remains explicitly v1.3 (Doc 26 §4.6/§9). Still one analysis,
+  one position converter, one classifier — reused, not duplicated; L1–L5
+  diagnostics/symbols/hover/goto/completion/references/rename proven
+  byte-unchanged. Proven by in-process `tower-lsp` client tests that
+  **decode the relative delta array back to absolute positions** and assert
+  the full decoded stream equals the reused-pipeline oracle (symbol
+  presence is NOT acceptance — the decoded bytes are), with hard-coded
+  per-token cross-checks (a state declaration carries the `declaration`
+  modifier, a state use does not, a `ctx.field` ref is the field type, a
+  comment is `comment`, a keyword is `keyword`, the `@id` decorator + its
+  string), the advertised legend asserted equal to Doc 14 §2/§10 order and
+  to the encoder's, and a non-ASCII fixture under **both** UTF-8 and UTF-16
+  with the decoded positions/lengths asserted correct in each. See
+  `docs/26-LSP-Architecture.md` §8 L6 and
+  `docs/00-Decisions-And-Reconciliation.md` §11.37.
 
 ### Changed
 

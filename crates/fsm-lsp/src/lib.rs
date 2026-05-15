@@ -82,9 +82,35 @@
 //! name collision with a clear message and **no edit**. Still one
 //! analysis, one position converter, one resolver — reused, not duplicated.
 //!
-//! L6+ capabilities (semanticTokens, codeAction, inlayHint) are out of L5
-//! scope and are NOT stubbed (a silent no-op handler is worse than an
-//! unadvertised capability — the `workspaceSymbol` precedent).
+//! ## L6 scope (Doc 26 §8 L6 — `semanticTokens`, no new analysis)
+//!
+//! `textDocument/semanticTokens/full` + `textDocument/semanticTokens/range`
+//! (Doc 14 §10, **single-file**), advertised in `initialize` with the Doc
+//! 14 §2/§10 `legend` declared **once** in
+//! [`capabilities::semantic_tokens::legend`] and reused by the encoder (the
+//! advertised indices and the encoded `tokenType`/`tokenModifiers` can
+//! never diverge). Semantic tokens are *more precise* than the Doc 21
+//! TextMate grammar: a bare `Ident` is one TextMate scope everywhere, but
+//! this layer knows — from the **same** single `analyze()` — whether it is
+//! a state / event / extern / context field / machine and whether it is a
+//! *declaration* or a *reference*. The decl-vs-ref + entity-type split
+//! **reuses** L3's [`capabilities::resolve`] (use sites) and L5's
+//! [`refs::collect_decl_name_tokens`] / [`refs::SymbolKey`] taxonomy
+//! (declaration sites) — one classifier, one `symbol_table` identity
+//! model, **no new analysis, no parallel classifier** (Doc 26 §8 L6).
+//! Non-`Ident` tokens get their lexical `fsm-lexer` `SyntaxKind` type
+//! (keyword / operator / number / string / comment / `@id` decorator);
+//! structural punctuation Doc 14 §10 has no legend slot for is not emitted
+//! (the client uses the Doc 21 TextMate scope — Doc 21 §6 coexistence). The
+//! LSP relative delta encoding measures `deltaStartChar`/`length` in the
+//! negotiated `positionEncoding` via L1's ONE authoritative `LineIndex`
+//! (no second converter); multi-line comments are split per line (LSP
+//! `multilineTokenSupport` defaults off). Still one analysis, one position
+//! converter, one resolver — reused, not duplicated.
+//!
+//! L7 capabilities (codeAction, inlayHint) are out of L6 scope and are NOT
+//! stubbed (a silent no-op handler is worse than an unadvertised capability
+//! — the `workspaceSymbol` precedent).
 //!
 //! ## The reuse seam
 //!

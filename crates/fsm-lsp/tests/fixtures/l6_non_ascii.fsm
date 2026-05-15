@@ -1,0 +1,17 @@
+language fsm 2.0
+
+machine Sys {
+    events { GO }
+
+    initial Start
+
+    state Start {
+        /* 🚀 ы переход к Target */ on GO -> Target
+    }
+
+    state Target {
+        /* multi
+           ы line 🚀 */
+        on GO -> Target
+    }
+}

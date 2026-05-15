@@ -31,12 +31,24 @@
 //! a same-spelled string/comment/different-scope token can never be in the
 //! `WorkspaceEdit` because it never entered the index.
 //!
-//! The remaining L6+ handlers (semanticTokens, codeAction, inlayHint —
-//! Doc 26 §5/§8) are out of L5 scope (Doc 26 §8 L5 scope boundary) and are
-//! deliberately NOT stubbed: an empty handler that silently returns
-//! nothing is worse than an unadvertised capability (the client would
-//! think the feature works) — the `workspaceSymbol`-left-unadvertised
-//! precedent (Doc 00 §11.33(5)).
+//! L6 adds [`semantic_tokens`] (`textDocument/semanticTokens/full` +
+//! `/range`, Doc 14 §10) — semantic tokens are *more precise* than the Doc
+//! 21 TextMate grammar (a bare `Ident` is one TextMate scope everywhere;
+//! semantic tokens know, from the one analysis, whether it is a state /
+//! event / extern / context field / machine and decl-vs-ref). It is **not**
+//! a new analysis or a parallel classifier: the decl-vs-ref + entity-type
+//! split **reuses** L3's [`resolve`] (use sites) and L5's
+//! [`crate::refs::collect_decl_name_tokens`] / [`crate::refs::SymbolKey`]
+//! taxonomy (declaration sites) — one classifier, one `symbol_table`
+//! identity model (Doc 26 §8 L6). The LSP relative delta encoding measures
+//! `deltaStartChar`/`length` in the negotiated `positionEncoding` via L1's
+//! one authoritative `LineIndex` (no second converter).
+//!
+//! The remaining L7 handlers (codeAction, inlayHint — Doc 26 §5/§8) are out
+//! of L6 scope (Doc 26 §8 L6 scope boundary) and are deliberately NOT
+//! stubbed: an empty handler that silently returns nothing is worse than an
+//! unadvertised capability (the client would think the feature works) — the
+//! `workspaceSymbol`-left-unadvertised precedent (Doc 00 §11.33(5)).
 
 pub mod complete;
 pub mod definition;
@@ -47,3 +59,4 @@ pub mod hover;
 pub mod references;
 pub mod rename;
 pub mod resolve;
+pub mod semantic_tokens;

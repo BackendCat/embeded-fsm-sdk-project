@@ -96,6 +96,47 @@ impl SymbolKey {
     fn is_renameable_kind(&self) -> bool {
         !matches!(self, SymbolKey::Machine { .. })
     }
+
+    /// The category of declared entity this key names. L6's semantic-tokens
+    /// classifier maps a *declaration-name* token to its Doc 14 §10 legend
+    /// type via this — reusing the SAME `SymbolKey` taxonomy L5's reference
+    /// index already keys on (one entity model, no parallel one). The
+    /// variants line up one-to-one with L3's [`crate::capabilities::resolve::
+    /// Resolved`] (use sites), so a decl and a use of the same symbol get
+    /// the identical legend type and differ only by the `declaration`
+    /// modifier (Doc 14 §10 modifier 0) — exactly the Doc 26 §8 L6 decl-vs-ref
+    /// requirement, decided by `symbol_table` identity, never re-classified.
+    pub(crate) fn entity_kind(&self) -> EntityKind {
+        match self {
+            SymbolKey::State { .. } => EntityKind::State,
+            SymbolKey::Event { .. } => EntityKind::Event,
+            SymbolKey::Extern { .. } => EntityKind::Extern,
+            SymbolKey::ContextField { .. } => EntityKind::ContextField,
+            SymbolKey::Machine { .. } => EntityKind::Machine,
+        }
+    }
+}
+
+/// The five user-symbol categories the LSP distinguishes — the union of
+/// L3's [`crate::capabilities::resolve::Resolved`] (use sites) and L5's
+/// [`SymbolKey`] (declarations). L6 maps each to exactly one Doc 14 §10
+/// semantic-token legend type. Defined here (next to `SymbolKey`, its
+/// declaration-side source) so both the decl path
+/// ([`SymbolKey::entity_kind`]) and the use path
+/// ([`crate::capabilities::semantic_tokens`]'s `Resolved` bridge) share one
+/// taxonomy — no second entity model, the Doc 26 §8 L6 reuse seam.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum EntityKind {
+    /// `state`/pseudo-state name — Doc 14 §10 type index 1 (`type`).
+    State,
+    /// `event` name — Doc 14 §10 type index 2 (`enum`).
+    Event,
+    /// `extern` function name — Doc 14 §10 type index 3 (`function`).
+    Extern,
+    /// `ctx.field` context field — Doc 14 §10 type index 4 (`variable`).
+    ContextField,
+    /// `machine` name — Doc 14 §10 type index 0 (`namespace`).
+    Machine,
 }
 
 /// Build a [`SymbolKey`] from an L3 [`Resolved`]. This is the *only*
@@ -130,6 +171,16 @@ fn key_of(r: &Resolved) -> SymbolKey {
         },
         Resolved::Machine { decl_span, .. } => SymbolKey::Machine { decl: *decl_span },
     }
+}
+
+/// The [`EntityKind`] of an L3-resolved *use site*, routed through the SAME
+/// [`key_of`] bridge L5's reference index uses (`Resolved` → `SymbolKey` →
+/// kind). L6 calls this for every `resolve_at`-classified `Ident` so a use
+/// site's legend type is decided by the identical taxonomy as its
+/// declaration (just without the `declaration` modifier) — one classifier,
+/// not two (Doc 26 §8 L6).
+pub(crate) fn resolved_entity_kind(r: &Resolved) -> EntityKind {
+    key_of(r).entity_kind()
 }
 
 /// One occurrence of a symbol — a byte range plus whether it is the
@@ -560,7 +611,21 @@ fn ident_tokens(cst: &SyntaxNode) -> impl Iterator<Item = SyntaxToken> {
 /// actual `Ident` tokens so a nameless decl (resilient parser on broken
 /// input) simply yields nothing for that entry (never a panic, never a
 /// guessed range).
-fn collect_decl_name_tokens(table: &SymbolTable, cst: &SyntaxNode) -> Vec<(SymbolKey, Span)> {
+///
+/// `pub(crate)` because L6's semantic-tokens classifier
+/// ([`crate::capabilities::semantic_tokens`]) reuses the **exact same**
+/// declaration-name discovery to assign the `declaration` modifier — a
+/// decl-name token must carry its entity type *plus* `declaration`, a use
+/// site the type *without* it (Doc 14 §10 modifier 0). Sharing this one
+/// function (rather than re-deriving "which `Ident` is a declaration")
+/// keeps L6's decl-vs-ref split byte-identical to L5's reference index and
+/// to `fsm check` — the Doc 26 §8 L6 "reuse `symbol_table` for the
+/// decl/ref distinction, do NOT add a parallel classifier" seam (the same
+/// promote-and-reuse the L4 wave applied to `resolve.rs`'s helpers).
+pub(crate) fn collect_decl_name_tokens(
+    table: &SymbolTable,
+    cst: &SyntaxNode,
+) -> Vec<(SymbolKey, Span)> {
     let mut out: Vec<(SymbolKey, Span)> = Vec::new();
 
     // First `Ident` token whose range is within `[span.start, span.end)`.

@@ -2862,3 +2862,566 @@ async fn references_none_and_prepare_error_on_non_symbol() {
         "oracle: a keyword cursor is not renameable"
     );
 }
+
+// ===========================================================================
+// L6 — semanticTokens/full + /range (Doc 26 §8 L6 / Doc 14 §10).
+//
+// The delta encoding makes symbol-presence acceptance non-trivial AND
+// forbidden: every test **decodes the relative `u32` array back to absolute
+// `(line, char, len, type, modifiers)` tuples** and asserts the FULL
+// decoded stream equals the oracle (the SAME `semantic_tokens_full` the
+// server runs, off the SAME analysis), plus hard-coded cross-checks on
+// specific tokens (a state DECLARATION carries the `declaration` modifier; a
+// state USE carries the type but NOT that modifier; a `ctx.field` ref is the
+// field type; a comment is `comment`; a keyword is `keyword`). The
+// advertised legend indices are asserted to be exactly what the encoded
+// `tokenType`/`tokenModifiers` reference. The non-ASCII test runs under BOTH
+// `positionEncoding`s — a byte-vs-UTF-16 mismatch makes the decoded
+// positions wrong → the test fails (the §4.1 defect guard, at the L6 layer).
+// ===========================================================================
+
+use tower_lsp::lsp_types::{
+    SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensResult,
+};
+
+use fsm_lsp::capabilities::semantic_tokens::{
+    legend as oracle_legend, semantic_tokens_full as oracle_semantic_full,
+    semantic_tokens_range as oracle_semantic_range,
+};
+
+fn semantic_full_params(uri: &Url) -> Value {
+    json!({ "textDocument": { "uri": uri } })
+}
+
+fn semantic_range_params(uri: &Url, range: Range) -> Value {
+    json!({
+        "textDocument": { "uri": uri },
+        "range": {
+            "start": { "line": range.start.line, "character": range.start.character },
+            "end":   { "line": range.end.line,   "character": range.end.character }
+        }
+    })
+}
+
+/// Decode the LSP relative-encoded `data` array (the wire form) back to
+/// ABSOLUTE `(line, startChar, len, tokenType, tokenModifiers)` tuples.
+/// This is the inverse of the server's `encode`; assertions read against
+/// absolute positions so a delta-math regression (a wrong deltaLine /
+/// deltaStartChar / length, or a non-reset deltaStartChar on a new line)
+/// makes the decoded stream wrong and the equality fail — that is the point
+/// (symbol presence is NOT acceptance; the decoded bytes are).
+fn decode_semantic(tokens: &[SemanticToken]) -> Vec<(u32, u32, u32, u32, u32)> {
+    let mut out = Vec::with_capacity(tokens.len());
+    let mut line = 0u32;
+    let mut ch = 0u32;
+    for t in tokens {
+        if t.delta_line == 0 {
+            ch += t.delta_start;
+        } else {
+            line += t.delta_line;
+            ch = t.delta_start;
+        }
+        out.push((line, ch, t.length, t.token_type, t.token_modifiers_bitset));
+    }
+    out
+}
+
+fn decode_semantic_result(result: &Value) -> Vec<SemanticToken> {
+    match serde_json::from_value::<SemanticTokensResult>(result.clone())
+        .expect("decode SemanticTokensResult")
+    {
+        SemanticTokensResult::Tokens(SemanticTokens { data, .. }) => data,
+        SemanticTokensResult::Partial(_) => {
+            panic!("server must return full Tokens, not a partial result")
+        }
+    }
+}
+
+/// Legend index of a token-type name in the advertised legend (so the
+/// per-token cross-checks reference the SAME indices the server encodes
+/// against — never a hard-coded magic number that could silently drift
+/// from the legend).
+fn ty_index(legend: &tower_lsp::lsp_types::SemanticTokensLegend, t: &SemanticTokenType) -> u32 {
+    legend
+        .token_types
+        .iter()
+        .position(|x| x == t)
+        .unwrap_or_else(|| panic!("token type {t:?} not in advertised legend")) as u32
+}
+
+fn md_bit(legend: &tower_lsp::lsp_types::SemanticTokensLegend, m: &SemanticTokenModifier) -> u32 {
+    let i = legend
+        .token_modifiers
+        .iter()
+        .position(|x| x == m)
+        .unwrap_or_else(|| panic!("token modifier {m:?} not in advertised legend"));
+    1u32 << i
+}
+
+/// Find the single decoded token whose absolute `(line, startChar)` is the
+/// LSP position of `needle`+`plus` in `text` under `enc`.
+fn tok_at<'a>(
+    decoded: &'a [(u32, u32, u32, u32, u32)],
+    li: &LineIndex,
+    text: &str,
+    enc: OffsetEncoding,
+    needle: &str,
+    plus: usize,
+) -> &'a (u32, u32, u32, u32, u32) {
+    let b = byte_of(text, needle, plus);
+    let p = li.position(text, b as u32, enc);
+    decoded
+        .iter()
+        .find(|(l, c, ..)| *l == p.line && *c == p.character)
+        .unwrap_or_else(|| panic!("no semantic token at {needle:?}+{plus} (pos {p:?})"))
+}
+
+/// (L6-a) `semanticTokens/full` on a fixture exercising every legend index
+/// → the FULL decoded stream byte-equals the reused-pipeline oracle, the
+/// advertised legend matches Doc 14 §2/§10, and the hard-coded per-token
+/// cross-checks hold (state decl vs use modifier, ctx field type, comment,
+/// keyword, operator, number, extern, event, the `@id` decorator + its
+/// string).
+#[tokio::test(flavor = "current_thread")]
+async fn semantic_tokens_full_decoded_stream_matches_oracle_and_cross_checks() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    let init = do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    // (1) The advertised legend is EXACTLY Doc 14 §2/§10 order and equals
+    //     the one the encoder uses (`oracle_legend`) — so every encoded
+    //     `tokenType`/`tokenModifiers` integer references the advertised
+    //     name. A drift here corrupts every client's colouring.
+    let adv = &init["capabilities"]["semanticTokensProvider"];
+    let adv_types: Vec<String> =
+        serde_json::from_value(adv["legend"]["tokenTypes"].clone()).expect("advertised tokenTypes");
+    let adv_mods: Vec<String> = serde_json::from_value(adv["legend"]["tokenModifiers"].clone())
+        .expect("advertised tokenModifiers");
+    let legend = oracle_legend();
+    let want_types: Vec<String> = legend
+        .token_types
+        .iter()
+        .map(|t| t.as_str().to_owned())
+        .collect();
+    let want_mods: Vec<String> = legend
+        .token_modifiers
+        .iter()
+        .map(|m| m.as_str().to_owned())
+        .collect();
+    assert_eq!(
+        adv_types,
+        vec![
+            "namespace",
+            "type",
+            "enum",
+            "function",
+            "variable",
+            "keyword",
+            "string",
+            "number",
+            "operator",
+            "comment",
+            "decorator"
+        ],
+        "advertised tokenTypes MUST be Doc 14 §2/§10 order"
+    );
+    assert_eq!(
+        adv_mods,
+        vec!["declaration", "readonly", "deprecated", "static"],
+        "advertised tokenModifiers MUST be Doc 14 §2/§10 order"
+    );
+    assert_eq!(
+        adv_types, want_types,
+        "advertised == encoder legend (types)"
+    );
+    assert_eq!(adv_mods, want_mods, "advertised == encoder legend (mods)");
+    assert_eq!(
+        adv["full"],
+        json!(true),
+        "Doc 26 §8 L6 / Doc 14 §2: `full` advertised"
+    );
+    assert_eq!(
+        adv["range"],
+        json!(true),
+        "Doc 26 §8 L6 / Doc 14 §2: `range` advertised"
+    );
+
+    let (text, uri) = fixture("l6_legend.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    // (2) Oracle: the SAME `semantic_tokens_full` the server runs, off the
+    //     SAME `analyze()` pipeline. The decoded stream must byte-match —
+    //     proving the server wired the single analysis + the reused
+    //     classifier + correct delta math (not a parallel pass).
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(&text, &path);
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "fixture invariant: l6_legend.fsm must be clean, got {:?}",
+        analysis.diagnostics
+    );
+    let cst = fsm_parser::parse(&text).syntax();
+    let li = LineIndex::new(&text);
+    let want = oracle_semantic_full(
+        &analysis.symbol_table,
+        &cst,
+        &li,
+        &text,
+        OffsetEncoding::Utf8,
+    );
+
+    let result = call_request(
+        &mut service,
+        "textDocument/semanticTokens/full",
+        semantic_full_params(&uri),
+        600,
+    )
+    .await;
+    let got_raw = decode_semantic_result(&result);
+    assert_eq!(
+        got_raw, want.data,
+        "the raw delta-encoded array MUST equal the reused-pipeline oracle"
+    );
+    let got = decode_semantic(&got_raw);
+    let want_dec = decode_semantic(&want.data);
+    assert_eq!(
+        got, want_dec,
+        "the DECODED absolute stream MUST equal the oracle (delta math correct)"
+    );
+    assert!(!got.is_empty(), "a non-empty fixture yields tokens");
+
+    // (3) Hard-coded per-token cross-checks — these pin the classification
+    //     (the oracle proves server==pipeline; these prove
+    //     pipeline==Doc 14 §10, so neither can silently regress).
+    let t_type = ty_index(&legend, &SemanticTokenType::TYPE);
+    let t_enum = ty_index(&legend, &SemanticTokenType::ENUM);
+    let t_func = ty_index(&legend, &SemanticTokenType::FUNCTION);
+    let t_var = ty_index(&legend, &SemanticTokenType::VARIABLE);
+    let t_kw = ty_index(&legend, &SemanticTokenType::KEYWORD);
+    let t_str = ty_index(&legend, &SemanticTokenType::STRING);
+    let t_num = ty_index(&legend, &SemanticTokenType::NUMBER);
+    let t_op = ty_index(&legend, &SemanticTokenType::OPERATOR);
+    let t_cmt = ty_index(&legend, &SemanticTokenType::COMMENT);
+    let t_dec = ty_index(&legend, &SemanticTokenType::DECORATOR);
+    let m_decl = md_bit(&legend, &SemanticTokenModifier::DECLARATION);
+    let m_ro = md_bit(&legend, &SemanticTokenModifier::READONLY);
+    let e = OffsetEncoding::Utf8;
+
+    // A state DECLARATION (`state Idle {`) → type `type` + `declaration`.
+    let decl_idle = tok_at(&got, &li, &text, e, "state Idle {", 6);
+    assert_eq!(decl_idle.2, 4, "`Idle` length 4");
+    assert_eq!(
+        (decl_idle.3, decl_idle.4),
+        (t_type, m_decl),
+        "a state DECLARATION = type `type` + the `declaration` modifier"
+    );
+    // The SAME state name USED as a transition target (`-> Moving`)… use
+    // `Idle` used in `on STOP -> Idle` instead (Idle is targeted there).
+    let use_idle = tok_at(&got, &li, &text, e, "-> Idle", 3);
+    assert_eq!(
+        (use_idle.3, use_idle.4),
+        (t_type, 0),
+        "a state USE = type `type`, NO `declaration` modifier (decl-vs-ref)"
+    );
+    // Event name after `on ` → `enum`.
+    let ev = tok_at(&got, &li, &text, e, "on CALL", 3);
+    assert_eq!(ev.3, t_enum, "event name → `enum`");
+    // `ctx.floor` field ref → `variable` (the field, classified by reuse
+    // of the L3 resolver).
+    let ctxf = tok_at(&got, &li, &text, e, "ctx.floor == 0", 4);
+    assert_eq!(
+        ctxf.3, t_var,
+        "a ctx.field ref is the field type `variable`"
+    );
+    // extern call `can_go(1)` in the guard → `function`.
+    let ext = tok_at(&got, &li, &text, e, "can_go(1)", 0);
+    assert_eq!(ext.3, t_func, "an extern name → `function`");
+    // The `state` keyword → `keyword`.
+    let kw = tok_at(&got, &li, &text, e, "state Idle", 0);
+    assert_eq!(kw.3, t_kw, "a reserved keyword → `keyword`");
+    // The `// a line comment` → `comment`.
+    let cmt = tok_at(&got, &li, &text, e, "// a line comment", 0);
+    assert_eq!(cmt.3, t_cmt, "a line comment → `comment`");
+    // The `->` operator → `operator`.
+    let arrow = tok_at(&got, &li, &text, e, "-> Moving", 0);
+    assert_eq!(arrow.3, t_op, "`->` → `operator`");
+    // The `0` integer literal in `floor: u8 = 0` → `number`.
+    let num = tok_at(&got, &li, &text, e, "u8 = 0", 5);
+    assert_eq!(num.3, t_num, "an integer literal → `number`");
+    // The `@id` decorator marker → `decorator`; its `"s-idle"` string →
+    // `string` (Doc 14 §10 index 6 covers stable-ID strings).
+    let atid = tok_at(&got, &li, &text, e, "@id(\"s-idle\")", 0);
+    assert_eq!(atid.3, t_dec, "`@id` annotation marker → `decorator`");
+    let sid = tok_at(&got, &li, &text, e, "\"s-idle\"", 0);
+    assert_eq!(sid.3, t_str, "the stable-ID string → `string`");
+    // `payload`-free fixture, but assert the `readonly` modifier constant
+    // is referenced by the legend (a guard the bit math stays in legend
+    // space even when this fixture emits none).
+    assert_eq!(m_ro, 1u32 << 1, "readonly modifier is legend bit 1");
+
+    // (4) No structural-punctuation token leaked (Doc 14 §10 has no slot
+    //     for `{` — TextMate handles it; the coexistence model).
+    let brace_b = byte_of(&text, "Lift {", 5);
+    let bp = li.position(&text, brace_b as u32, e);
+    assert!(
+        !got.iter()
+            .any(|(l, c, len, ..)| *l == bp.line && *c == bp.character && *len == 1),
+        "a structural `{{` must NOT get a semantic token"
+    );
+}
+
+/// (L6-b) `semanticTokens/range` — Doc 26 §8 L6 explicitly specifies
+/// `full + range`. The range response is a self-contained token stream
+/// (its first token's deltas are relative to the response start, NOT a
+/// slice of the full stream), equals the oracle for the same range, and
+/// contains no out-of-range token.
+#[tokio::test(flavor = "current_thread")]
+async fn semantic_tokens_range_is_self_contained_and_matches_oracle() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text, uri) = fixture("l6_legend.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(&text, &path);
+    let cst = fsm_parser::parse(&text).syntax();
+    let li = LineIndex::new(&text);
+    let e = OffsetEncoding::Utf8;
+
+    // Range = exactly the `state Moving { … }` declaration block.
+    let s_byte = byte_of(&text, "state Moving", 0) as u32;
+    let e_byte = (text.rfind('}').unwrap()) as u32; // close of Moving/machine
+    let r = Range {
+        start: li.position(&text, s_byte, e),
+        end: li.position(&text, e_byte, e),
+    };
+
+    let want = oracle_semantic_range(
+        &analysis.symbol_table,
+        &cst,
+        &li,
+        &text,
+        e,
+        li.offset(&text, r.start, e),
+        li.offset(&text, r.end, e),
+    );
+
+    let result = call_request(
+        &mut service,
+        "textDocument/semanticTokens/range",
+        semantic_range_params(&uri, r),
+        610,
+    )
+    .await;
+    let got_raw = decode_semantic_result(&result);
+    assert_eq!(
+        got_raw, want.data,
+        "the range delta array MUST equal the reused-pipeline range oracle"
+    );
+    let got = decode_semantic(&got_raw);
+    assert!(!got.is_empty(), "the range over `state Moving` has tokens");
+
+    // Self-contained: the FIRST token decodes to an ABSOLUTE position on
+    // the `state Moving` line (its deltas are relative to the response
+    // start, not byte 0 of the document).
+    let moving_line = li.position(&text, s_byte, e).line;
+    assert_eq!(
+        got[0].0, moving_line,
+        "the range substream decodes to absolute positions (relative to response start)"
+    );
+    // No token outside [Moving-decl-line, end] leaked in (the `state Idle`
+    // line precedes the range).
+    let idle_line = li
+        .position(&text, byte_of(&text, "state Idle", 0) as u32, e)
+        .line;
+    for (l, ..) in &got {
+        assert!(
+            *l >= moving_line && *l != idle_line,
+            "an out-of-range token (line {l}) leaked into the range response"
+        );
+    }
+}
+
+/// (L6-c) **Non-ASCII, BOTH `positionEncoding`s.** A 4-byte 🚀 + 2-byte
+/// Cyrillic appear ONLY in lexer-valid block comments (Cyrillic
+/// *identifiers* explode the ASCII-only lexer — the standing lesson). The
+/// state `Target` is used on the SAME line after a multibyte single-line
+/// comment, and a MULTI-line block comment forces the per-line split. The
+/// decoded absolute positions/lengths must be correct under UTF-8 (bytes)
+/// AND UTF-16 (code units) — a byte-vs-UTF-16 mismatch makes the decoded
+/// position wrong and the test fails (the §4.1 defect guard at L6).
+#[tokio::test(flavor = "current_thread")]
+async fn semantic_tokens_non_ascii_correct_under_both_encodings() {
+    for enc_kind in [PositionEncodingKind::UTF8, PositionEncodingKind::UTF16] {
+        let (mut service, _socket) = LspService::new(Backend::new);
+        do_initialize(&mut service, std::slice::from_ref(&enc_kind)).await;
+        let enc = OffsetEncoding::from_lsp(&enc_kind);
+
+        let (text, uri) = fixture("l6_non_ascii.fsm");
+        let did_open = Request::build("textDocument/didOpen")
+            .params(did_open_params(&uri, &text))
+            .finish();
+        service.ready().await.unwrap().call(did_open).await.unwrap();
+
+        let path = uri.to_file_path().unwrap();
+        let analysis = analyze(&text, &path);
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "[{enc_kind:?}] l6_non_ascii.fsm must be clean, got {:?}",
+            analysis.diagnostics
+        );
+        let cst = fsm_parser::parse(&text).syntax();
+        let li = LineIndex::new(&text);
+        let want = oracle_semantic_full(&analysis.symbol_table, &cst, &li, &text, enc);
+
+        let result = call_request(
+            &mut service,
+            "textDocument/semanticTokens/full",
+            semantic_full_params(&uri),
+            620,
+        )
+        .await;
+        let got_raw = decode_semantic_result(&result);
+        assert_eq!(
+            got_raw, want.data,
+            "[{enc_kind:?}] raw delta array MUST equal the oracle in this encoding"
+        );
+        let got = decode_semantic(&got_raw);
+
+        let legend = oracle_legend();
+        let t_type = ty_index(&legend, &SemanticTokenType::TYPE);
+        let t_cmt = ty_index(&legend, &SemanticTokenType::COMMENT);
+        let m_decl = md_bit(&legend, &SemanticTokenModifier::DECLARATION);
+
+        // The `Target` USE in `… переход к Target */ on GO -> Target` — its
+        // column DIFFERS UTF-8 (bytes) vs UTF-16 (code units) because of the
+        // 🚀+Cyrillic earlier on the line. Decoded absolute position must be
+        // correct in THIS encoding (a byte/scalar shim fails one of these).
+        let use_target = tok_at(&got, &li, &text, enc, "-> Target", 3);
+        assert_eq!(use_target.3, t_type, "[{enc_kind:?}] a state use is `type`");
+        assert_eq!(
+            use_target.4, 0,
+            "[{enc_kind:?}] a state USE has NO `declaration` modifier"
+        );
+        // Its decoded position must round-trip back to the bare `Target`
+        // token via the SAME encoding's inverse (a wrong intra-line
+        // transcoding on the multibyte line fails this).
+        let back = li.offset(
+            &text,
+            tower_lsp::lsp_types::Position {
+                line: use_target.0,
+                character: use_target.1,
+            },
+            enc,
+        ) as usize;
+        assert_eq!(
+            &text[back..back + "Target".len()],
+            "Target",
+            "[{enc_kind:?}] decoded position round-trips to the bare `Target`"
+        );
+        // The `Target` DECLARATION carries the `declaration` modifier (and
+        // is the SAME `type`), regardless of encoding.
+        let decl_target = tok_at(&got, &li, &text, enc, "state Target", 6);
+        assert_eq!(
+            (decl_target.3, decl_target.4),
+            (t_type, m_decl),
+            "[{enc_kind:?}] state DECLARATION = `type` + `declaration`"
+        );
+
+        // The MULTI-line `/* multi … 🚀 */` block comment is split into
+        // one piece PER line — none spanning lines (LSP
+        // multilineTokenSupport is off). Its pieces' lengths are in the
+        // negotiated unit (so the 🚀/Cyrillic line's length differs UTF-8
+        // vs UTF-16).
+        let cmt_open = byte_of(&text, "/* multi", 0);
+        let cmt_line0 = li.position(&text, cmt_open as u32, enc).line;
+        let comment_pieces: Vec<&(u32, u32, u32, u32, u32)> = got
+            .iter()
+            .filter(|(l, .., ty, _)| *ty == t_cmt && *l >= cmt_line0 && *l <= cmt_line0 + 1)
+            .collect();
+        assert!(
+            comment_pieces.len() >= 2,
+            "[{enc_kind:?}] the 2-line /* */ MUST split into ≥2 per-line pieces, got {comment_pieces:?}"
+        );
+        // No comment piece spans more than its own line: re-derive each
+        // piece's end position and assert it is on the same line as its
+        // start (the per-line-split invariant).
+        for &&(l, c, len, ..) in &comment_pieces {
+            // Convert (l, c) + len back to a byte, then to a position; it
+            // must stay on line `l` (a multi-line token would not).
+            let start_b = li.offset(
+                &text,
+                tower_lsp::lsp_types::Position {
+                    line: l,
+                    character: c,
+                },
+                enc,
+            );
+            let end_pos = li.position(
+                &text,
+                start_b + token_byte_len(&text, start_b, len, enc),
+                enc,
+            );
+            assert_eq!(
+                end_pos.line, l,
+                "[{enc_kind:?}] comment piece at line {l} must NOT span lines"
+            );
+        }
+
+        // FULL decoded-stream equality in this encoding (the strongest
+        // assertion — every token's position/length/type/modifier under
+        // the negotiated unit).
+        let want_dec = decode_semantic(&want.data);
+        assert_eq!(
+            got, want_dec,
+            "[{enc_kind:?}] the full decoded stream MUST equal the oracle"
+        );
+    }
+}
+
+/// Helper for the non-ASCII test: the byte length of a token that starts at
+/// `start_byte` and is `units` long in `enc` units (walk `units` code units
+/// forward from `start_byte`, return the byte delta). Pure inverse-of-length
+/// arithmetic over the buffer — used only to re-derive a piece's end byte
+/// for the "does not span lines" check.
+fn token_byte_len(text: &str, start_byte: u32, units: u32, enc: OffsetEncoding) -> u32 {
+    let mut consumed = 0u32;
+    let mut bytes = 0u32;
+    for ch in text[start_byte as usize..].chars() {
+        if consumed >= units {
+            break;
+        }
+        consumed += match enc {
+            OffsetEncoding::Utf8 => ch.len_utf8() as u32,
+            OffsetEncoding::Utf16 => ch.len_utf16() as u32,
+        };
+        bytes += ch.len_utf8() as u32;
+    }
+    bytes
+}
+
+/// (L6-d) A not-open document → `semanticTokens/full` returns `null` (the
+/// spec-correct empty answer, never a panic, never a fabricated token).
+#[tokio::test(flavor = "current_thread")]
+async fn semantic_tokens_full_on_unopened_doc_is_null() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+    let uri = Url::parse("file:///tmp/never-opened-l6.fsm").unwrap();
+    let result = call_request(
+        &mut service,
+        "textDocument/semanticTokens/full",
+        semantic_full_params(&uri),
+        630,
+    )
+    .await;
+    assert!(
+        result.is_null(),
+        "semanticTokens on a not-open doc must be null, got {result}"
+    );
+}

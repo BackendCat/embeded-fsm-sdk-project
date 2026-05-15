@@ -23,9 +23,20 @@
 //! match); they reuse the `resolve` seam, not a parallel resolver, and
 //! `LineIndex` for ranges, not a second converter (Doc 26 §8 L5).
 //!
-//! L5 scope boundary (Doc 26 §8): NO semanticTokens/codeAction/inlayHint.
-//! Those are L6+ and are deliberately neither implemented nor stubbed (a
-//! silent no-op handler is worse than an unadvertised capability — the
+//! L6 adds `semanticTokens` (`textDocument/semanticTokens/full` + `/range`,
+//! Doc 14 §10) — *more precise* than the Doc 21 TextMate grammar: it knows,
+//! from the SAME single `analyze()`, whether an `Ident` is a state / event
+//! / extern / context field / machine and whether it is a declaration or a
+//! reference, reusing L3's `resolve` classifier (use sites) + L5's
+//! `ReferenceIndex` decl-name discovery / `SymbolKey` taxonomy (declaration
+//! sites) — one classifier, one `symbol_table` identity model, NO new
+//! analysis, NO parallel classifier (Doc 26 §8 L6). The LSP relative delta
+//! encoding measures `deltaStartChar`/`length` in the negotiated
+//! `positionEncoding` via L1's one authoritative `LineIndex`.
+//!
+//! L6 scope boundary (Doc 26 §8): NO codeAction/inlayHint. Those are L7 and
+//! are deliberately neither implemented nor stubbed (a silent no-op handler
+//! is worse than an unadvertised capability — the
 //! `workspaceSymbol`-left-unadvertised precedent, Doc 00 §11.33(5)).
 
 use std::collections::HashMap;
@@ -43,6 +54,8 @@ use tower_lsp::lsp_types::{
     GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
     InitializeParams, InitializeResult, InitializedParams, Location, MessageType, OneOf,
     PositionEncodingKind, PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensRangeParams,
+    SemanticTokensRangeResult, SemanticTokensResult, SemanticTokensServerCapabilities,
     ServerCapabilities, ServerInfo, TextDocumentPositionParams, TextDocumentSyncCapability,
     TextDocumentSyncKind, Url, WorkspaceEdit,
 };
@@ -57,6 +70,10 @@ use crate::capabilities::folding::folding_ranges;
 use crate::capabilities::hover::hover as build_hover;
 use crate::capabilities::references::references as build_references;
 use crate::capabilities::rename::{prepare_rename_handler, rename_handler};
+use crate::capabilities::semantic_tokens::{
+    legend as semantic_tokens_legend, semantic_tokens_full as build_semantic_tokens_full,
+    semantic_tokens_range as build_semantic_tokens_range,
+};
 use crate::document_store::DocumentStore;
 use crate::position::OffsetEncoding;
 use crate::refs::ReferenceIndex;
@@ -245,6 +262,28 @@ impl LanguageServer for Backend {
                     prepare_provider: Some(true),
                     work_done_progress_options: Default::default(),
                 })),
+                // L6 (Doc 26 §8 L6 / Doc 14 §2/§10): semantic tokens. An
+                // honest, fully-implemented provider — `full` AND `range`
+                // both genuinely work (Doc 26 §8 L6 says "full + range";
+                // Doc 14 §2's block has `"full": true, "range": true`),
+                // backed by the SAME single analysis (no second pass) +
+                // the reused L3/L5 classifier (no parallel one). The
+                // `legend` is declared ONCE in `semantic_tokens::legend()`
+                // and reused by the encoder, so the advertised indices and
+                // the encoded `tokenType`/`tokenModifiers` can never
+                // diverge (the §5.4 tests assert this identity). NOT
+                // advertised-but-stubbed (the cardinal sin) — it is
+                // advertised because it genuinely works.
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: semantic_tokens_legend(),
+                            full: Some(tower_lsp::lsp_types::SemanticTokensFullOptions::Bool(true)),
+                            range: Some(true),
+                            work_done_progress_options: Default::default(),
+                        },
+                    ),
+                ),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -637,5 +676,94 @@ impl LanguageServer for Backend {
             // WorkspaceEdit (Doc 26 risk-2).
             Err(message) => Err(RpcError::invalid_params(message)),
         }
+    }
+
+    /// `textDocument/semanticTokens/full` — Doc 14 §10 / Doc 26 §8 L6
+    /// (single-file).
+    ///
+    /// Classifies every CST token of the SAME single `analyze()` the
+    /// diagnostics/symbol/hover/completion/references path runs (Doc 26
+    /// §3/§8 — NO second analysis, NO parallel classifier): an `Ident` via
+    /// the reused L3 `resolve` classifier (use sites) + L5 `ReferenceIndex`
+    /// decl-name discovery / `SymbolKey` taxonomy (declaration sites — the
+    /// decl-vs-ref + entity-type split is decided by `symbol_table`
+    /// identity, exactly Doc 26 §8 L6); every other token by its lexical
+    /// `fsm-lexer` `SyntaxKind`. Emitted as the LSP relative delta array
+    /// with `deltaStartChar`/`length` in the negotiated `positionEncoding`
+    /// via L1's ONE authoritative `LineIndex` (no second converter — the
+    /// §11.32 DRIFT-2 boundary intact). A not-open document → `None` (the
+    /// spec-correct empty answer, never a panic). Snapshot released before
+    /// the await-free analysis, exactly as the L2–L5 paths do.
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> RpcResult<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        let path = Backend::uri_to_path(&uri);
+        // THE reuse seam — the identical `fsm check` pipeline; the tokens
+        // are classified from THIS single run's symbol_table + parse.
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        let tokens =
+            build_semantic_tokens_full(&analysis.symbol_table, &cst, &line_index, &text, enc);
+        Ok(Some(SemanticTokensResult::Tokens(tokens)))
+    }
+
+    /// `textDocument/semanticTokens/range` — Doc 14 §10 / Doc 26 §8 L6
+    /// ("full + range" — both explicitly specified).
+    ///
+    /// Identical classification (the SAME one reused analysis, the SAME
+    /// reused classifier — no second pass, no parallel classifier), then
+    /// the token stream is filtered to tokens overlapping the requested
+    /// byte range and the relative delta encoding is recomputed for the
+    /// subset (so a range response is a self-contained token stream whose
+    /// first token's deltas are relative to the response start, per the LSP
+    /// relative-encoding contract — not a slice of the full stream). The
+    /// request `Range` is mapped to bytes via L1's ONE authoritative
+    /// `LineIndex` inverse in the negotiated encoding (no second
+    /// converter). Not-open document → `None`.
+    async fn semantic_tokens_range(
+        &self,
+        params: SemanticTokensRangeParams,
+    ) -> RpcResult<Option<SemanticTokensRangeResult>> {
+        let uri = params.text_document.uri;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        // Request Range -> byte offsets via the ONE authoritative LineIndex
+        // inverse (NOT a second converter — Doc 26 §4.1 / §11.32 boundary).
+        let start_byte = line_index.offset(&text, params.range.start, enc);
+        let end_byte = line_index.offset(&text, params.range.end, enc);
+        let path = Backend::uri_to_path(&uri);
+        // THE reuse seam — identical pipeline; classified from THIS run.
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        let tokens = build_semantic_tokens_range(
+            &analysis.symbol_table,
+            &cst,
+            &line_index,
+            &text,
+            enc,
+            start_byte,
+            end_byte,
+        );
+        Ok(Some(SemanticTokensRangeResult::Tokens(tokens)))
     }
 }
