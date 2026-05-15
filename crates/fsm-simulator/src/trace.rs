@@ -92,6 +92,17 @@ pub enum StepKind {
     Completion,
     /// The event was discarded (no enabled transition).
     Discarded,
+    /// The event matched a `defer EVENT` in the active configuration and
+    /// no transition consumed it, so it was held in the defer buffer
+    /// rather than discarded (Doc 08 §10.1). The step changes no
+    /// configuration; `configBefore == configAfter`.
+    EventDeferred,
+    /// A previously-deferred event was released back to the front of the
+    /// queue on exit from the last deferring state (Doc 08 §10.2) and is
+    /// now being reprocessed in the new configuration. The structural
+    /// fields (transition / entered / exited) describe that reprocessing
+    /// exactly as a normal dispatch would.
+    EventRedispatched,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

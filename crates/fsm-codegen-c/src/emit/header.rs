@@ -255,6 +255,17 @@ fn emit_machine_struct(ctx: &MachineEmitCtx<'_>) -> String {
     s.push_str("    uint8_t _queue_tail;\n");
     s.push_str("    uint8_t _queue_count;\n");
     s.push_str("    uint8_t _completion_depth; /* per-instance watchdog */\n");
+    // Deferred-event buffer (Doc 08 §10). Always present so the struct
+    // layout is stable regardless of whether this machine uses `defer`;
+    // `Motor_init`'s memset zeroes it, and the defer apparatus is only
+    // emitted (and only touches these) when the machine declares a
+    // `defer`. A bounded array — heap-free per Doc 02 G2.
+    s.push_str(&format!(
+        "    {prefix}_Event_t _deferred[{macro}_DEFER_CAPACITY];\n",
+        prefix = prefix,
+        macro = macro_prefix,
+    ));
+    s.push_str("    uint8_t _deferred_count;\n");
     s.push_str(&format!("}} {prefix}_t;\n", prefix = prefix));
     s
 }

@@ -45,12 +45,12 @@ pub fn check_and_enqueue_completion(
     // transition is the same auto-transition mechanism UML uses for
     // "completion events".
     if state_has_done_transition(rt, just_entered) {
-        rt.queue.push_front(QueuedEvent {
-            kind: EventKind::Completion {
+        rt.queue.push_front(QueuedEvent::new(
+            EventKind::Completion {
                 state_id: just_entered.to_string(),
             },
-            payload: None,
-        })?;
+            None,
+        ))?;
         return Ok(());
     }
     let ancestors = rt.machine.ancestors(just_entered);
@@ -74,12 +74,12 @@ pub fn check_and_enqueue_completion(
             _ => false,
         };
         if satisfied {
-            rt.queue.push_front(QueuedEvent {
-                kind: EventKind::Completion {
+            rt.queue.push_front(QueuedEvent::new(
+                EventKind::Completion {
                     state_id: parent_id,
                 },
-                payload: None,
-            })?;
+                None,
+            ))?;
             return Ok(());
         }
     }

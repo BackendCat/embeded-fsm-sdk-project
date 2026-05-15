@@ -27,13 +27,14 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
 
     // History helpers, completion helpers, timer tick.
     //
-    // Audit P0-5 option-b (2026-05-14): defer mask table no longer emitted.
-    // The runtime path that read it silently dropped events, contradicting
-    // Doc 02 G1. With `defer EVENT` rejected at analysis time via
-    // FSM-E0903, no machine that reaches codegen has anything to defer; an
-    // emitted-but-unread `Motor_defer_mask[]` would just be dead weight
-    // (and `-Werror=unused-const-variable` would reject it anyway). The
-    // emitter is preserved in `emit/defer.rs` for v1.1.
+    // v1.1 (2026-05-15): real deferred-event runtime now ships. The defer
+    // membership table + buffer helpers are emitted by the dispatch
+    // strategy (right after the parent table it owns, since the defer
+    // membership query walks that table) — see `dispatch_switch.rs` /
+    // `dispatch_table.rs`. Only emitted when the machine declares a
+    // `defer` (`defer::machine_has_defer`), so non-defer machines pay zero
+    // code size and dodge `-Werror=unused-function`. Supersedes the audit
+    // P0-5 option-b stopgap (docs/00 §11.7).
     body.push_str(&history::emit_history_helpers(ctx));
     body.push_str("\n");
     body.push_str(&completion::emit_all_regions_final_helper(ctx));

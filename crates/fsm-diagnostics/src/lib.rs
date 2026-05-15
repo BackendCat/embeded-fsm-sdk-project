@@ -224,13 +224,11 @@ macro_rules! for_each_code {
 
             // §10 — Runtime Safety Errors (FSM-E0900 – FSM-E0999)
             E0900 => (Error,   "FSM-E0900", "completion event chain too deep"),
-            // Reconciler addition (Doc 00 §8 / G-08):
-            // Audit P0-5 option-b (2026-05-14): repurposed from "too many
-            // event types for defer bitmask" — v1.0 has no working defer
-            // queue at all, so every `defer EVENT` is rejected at analysis
-            // time. The bitmask-size limit re-applies in v1.1 once the
-            // queue ships.
-            E0903 => (Error,   "FSM-E0903", "`defer EVENT` is not supported in v1.0"),
+            //   E0903 retired -> deprecated module (v1.1, 2026-05-15):
+            //   the v1.0 "`defer EVENT` not supported" stopgap (audit P0-5
+            //   option-b) is gone — real defer-buffer runtime now ships in
+            //   codegen-c + simulator (Doc 08 §10). The wire form still
+            //   parses in suppression annotations via DeprecatedCode.
 
             // §11 — Warnings (FSM-W0xxx)
             //   W0400 retired (now E0410) -> deprecated module
@@ -384,6 +382,11 @@ pub mod deprecated {
     //!      now allowed (B-07); the check is gone.
     //!   - `E0304` "Parallel region has no initial" — duplicate of E0600.
     //!   - `W0400` "Timer duration is zero" — promoted to fatal `E0410`.
+    //!   - `E0903` "`defer EVENT` not supported in v1.0" — the audit P0-5
+    //!      option-b stopgap. Retired in v1.1: real per-state defer-buffer
+    //!      runtime now ships in codegen-c + the simulator (Doc 08 §10).
+    //!      `defer` is accepted; only `E0310` (defer-vs-transition
+    //!      conflict) remains. Supersedes docs/00 §11.7.
     use core::fmt;
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -392,6 +395,7 @@ pub mod deprecated {
         E0301,
         E0304,
         W0400,
+        E0903,
     }
 
     impl fmt::Display for DeprecatedCode {
@@ -400,6 +404,7 @@ pub mod deprecated {
                 DeprecatedCode::E0301 => "FSM-E0301",
                 DeprecatedCode::E0304 => "FSM-E0304",
                 DeprecatedCode::W0400 => "FSM-W0400",
+                DeprecatedCode::E0903 => "FSM-E0903",
             })
         }
     }
@@ -415,6 +420,7 @@ pub mod deprecated {
                 "FSM-E0301" => Some(DeprecatedCode::E0301),
                 "FSM-E0304" => Some(DeprecatedCode::E0304),
                 "FSM-W0400" => Some(DeprecatedCode::W0400),
+                "FSM-E0903" => Some(DeprecatedCode::E0903),
                 _ => None,
             }
         }
@@ -660,15 +666,19 @@ mod tests {
         assert!(DiagnosticCode::from_str("FSM-E0301").is_none());
         assert!(DiagnosticCode::from_str("FSM-E0304").is_none());
         assert!(DiagnosticCode::from_str("FSM-W0400").is_none());
+        // E0903 retired in v1.1 (defer runtime shipped):
+        assert!(DiagnosticCode::from_str("FSM-E0903").is_none());
     }
 
     // --- all_codes() vs variant count ---
 
     #[test]
     fn all_codes_matches_expected_count() {
-        // Live variants: 75 (52 E + 13 W + 4 I + 6 H).
+        // Live variants: 74 (51 E + 13 W + 4 I + 6 H).
+        // E0903 retired to `deprecated` in v1.1 (defer runtime shipped),
+        // dropping the Error count from 52 to 51.
         // If a new code is added, update this constant in lockstep.
-        const EXPECTED: usize = 75;
+        const EXPECTED: usize = 74;
         let table = DiagnosticCode::all_codes();
         assert_eq!(
             table.len(),
@@ -728,6 +738,13 @@ mod tests {
         assert_eq!(
             DeprecatedCode::from_str("FSM-W0400"),
             Some(DeprecatedCode::W0400)
+        );
+        // E0903 retired in v1.1 but still accepted in suppression
+        // annotations (Doc 10 §14 rule 2; supersedes docs/00 §11.7).
+        assert_eq!(DeprecatedCode::E0903.to_string(), "FSM-E0903");
+        assert_eq!(
+            DeprecatedCode::from_str("FSM-E0903"),
+            Some(DeprecatedCode::E0903)
         );
         assert_eq!(DeprecatedCode::from_str("FSM-E0001"), None);
     }

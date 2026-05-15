@@ -237,29 +237,15 @@ impl Interpreter {
                 name: event_name.to_string(),
             })?
             .to_string();
-        // Apply deferral semantics before the event hits the queue (Doc 08 §10).
-        // For non-parallel machines, "defer set" is at machine level; if any
-        // active state declares `defer EVENT`, the event is set aside.
-        if rt
-            .active_states
-            .iter()
-            .flat_map(|s| {
-                rt.machine.ancestors(s).into_iter().flat_map(|id| {
-                    rt.machine
-                        .node(&id)
-                        .map(|n| n.defers.clone())
-                        .unwrap_or_default()
-                })
-            })
-            .any(|d| d.event_id == event_id)
-        {
-            rt.defer_set.push(event_id);
-            return Ok(vec![]);
-        }
-        rt.queue.push_back(QueuedEvent {
-            kind: EventKind::Dispatched { event_id },
-            payload,
-        })?;
+        // Doc 08 §10.1 + UML 2.5.1 §14.2.3.9.1: deferral is decided *during*
+        // the RTC step, AFTER transition selection — an enabled transition
+        // wins over `defer` (transition-wins). The pre-v1.1 simulator
+        // deferred here (before the queue), which discarded the event with
+        // no trace record AND let `defer` shadow a consuming transition.
+        // The event now enters the queue normally; `run_step` holds it in
+        // `defer_set` only if no transition consumes it (Doc 08 §10).
+        rt.queue
+            .push_back(QueuedEvent::new(EventKind::Dispatched { event_id }, payload))?;
         self.drain_internal_queue()
     }
 
@@ -282,10 +268,8 @@ impl Interpreter {
                 name: event_name.to_string(),
             })?
             .to_string();
-        rt.queue.push_front(QueuedEvent {
-            kind: EventKind::Raised { event_id },
-            payload,
-        })?;
+        rt.queue
+            .push_front(QueuedEvent::new(EventKind::Raised { event_id }, payload))?;
         self.drain_internal_queue()
     }
 
@@ -318,14 +302,14 @@ impl Interpreter {
                 let now = rt.virtual_clock_ms;
                 let fired = rt.timers.pop_fired_through(now);
                 for t in fired {
-                    rt.queue.push_back(QueuedEvent {
-                        kind: EventKind::TimerFire {
+                    rt.queue.push_back(QueuedEvent::new(
+                        EventKind::TimerFire {
                             timer_id: t.timer_id.clone(),
                             transition_id: t.transition_id.clone().unwrap_or_default(),
                             source_state: t.source_state.clone(),
                         },
-                        payload: None,
-                    })?;
+                        None,
+                    ))?;
                 }
             }
             out.extend(self.drain_internal_queue()?);
@@ -472,10 +456,54 @@ impl Interpreter {
         // 1) Transition selection — one per region, innermost-first walk.
         let selected = select_transitions(rt, &event, &self.externs)?;
         if selected.is_empty() {
+            // No transition consumed the event. Doc 08 §10.1: if the
+            // event's id is in the defer set of any state in the active
+            // configuration (the state or an active ancestor), it is HELD
+            // rather than discarded. Transition-wins is already satisfied
+            // because we only reach here after selection returned empty
+            // (UML 2.5.1 §14.2.3.9.1). Completion / timer events have no
+            // DSL-level event id and are never deferrable.
+            let deferrable_event_id = match &event.kind {
+                EventKind::Dispatched { event_id } | EventKind::Raised { event_id } => {
+                    Some(event_id.clone())
+                }
+                EventKind::Completion { .. } | EventKind::TimerFire { .. } => None,
+            };
+            let is_deferred = deferrable_event_id
+                .as_ref()
+                .map(|eid| active_config_defers(rt, eid))
+                .unwrap_or(false);
+
             rt.current_payload = None;
+            if is_deferred {
+                // Hold the event. FIFO order is preserved by appending to
+                // `defer_set` (Doc 08 §10.3). The configuration is
+                // unchanged: config_before == config_after.
+                let event_id =
+                    deferrable_event_id.expect("is_deferred implies a deferrable event id");
+                rt.defer_set.push(event_id);
+                let rec = StepRecord {
+                    trace_id: rt.next_trace_id,
+                    kind: StepKind::EventDeferred,
+                    virtual_clock_ms,
+                    event_received: event_received_for(rt, &event),
+                    transition_taken: None,
+                    exited_states: vec![],
+                    entered_states: vec![],
+                    actions_executed: vec![],
+                    config_before,
+                    config_after: rt.active_states.clone(),
+                };
+                rt.next_trace_id += 1;
+                return Ok(rec);
+            }
+            // Genuinely unconsumed and not deferred — discard per Doc 08
+            // §3.1. A redispatched event that finds no transition AND is
+            // no longer deferred (its deferring state already exited) is a
+            // normal discard.
             let rec = StepRecord {
                 trace_id: rt.next_trace_id,
-                kind: kind_for_event(&event.kind),
+                kind: kind_for_event(&event),
                 virtual_clock_ms,
                 event_received: event_received_for(rt, &event),
                 transition_taken: None,
@@ -521,7 +549,7 @@ impl Interpreter {
         rt.current_payload = None;
         let rec = StepRecord {
             trace_id: rt.next_trace_id,
-            kind: kind_for_event(&event.kind),
+            kind: kind_for_event(&event),
             virtual_clock_ms,
             event_received: event_received_for(rt, &event),
             transition_taken: Some(TransitionTakenRecord {
@@ -544,8 +572,15 @@ impl Interpreter {
 // Step helpers — these own the algorithm details.
 // ---------------------------------------------------------------------------
 
-fn kind_for_event(k: &EventKind) -> StepKind {
-    match k {
+fn kind_for_event(ev: &QueuedEvent) -> StepKind {
+    // A released deferred event reprocesses as `EventRedispatched` so the
+    // trace shows the defer→release round-trip (Doc 08 §10.2). Only
+    // dispatched/raised events can have been deferred; the flag is never
+    // set on completion / timer events.
+    if ev.redispatched {
+        return StepKind::EventRedispatched;
+    }
+    match &ev.kind {
         EventKind::Dispatched { .. } => StepKind::Dispatched,
         EventKind::Raised { .. } => StepKind::Raised,
         EventKind::TimerFire { .. } => StepKind::TimerFired,
@@ -1272,15 +1307,12 @@ fn arm_timers_on_entry(timers: &mut TimerSet, idx: &MachineIndex, state: &str, n
     }
 }
 
-/// Doc 08 §10.2 — when the machine exits a deferring state, any deferred
-/// events that no longer match an active deferring state are released to the
-/// front of the queue in FIFO order.
-fn release_deferred(rt: &mut RuntimeState) -> Result<(), StepError> {
-    if rt.defer_set.is_empty() {
-        return Ok(());
-    }
-    let active_deferred: HashSet<String> = rt
-        .active_states
+/// Returns the set of event ids deferred by *any* state in the current
+/// active configuration (each active leaf plus all of its ancestors).
+/// Doc 08 §10.1: an event is held only if a state that is currently
+/// active declares `defer` for it.
+fn active_config_deferred_ids(rt: &RuntimeState) -> HashSet<String> {
+    rt.active_states
         .iter()
         .flat_map(|s| {
             rt.machine.ancestors(s).into_iter().flat_map(|id| {
@@ -1291,7 +1323,36 @@ fn release_deferred(rt: &mut RuntimeState) -> Result<(), StepError> {
             })
         })
         .map(|d| d.event_id)
-        .collect();
+        .collect()
+}
+
+/// Whether `event_id` is deferred by some state in the active
+/// configuration. Used by `run_step` to decide hold-vs-discard for an
+/// unconsumed event (Doc 08 §10.1).
+fn active_config_defers(rt: &RuntimeState, event_id: &str) -> bool {
+    active_config_deferred_ids(rt).contains(event_id)
+}
+
+/// Doc 08 §10.2 — when the machine exits a deferring state, any deferred
+/// events that no longer match an active deferring state are released to
+/// the front of the queue in FIFO order (the order they were deferred).
+///
+/// Doc 08 §10.4 recursion prevention: an event still deferred by a state
+/// that remains active after the transition is NOT released — it stays in
+/// `defer_set` so it is not immediately re-deferred / churned. Only events
+/// no longer covered by any active deferring state are released.
+///
+/// Released events are flagged `redispatched` so the subsequent
+/// reprocessing step records as `StepKind::EventRedispatched` (the
+/// defer→release round-trip is visible in the trace; Doc 13 §11).
+fn release_deferred(rt: &mut RuntimeState) -> Result<(), StepError> {
+    if rt.defer_set.is_empty() {
+        return Ok(());
+    }
+    let active_deferred = active_config_deferred_ids(rt);
+    // Preserve FIFO: `defer_set` is in deferral order, so `release` keeps
+    // that order and `keep` keeps the relative order of still-deferred
+    // events.
     let mut release: Vec<String> = Vec::new();
     let mut keep: Vec<String> = Vec::new();
     for ev in rt.defer_set.drain(..) {
@@ -1302,11 +1363,14 @@ fn release_deferred(rt: &mut RuntimeState) -> Result<(), StepError> {
         }
     }
     rt.defer_set = keep;
+    // Prepend in FIFO order (Doc 08 §10.3): queue becomes
+    // [D, E, <prior queue contents>] when D was deferred before E.
     let evs: Vec<QueuedEvent> = release
         .into_iter()
         .map(|event_id| QueuedEvent {
             kind: EventKind::Dispatched { event_id },
             payload: None,
+            redispatched: true,
         })
         .collect();
     rt.queue.prepend(evs)?;

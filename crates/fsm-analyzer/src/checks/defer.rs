@@ -1,16 +1,19 @@
-//! Defer-related checks — Doc 04 §9.4 / Doc 00 §G-08 / Audit P0-5.
+//! Defer-related checks — Doc 04 §9.4 / Doc 08 §10 / Doc 00 §G-08.
 //!
 //! - `FSM-E0310` if a state declares both `defer E` and an explicit
-//!   `on E -> ...` (or `internal on E:`) for the same event.
-//! - `FSM-E0903` on every `defer EVENT` declaration. Per audit P0-5
-//!   option-b: v1.0 codegen has no real defer queue (the prior runtime
-//!   path silently dropped deferred events, contradicting Doc 02 G1
-//!   "no undefined behaviour"). Until v1.1 ships a working queue, we
-//!   reject `defer` at analysis time so users get a clear error pointing
-//!   at the v1.1 roadmap rather than silently broken machines. The
-//!   simulator's defer support (Doc 08 §10) remains intact for internal
-//!   tooling; this gate is codegen-facing. See Doc 00 §6 (D-15 to be
-//!   added) and `docs/AUDIT_2026_05_14.md` §P0-5.
+//!   `on E -> ...` (or `internal on E:`) for the same event. This is a
+//!   genuine semantic conflict (Doc 10 §7): the user asked to both hold
+//!   and consume the same event in the same state. It stays a hard error.
+//!
+//! v1.1 (2026-05-15): `FSM-E0903` ("`defer EVENT` not supported in v1.0",
+//! audit P0-5 option-b) is **retired**. Real per-state defer-buffer
+//! runtime now ships in both codegen-c and the simulator per Doc 08 §10,
+//! so analysis no longer rejects `defer`. The defer set is lowered into
+//! the IR (`StateNode::*::defers`) by `lower::lower_defers`; codegen and
+//! the simulator consume it directly. The retired E0903 wire form still
+//! parses in `// fsm-lint:disable` annotations via
+//! [`fsm_diagnostics::deprecated::DeprecatedCode`] (Doc 10 §14). Supersedes
+//! docs/00 §11.7.
 
 use std::collections::HashSet;
 
@@ -23,29 +26,13 @@ use crate::util::{span_of, walk_all_states};
 /// Run defer-related checks.
 pub fn check(file: &ast::File, _st: &SymbolTable, out: &mut Vec<Diagnostic>) {
     for machine in file.machines() {
-        // E0310 — defer-vs-transition conflict per state.
+        // E0310 — defer-vs-transition conflict per state. This is the only
+        // defer diagnostic in v1.1: declaring `defer E` AND a transition on
+        // `E` in the same state is contradictory (UML 2.5.1 §14.2.3.9.1:
+        // an enabled transition wins over deferral, so the `defer` would be
+        // dead — flag it rather than silently ignore one of the two).
         for state in walk_all_states(&machine) {
             check_state_defer_conflicts(&state, out);
-        }
-        // E0903 — defer is not yet supported in v1.0 (audit P0-5
-        // option-b). Emit one diagnostic per `defer EVENT` declaration so
-        // users see every offending site, not just the first machine. The
-        // older "too many event types for defer bitmask" trigger is
-        // subsumed: with zero supported defers, the >256-event capacity
-        // check is moot.
-        for state in walk_all_states(&machine) {
-            for d in state.defers() {
-                let event = d.event().unwrap_or_else(|| "<unknown>".to_string());
-                out.push(
-                    Diagnostic::new(DiagnosticCode::E0903, span_of(d.syntax())).with_message(
-                        format!(
-                            "`defer {event}` is not yet supported in v1.0; \
-                             remove the `defer` clause or wait for v1.1 \
-                             (see docs/AUDIT_2026_05_14.md §P0-5)",
-                        ),
-                    ),
-                );
-            }
         }
     }
 }

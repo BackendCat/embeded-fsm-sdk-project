@@ -149,12 +149,12 @@ pub fn execute_statement(
             // external event. We capture argument values keyed by parameter
             // name so guard expressions can read `payload.field`.
             let payload = build_event_payload(rt, sctx, event_id, args)?;
-            rt.queue.push_front(QueuedEvent {
-                kind: EventKind::Raised {
+            rt.queue.push_front(QueuedEvent::new(
+                EventKind::Raised {
                     event_id: event_id.clone(),
                 },
                 payload,
-            })?;
+            ))?;
         }
         Statement::Send { .. } => {
             // Cross-machine routing requires a multi-instance simulator. For

@@ -36,6 +36,13 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
  * Compiler enforces this at codegen time. */
 #define {prefix}_QUEUE_CAPACITY     {qcap}u
 
+/* Deferred-event buffer capacity (Doc 08 §10). Sized to the queue
+ * capacity: the worst case is every queued slot's worth of events being
+ * held by a deferring state before release. Not required to be a power of
+ * two — the defer buffer is a linearly-scanned bounded array, not a
+ * bitwise-modulo ring (release filters arbitrary elements per §10.4). */
+#define {prefix}_DEFER_CAPACITY     {qcap}u
+
 /* Overflow policy: FSM_QUEUE_ASSERT or FSM_QUEUE_DROP_NEWEST. */
 #define {prefix}_QUEUE_OVERFLOW     {overflow_macro}
 

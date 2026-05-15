@@ -6,7 +6,9 @@
 //! 3. asserts the expected code appears in the diagnostic list.
 //!
 //! Test numbering follows Doc 00 §B / §G test plan plus the new codes
-//! (E0410, E0111, E0903). PARSE-NEG-* corrections from Doc 00 G-11 are
+//! (E0410, E0111). E0903 ("defer not supported") was retired in v1.1 when
+//! the defer runtime shipped; only E0310 (defer-vs-transition conflict)
+//! remains for defer. PARSE-NEG-* corrections from Doc 00 G-11 are
 //! reflected here.
 
 use fsm_analyzer::{analyze, DiagnosticCode};

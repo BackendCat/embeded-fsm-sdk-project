@@ -17,6 +17,25 @@ pub struct QueuedEvent {
     /// events that do not carry a payload. `BTreeMap` so trace records
     /// emit payload entries in deterministic lexical order.
     pub payload: Option<BTreeMap<String, Value>>,
+    /// `true` when this event is a previously-deferred event released back
+    /// to the front of the queue on exit from the last deferring state
+    /// (Doc 08 §10.2). Purely a trace-fidelity discriminator: it makes the
+    /// reprocessing step record as `StepKind::EventRedispatched` instead of
+    /// `Dispatched` so consumers can see the defer→release round-trip. The
+    /// event is otherwise processed exactly like a normal dispatch.
+    pub redispatched: bool,
+}
+
+impl QueuedEvent {
+    /// Construct a normal (non-redispatched) queued event. Most call sites
+    /// use this; the defer-release path sets `redispatched` explicitly.
+    pub fn new(kind: EventKind, payload: Option<BTreeMap<String, Value>>) -> Self {
+        Self {
+            kind,
+            payload,
+            redispatched: false,
+        }
+    }
 }
 
 /// Three concrete event kinds.

@@ -273,6 +273,8 @@ fn format_record_summary(rec: &fsm_simulator::StepRecord) -> String {
         fsm_simulator::StepKind::TimerFired => "timer_fired",
         fsm_simulator::StepKind::Completion => "completion",
         fsm_simulator::StepKind::Discarded => "discarded",
+        fsm_simulator::StepKind::EventDeferred => "event_deferred",
+        fsm_simulator::StepKind::EventRedispatched => "event_redispatched",
     };
     let evt = rec
         .event_received

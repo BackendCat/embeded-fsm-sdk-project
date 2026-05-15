@@ -15,7 +15,10 @@
 //! - **B-09** [`effective_lca`] for self-transitions.
 //! - **B-13** `FSM-E0410` for `after 0 ms`.
 //! - **B-14** `FSM-E0111` when a history pseudo-state has no `default ->`.
-//! - **G-08** `FSM-E0903` when defer is used and event count > 256.
+//! - **G-08 / v1.1** `defer EVENT` lowered to the IR defer set; runtime
+//!   support shipped in codegen-c + simulator (Doc 08 §10). `FSM-E0903`
+//!   (the v1.0 "not supported" stopgap) is retired; only `FSM-E0310`
+//!   (defer-vs-explicit-transition conflict) remains for defer.
 
 #![forbid(unsafe_code)]
 #![deny(missing_debug_implementations)]

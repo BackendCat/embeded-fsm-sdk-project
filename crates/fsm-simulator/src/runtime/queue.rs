@@ -117,12 +117,12 @@ mod tests {
     use crate::runtime::event::{EventKind, QueuedEvent};
 
     fn ev(name: &str) -> QueuedEvent {
-        QueuedEvent {
-            kind: EventKind::Dispatched {
+        QueuedEvent::new(
+            EventKind::Dispatched {
                 event_id: name.into(),
             },
-            payload: None,
-        }
+            None,
+        )
     }
 
     #[test]
