@@ -1,6 +1,6 @@
 //! Small utilities shared across the analyzer pipeline.
 
-use fsm_diagnostics::{SourceLocation, Span};
+use fsm_diagnostics::{LineColUnit, SourceLocation, Span};
 use fsm_parser::ast;
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
@@ -157,31 +157,24 @@ pub fn loc_of(node: &SyntaxNode, file: &str) -> SourceLocation {
     SourceLocation::new(file.to_string(), span_of(node), 0, 0)
 }
 
-/// Compute a (line, column) pair for byte offset `pos` in `src`. Lines are
-/// 1-indexed; columns are 1-indexed. Used by the lowerer to enrich the IR
+/// Compute a (line, column) pair for byte offset `pos` in `src`. Lines and
+/// columns are 1-indexed; columns count **bytes** (a non-ASCII char advances
+/// the column by its UTF-8 length). Used by the lowerer to enrich the IR
 /// `loc` fields without pulling in `fsm-lexer` at runtime.
+///
+/// **DRIFT-2 convergence (Doc 00 §11.3x).** This was a hand-rolled per-byte
+/// loop duplicated against `fsm_cli::cmd::check::line_col`'s per-scalar loop;
+/// it now delegates to the single shared core
+/// [`fsm_diagnostics::compute_line_col`] with [`LineColUnit::Byte`], which is
+/// that exact loop generalised over the counting unit. The byte-counting,
+/// 1-based contract baked into the IR `SourceLocation` (hence the
+/// deterministic C / `lower_split_byte_identity` fingerprint) is **unchanged**
+/// — proven byte-identical: at every char boundary (the only offsets
+/// `span_of`'s rowan `TextRange` can produce) the converged core's
+/// `Σ len_utf8` equals the old per-byte tally. The signature is preserved so
+/// callers and the public `util` surface are untouched.
 pub fn compute_line_col(src: &str, pos: usize) -> (u32, u32) {
-    let mut line: u32 = 1;
-    let mut col: u32 = 1;
-    for (i, b) in src.bytes().enumerate() {
-        if i >= pos {
-            break;
-        }
-        if b == b'\n' {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
-        }
-    }
-    (line, col)
-}
-
-/// Same as [`loc_of`] but populates line/column using `src`.
-pub fn loc_of_with_src(node: &SyntaxNode, file: &str, src: &str) -> SourceLocation {
-    let span = span_of(node);
-    let (line, column) = compute_line_col(src, span.start);
-    SourceLocation::new(file.to_string(), span, line, column)
+    fsm_diagnostics::compute_line_col(src, pos, LineColUnit::Byte)
 }
 
 #[cfg(test)]

@@ -24,7 +24,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fsm_analyzer::analyze_with_source;
-use fsm_diagnostics::{Diagnostic, Span};
+use fsm_diagnostics::{Diagnostic, LineColUnit, Span};
 use fsm_parser::ast::{AstNode, File as AstFile};
 use fsm_parser::import_resolver::{resolve_import, ImportError};
 use fsm_parser::{parse, ParseResult};
@@ -235,19 +235,21 @@ fn security_check_imports(
     out
 }
 
+/// 1-based `(line, col)` for byte offset `byte` in `src`, counting columns
+/// in **Unicode scalars** (a non-ASCII char is one column regardless of its
+/// byte length) — the `fsm check` `--json` / human-diagnostic contract,
+/// asserted by the CLI tests.
+///
+/// **DRIFT-2 convergence (Doc 00 §11.3x).** This was a hand-rolled
+/// `char_indices` loop duplicated against `fsm_analyzer`'s per-byte loop; it
+/// now delegates to the single shared core
+/// [`fsm_diagnostics::compute_line_col`] with [`LineColUnit::Scalar`], which
+/// is that exact loop generalised over the counting unit. The scalar,
+/// 1-based contract is **byte-identical** to the former loop for every
+/// offset including past-EOF (resilient-parser diagnostic spans can sit at
+/// or past `len`) — the break condition `i >= byte` and the per-char
+/// `col += 1` are preserved verbatim by the `Scalar` arm. The signature is
+/// kept so the two call sites in `emit_json_aggregate` are untouched.
 fn line_col(src: &str, byte: usize) -> (u32, u32) {
-    let mut line: u32 = 1;
-    let mut col: u32 = 1;
-    for (i, ch) in src.char_indices() {
-        if i >= byte {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
-        }
-    }
-    (line, col)
+    fsm_diagnostics::compute_line_col(src, byte, LineColUnit::Scalar)
 }
