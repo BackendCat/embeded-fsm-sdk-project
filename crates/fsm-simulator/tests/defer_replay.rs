@@ -141,7 +141,9 @@ fn print_job_is_held_while_maintenance_active_then_replayed_on_exit() {
         recs.len(),
         2,
         "MAINT_DONE plus the replayed PRINT_JOB = 2 steps; got: {:?}",
-        recs.iter().map(|r| (r.kind, r.config_after.clone())).collect::<Vec<_>>()
+        recs.iter()
+            .map(|r| (r.kind, r.config_after.clone()))
+            .collect::<Vec<_>>()
     );
 
     let maint = &recs[0];

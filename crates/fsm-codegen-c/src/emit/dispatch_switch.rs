@@ -17,6 +17,17 @@ pub fn emit_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
     let mut s = String::new();
     s.push_str(&emit_parent_table(ctx));
     s.push_str("\n");
+    // v1.1: the deferred-event apparatus is emitted right after the parent
+    // table (the defer-membership query walks it) and before the outer
+    // dispatch that calls into it. Gated on `machine_has_defer` so a
+    // machine with no `defer` declaration emits byte-identical code to
+    // before this wave (no dead helpers, no `-Werror=unused-function`).
+    if super::defer::machine_has_defer(ctx) {
+        s.push_str(&super::defer::emit_defer_table(ctx));
+        s.push_str("\n");
+        s.push_str(&super::defer::emit_defer_runtime(ctx));
+        s.push_str("\n");
+    }
     s.push_str(&emit_per_state_helpers(ctx));
     s.push_str("\n");
     s.push_str(&emit_outer_dispatch(ctx));
@@ -172,6 +183,59 @@ fn emit_one_case(t: &TransitionObject, ctx: &MachineEmitCtx<'_>, out: &mut Strin
 fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
     let prefix = ctx.type_prefix();
     let macro_prefix = ctx.macro_prefix();
+    let has_defer = super::defer::machine_has_defer(ctx);
+
+    // v1.1 deferral hook A: an unconsumed event whose id is deferred by the
+    // active configuration is HELD (not discarded). Checked AFTER the
+    // leaf-to-root search fails for every region, so an enabled transition
+    // always wins (transition-wins, UML 2.5.1 §14.2.3.9.1 / Doc 08 §10.1).
+    let defer_hold = if has_defer {
+        format!(
+            "    if (!fired_any && {prefix}_active_config_defers(m, ev->id)) {{\n\
+             \x20       {prefix}_defer_push(m, ev);\n\
+             \x20       return;\n\
+             \x20   }}\n",
+            prefix = prefix,
+        )
+    } else {
+        String::new()
+    };
+
+    // v1.1 deferral hook B: a fired transition may have exited a deferring
+    // state. Mirror the simulator's `run_step` ordering exactly:
+    //
+    //   sim step 2: execute transition
+    //   sim step 3: release_deferred  → released events prepended to queue
+    //   sim step 4: check_completion  → completion event push_front'd
+    //   (return; drain pops completion FIRST, then the released events)
+    //
+    // So in C: release the buffer to the queue front (Doc 08 §10.2), then
+    // run completion synchronously (the simulator processes completion
+    // before the released deferred events because completion is push_front'd
+    // *after* the deferred prepend), THEN drain the released events. Draining
+    // re-runs the same RTC machinery the simulator's `drain_internal_queue`
+    // does for prepended events (Doc 08 §10.3). A redispatched event that
+    // finds no consuming transition and is no longer deferred discards
+    // normally — identical to the simulator.
+    let release_call = if has_defer {
+        format!("        {prefix}_release_deferred(m);\n", prefix = prefix)
+    } else {
+        String::new()
+    };
+    let drain_released = if has_defer {
+        format!(
+            "        {{\n\
+             \x20           {prefix}_Event_t __rd;\n\
+             \x20           while ({prefix}_dequeue(m, &__rd)) {{\n\
+             \x20               {prefix}_dispatch(m, &__rd);\n\
+             \x20           }}\n\
+             \x20       }}\n",
+            prefix = prefix,
+        )
+    } else {
+        String::new()
+    };
+
     format!(
         r#"void {prefix}_dispatch({prefix}_t *m, const {prefix}_Event_t *ev) {{
     /* B-10 + B-11: per-region ancestor walk. For each active leaf in
@@ -180,12 +244,13 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
      * so a single event can drive every region in a parallel state in the
      * same RTC step.
      *
-     * Audit P0-5 option-b (2026-05-14): the prior `defer_mask` short-circuit
-     * lived here and silently dropped events — a documented "store and
-     * return" that never actually stored. The analyzer now rejects every
-     * `defer EVENT` with FSM-E0903 (Doc 02 G1 compliance), so this path is
-     * gone. The mask table is still emitted for inspection / future v1.1
-     * defer queue, but no runtime read survives. */
+     * v1.1 (2026-05-15): deferred-event runtime. The audit P0-5 option-b
+     * stopgap (analyzer rejected every `defer` with FSM-E0903) is retired;
+     * `defer` is now a real UML 2.5.1 §14.2.3.9.1 feature. Hook A holds an
+     * unconsumed-but-deferred event; hook B releases held events to the
+     * queue front on a configuration-changing transition and drains them.
+     * Both gated on `machine_has_defer`, so non-defer machines emit the
+     * exact code they did before. */
     bool fired_any = false;
     bool fired_in_region[{macro}_MAX_PARALLEL_REGIONS] = {{ false }};
     /* Snapshot active region count up front so transition side effects
@@ -211,14 +276,17 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
             s = {prefix}_parent_table[s];
         }}
     }}
-    if (fired_any) {{
-        {prefix}_handle_completion(m);
-    }}
+{defer_hold}    if (fired_any) {{
+{release_call}        {prefix}_handle_completion(m);
+{drain_released}    }}
     /* Otherwise: no ancestor handled the event — discard per Doc 08 §3.1. */
 }}
 "#,
         prefix = prefix,
         macro = macro_prefix,
+        defer_hold = defer_hold,
+        release_call = release_call,
+        drain_released = drain_released,
     )
 }
 

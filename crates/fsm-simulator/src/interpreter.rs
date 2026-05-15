@@ -244,8 +244,10 @@ impl Interpreter {
         // no trace record AND let `defer` shadow a consuming transition.
         // The event now enters the queue normally; `run_step` holds it in
         // `defer_set` only if no transition consumes it (Doc 08 §10).
-        rt.queue
-            .push_back(QueuedEvent::new(EventKind::Dispatched { event_id }, payload))?;
+        rt.queue.push_back(QueuedEvent::new(
+            EventKind::Dispatched { event_id },
+            payload,
+        ))?;
         self.drain_internal_queue()
     }
 
