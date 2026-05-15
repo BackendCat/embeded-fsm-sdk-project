@@ -81,33 +81,33 @@ use crate::refs::{collect_decl_name_tokens, resolved_entity_kind, EntityKind};
 /// `tokenTypes` array — Doc 14 §2). Named so the classifier never hard-codes
 /// a bare integer and the §5.4 oracle is self-documenting.
 mod ty {
-    pub const NAMESPACE: u32 = 0; // Machine names
-    pub const TYPE: u32 = 1; // State names (decl + ref)
-    pub const ENUM: u32 = 2; // Event names
-    pub const FUNCTION: u32 = 3; // Extern function names
-    pub const VARIABLE: u32 = 4; // ctx.X / payload.X fields
-    pub const KEYWORD: u32 = 5; // all FSM-Lang keywords
-    pub const STRING: u32 = 6; // stable-ID strings, string literals
-    pub const NUMBER: u32 = 7; // integer / float literals
-    pub const OPERATOR: u32 = 8; // -> ~> : = [ ] && || comparison …
-    pub const COMMENT: u32 = 9; // line / block / doc comments
-    pub const DECORATOR: u32 = 10; // @id(...) annotation
+    pub(crate) const NAMESPACE: u32 = 0; // Machine names
+    pub(crate) const TYPE: u32 = 1; // State names (decl + ref)
+    pub(crate) const ENUM: u32 = 2; // Event names
+    pub(crate) const FUNCTION: u32 = 3; // Extern function names
+    pub(crate) const VARIABLE: u32 = 4; // ctx.X / payload.X fields
+    pub(crate) const KEYWORD: u32 = 5; // all FSM-Lang keywords
+    pub(crate) const STRING: u32 = 6; // stable-ID strings, string literals
+    pub(crate) const NUMBER: u32 = 7; // integer / float literals
+    pub(crate) const OPERATOR: u32 = 8; // -> ~> : = [ ] && || comparison …
+    pub(crate) const COMMENT: u32 = 9; // line / block / doc comments
+    pub(crate) const DECORATOR: u32 = 10; // @id(...) annotation
 }
 
 /// Doc 14 §10 token-modifier legend indices. The encoded `tokenModifiers`
 /// field is a bitset: modifier `i` set ⇒ bit `1 << i`.
 mod md {
     /// Doc 14 §10 modifier 0 — token is the declaration site, not a ref.
-    pub const DECLARATION: u32 = 0;
+    pub(crate) const DECLARATION: u32 = 0;
     /// Doc 14 §10 modifier 1 — payload fields (read-only in action blocks).
-    pub const READONLY: u32 = 1;
+    pub(crate) const READONLY: u32 = 1;
     // Modifier 2 `deprecated` — Doc 14 §10 says "reserved for future use"
     // (no in-tree source: no `SymbolTable`/IR field records a deprecated
     // stable ID). Declared in the legend (the spec advertises it) but never
     // emitted — emitting a modifier with no analysis backing would be a
     // fabrication. Flagged in Doc 00 §11.37, not silently dropped.
     /// Doc 14 §10 modifier 3 — enum-variant names in payload-type context.
-    pub const STATIC: u32 = 3;
+    pub(crate) const STATIC: u32 = 3;
 }
 
 /// The semantic-tokens legend the server advertises in `initialize`

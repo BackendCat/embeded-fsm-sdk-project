@@ -8,6 +8,11 @@ authors.workspace = true
 repository.workspace = true
 description = "FSM Studio semantic analyzer — symbol table, type check, determinism, AST→IR lowering"
 
+# Inherits the workspace lint policy (root `[workspace.lints.rust]`):
+# `unreachable_pub = "warn"`. Doc 00 §11.4x (the §11.31 deferral closed).
+[lints]
+workspace = true
+
 [dependencies]
 # Analyzer emits `Diagnostic` values for every semantic / determinism check
 # and consumes the `Span` / `DiagnosticCode` types from the foundation crate.

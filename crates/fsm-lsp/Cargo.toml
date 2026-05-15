@@ -8,6 +8,11 @@ authors.workspace = true
 repository.workspace = true
 description = "FSM Studio Language Server (LSP) — the `fsm-lang-server` binary"
 
+# Inherits the workspace lint policy (root `[workspace.lints.rust]`):
+# `unreachable_pub = "warn"`. Doc 00 §11.4x (the §11.31 deferral closed).
+[lints]
+workspace = true
+
 [lib]
 name = "fsm_lsp"
 path = "src/lib.rs"

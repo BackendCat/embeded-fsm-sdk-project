@@ -4,6 +4,11 @@
 //! `SourceLocation` shells.
 
 #![allow(dead_code)]
+// Same idiom-based reason as the `dead_code` allow above: `tests/common/mod.rs`
+// is recompiled per test binary, so the workspace `unreachable_pub` lint (Doc 00
+// §11.4x) flags shared helpers as unreachable per-binary though they are a real
+// cross-test API. One module attribute, not per-item noise.
+#![allow(unreachable_pub)]
 
 use fsm_diagnostics::{SourceLocation, Span};
 use fsm_ir::{
