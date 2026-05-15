@@ -41,6 +41,16 @@ For a machine named `Motor`, the compiler generates exactly four files:
 The user includes `Motor.h`, provides the HAL (`fsm_hal.h` — Doc 16), and
 implements the functions declared in `Motor_impl.h`.
 
+> _Updated 2026-05-15 (OPAQUE-BUG-1 fix): an `extern` declared with an
+> `opaque "C_type"` parameter or return type (Doc 04 §2.6 / §3) emits that
+> verbatim C type unchanged into the `Motor_impl.h` prototype, e.g.
+> `extern dev_write(opaque "struct dev *" h, u32 reg)` →
+> `void dev_write(struct dev * h, uint32_t reg);`. A guard/action call
+> passing an `opaque`-typed context field (`dev_write(ctx.dev, …)`) threads
+> the handle through verbatim. Previously the analyzer silently dropped the
+> opaque param/return before codegen — a P0-1-class silent-data-loss on a
+> documented construct, now fixed at the AST→IR boundary._
+
 > _Updated 2026-05-14: every generated `.c` and `.h` carries an SPDX license
 > header (`SPDX-License-Identifier: MIT` by default; user-overridable via
 > `fsm generate --license <SPDX>`) per Doc 00 §10.4. See Doc 18 for the

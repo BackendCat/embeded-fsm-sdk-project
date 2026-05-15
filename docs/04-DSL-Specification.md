@@ -226,12 +226,19 @@ param       = type , identifier ;
 - `pure extern` — usable in guard expressions; MUST be side-effect free.
 - `extern` without `pure` — usable in action lists only.
 - Return type omitted → `void`.
+- A `param` (and the return `type`) may be any `type`, **including
+  `opaque "C_type"`** — the canonical way to thread a C pointer / handle /
+  struct from a guard or action into a HAL function (a core embedded use
+  case; the argument is typically an `opaque`-typed context field). The
+  verbatim C type is emitted unchanged into the generated prototype.
 
 ```fsm
 pure extern can_unlock   (ctx) : bool
 pure extern at_max_retries(ctx) : bool
      extern lock_motor   ()
      extern set_speed    (u16 rpm)
+     extern dev_write    (opaque "struct dev *" h, u32 reg)
+pure extern dev_is_ready (opaque "struct dev *" h) : bool
 ```
 
 The compiler generates the corresponding C declaration in `M_impl.h`:
@@ -241,6 +248,8 @@ bool   M_can_unlock(const M_ctx_t *ctx);
 bool   M_at_max_retries(const M_ctx_t *ctx);
 void   M_lock_motor(void);
 void   M_set_speed(uint16_t rpm);
+void   dev_write(struct dev * h, uint32_t reg);
+bool   dev_is_ready(struct dev * h);
 ```
 
 ---

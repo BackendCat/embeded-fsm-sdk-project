@@ -21,7 +21,7 @@ use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use super::ids::IdMinter;
 use super::loc::LocCtx;
-use super::machine::{lower_literal, lower_type_ref};
+use super::machine::{lower_literal, lower_type_ref_node};
 
 pub(super) fn lower_action_block(
     ids: &mut IdMinter,
@@ -359,11 +359,10 @@ fn lower_cast_expr(ids: &mut IdMinter, locs: &LocCtx, node: &SyntaxNode) -> IrEx
         .find_map(ast::Expr::cast)
         .map(|e| lower_action_expr(ids, locs, &e))
         .unwrap_or_else(literal_false_expr);
-    let target_type = node
-        .children()
-        .find_map(ast::TypeRef::cast)
-        .and_then(|t| lower_type_ref(Some(&t)))
-        .unwrap_or(Type::Primitive { name: "i64".into() });
+    // OPAQUE-BUG-1 (same class): resolve from the CAST_EXPR node so a
+    // `(opaque "T *") x` cast carries the verbatim C type instead of
+    // silently falling back to `i64`.
+    let target_type = lower_type_ref_node(node).unwrap_or(Type::Primitive { name: "i64".into() });
     IrExpr::Cast(CastExpr {
         operand: Box::new(operand),
         target_type,

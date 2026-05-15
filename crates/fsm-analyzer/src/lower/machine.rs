@@ -241,7 +241,9 @@ fn lower_machine_inner<M: MachineLike>(
 
 fn lower_field(ids: &mut IdMinter, locs: &LocCtx, f: &ast::FieldDecl) -> Option<ContextField> {
     let name = f.name()?;
-    let ty = lower_type_ref(f.ty().as_ref())?;
+    // OPAQUE-BUG-1: resolve from the FIELD_DECL node, not `f.ty()` (which
+    // only casts to TYPE_REF and cannot see an OPAQUE_TYPE_REF sibling).
+    let ty = lower_type_ref_node(f.syntax())?;
     let default = f
         .default()
         .and_then(|d| lower_literal(ids, locs, d.syntax()));
@@ -260,7 +262,7 @@ fn lower_event(ids: &mut IdMinter, locs: &LocCtx, e: &ast::EventDecl) -> Option<
         pl.fields()
             .filter_map(|f| {
                 let n = f.name()?;
-                let ty = lower_type_ref(f.ty().as_ref())?;
+                let ty = lower_type_ref_node(f.syntax())?;
                 Some(Param {
                     name: n,
                     ty,
@@ -288,7 +290,9 @@ fn lower_extern(ids: &mut IdMinter, locs: &LocCtx, e: &ast::ExternDecl) -> Optio
         pl.params()
             .filter_map(|p| {
                 let n = p.name()?;
-                let ty = lower_type_ref(p.ty().as_ref())?;
+                // OPAQUE-BUG-1: resolve from the PARAM node so an
+                // `opaque "T *"` parameter is not silently dropped.
+                let ty = lower_type_ref_node(p.syntax())?;
                 Some(Param {
                     name: n,
                     ty,
@@ -300,7 +304,9 @@ fn lower_extern(ids: &mut IdMinter, locs: &LocCtx, e: &ast::ExternDecl) -> Optio
     } else {
         Vec::new()
     };
-    let return_type = e.return_type().and_then(|t| lower_type_ref(Some(&t)));
+    // OPAQUE-BUG-1: resolve the return type from the EXTERN_DECL node so an
+    // `: opaque "T"` return is carried through instead of silently dropped.
+    let return_type = lower_type_ref_node(e.syntax());
     Some(ExternObject {
         id: format!("ex-{}-{name}", ids.machine_name),
         stable_id: format!("M:{}:extern:{name}", ids.machine_name),
@@ -441,12 +447,29 @@ fn lower_features() -> Vec<IrFeatureDecl> {
 
 // -- types ------------------------------------------------------------------
 
-pub(super) fn lower_type_ref(ty: Option<&ast::TypeRef>) -> Option<Type> {
-    let ty = ty?;
-    // Type variations: a primitive keyword token, an opaque-string, or an
-    // identifier (enum or named type).
-    let tok = ty
-        .syntax()
+/// Lower the type-reference *child* of `parent` (a PARAM, FIELD_DECL,
+/// EXTERN_DECL, EVENT payload field, or CAST_EXPR) to an IR [`Type`].
+///
+/// OPAQUE-BUG-1 fix: `opaque "C_type"` parses into a distinct
+/// `OPAQUE_TYPE_REF` node, *not* a `TYPE_REF`. The typed accessors
+/// (`Param::ty`, `FieldDecl::ty`, `ExternDecl::return_type`) cast only to
+/// `ast::TypeRef`, so they returned `None` for an opaque type and the
+/// caller's `?`/`filter_map` silently dropped the whole param/field/return
+/// — a documented Doc 04 construct vanishing with no diagnostic (P0-1-class
+/// silent data loss). Resolving from the *parent* node lets us see either
+/// type-ref kind, so opaque types now round-trip into the IR's existing
+/// [`Type::Opaque`] variant (already emitted verbatim by codegen).
+pub(super) fn lower_type_ref_node(parent: &SyntaxNode) -> Option<Type> {
+    let child = parent
+        .children()
+        .find(|n| matches!(n.kind(), SyntaxKind::TYPE_REF | SyntaxKind::OPAQUE_TYPE_REF))?;
+    if child.kind() == SyntaxKind::OPAQUE_TYPE_REF {
+        // The grammar already validated the body against the G-02 charset
+        // at parse time; emit it verbatim.
+        let c_type = ast::OpaqueTypeRef::cast(child)?.c_type()?;
+        return Some(Type::Opaque { c_type });
+    }
+    let tok = child
         .children_with_tokens()
         .filter_map(|el| el.into_token())
         .next()?;

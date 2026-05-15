@@ -158,6 +158,21 @@ impl ExternDecl {
     }
 }
 
+impl OpaqueTypeRef {
+    /// The verbatim C type string between the quotes of `opaque "C_type"`,
+    /// with the surrounding double quotes stripped. The grammar already
+    /// validated the body against the G-02 charset at parse time, so the
+    /// returned string is safe to emit verbatim into generated C.
+    pub fn c_type(&self) -> Option<String> {
+        let token = self
+            .0
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .find(|t| t.kind() == SyntaxKind::StringLiteral)?;
+        Some(strip_quotes(token.text()).to_string())
+    }
+}
+
 impl ParamList {
     pub fn params(&self) -> AstChildren<Param> {
         children(&self.0)
