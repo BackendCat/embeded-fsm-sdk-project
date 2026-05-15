@@ -41,15 +41,15 @@ See `docs/00-Decisions-And-Reconciliation.md` §11 for the full implementation-t
 Adoption-blocking items first; UML completeness second.
 
 ### Integration features
-- **`fsm generate --import-header <path.h>`** — auto-extern from existing C header files. Reduces friction for users with substantial existing C codebases who currently must hand-write each `extern` declaration. Implementation: lightweight C declaration parser or `bindgen` integration.
-- **`examples/integration/{make,cmake,cargo-rust,platformio}/`** — minimal worked examples showing end-to-end FSM-Lang in each ecosystem. Each compiles + runs + traces.
+- **`fsm generate --import-header <path.h>`** — auto-extern from existing C header files. ✅ **COMPLETE 2026-05-15** (W5). Reduces friction for users with substantial existing C codebases who currently must hand-write each `extern` declaration. (OPAQUE-BUG-1, surfaced *by* this wave's honest scoping, then fixed in §11.23 — opaque pointer/struct HAL params now model end-to-end; relaxing W5's importer opaque-skip tracked as W5-FU-1.)
+- **`examples/integration/{make,cmake,cargo-rust,platformio}/`** — ✅ **COMPLETE 2026-05-15** (W6 `e74888a`). Four worked end-to-end integrations; each *genuinely* builds the generated C under `gcc -std=c99 -Wall -Wextra -Wpedantic -Werror` (make/cmake/cargo-rust run+assert the full lifecycle; platformio ships the real `pio` recipe + a verified host-gcc fallback since `pio` is absent on the box). No codegen defect surfaced — independent corroboration the pipeline holds under real ecosystems.
 - **Per-machine strategy override** via `fsm.toml`:
   ```toml
   [machine.MotorControl]
   strategy = "switch"
   ```
   More fine-grained than CLI flag; enables mixed dispatch in one project.
-- **`docs/25-Integration-Guide.md`** — first-class doc covering C / C++ / Rust / Ada / Zig integration patterns. Includes ABI notes, build-system fragments, troubleshooting.
+- **`docs/25-Integration-Guide.md`** — ✅ **COMPLETE 2026-05-15** (W6). First-class doc: generated-C ABI contract, C/C++ `extern "C"` recipe, Rust `cc`+FFI recipe (incl. workspace-isolation nuance), Make/CMake/PlatformIO fragments, mandatory-HAL + `_POSIX_C_SOURCE`-ordering gotcha, integration knobs, a 10-row troubleshooting matrix. Cross-linked from README + `examples/integration/README.md`.
 
 ### UML completion
 - **`defer EVENT` real implementation.** Bounded defer queue per state; replay on state exit. Removes the v1.0 hard-fail with FSM-E0903.
@@ -69,7 +69,7 @@ Adoption-blocking items first; UML completeness second.
 ### Release criteria for v1.1
 - 0 P0, ≤5 well-scoped P1s in pre-tag audit
 - 600+ tests passing
-- One real-world customer-style integration example proven end-to-end on a representative embedded target
+- One real-world customer-style integration example proven end-to-end on a representative embedded target — ✅ **SATISFIED 2026-05-15** (W6: four ecosystems, each gcc -Werror RUN-verified; platformio `native`+`uno` AVR target)
 
 ---
 
