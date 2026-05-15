@@ -187,6 +187,24 @@ fn emit_trans_table(ctx: &MachineEmitCtx<'_>, rows: &[EmittedTransRow]) -> Strin
         "static const {prefix}_TransRow_t {prefix}_trans_table[] = {{\n",
         prefix = prefix,
     ));
+    if rows.is_empty() {
+        // TD-BUG-1: a valid zero-transition machine would otherwise emit
+        // `static const T arr[] = {};` — an empty initializer + zero-size
+        // array, both rejected by `gcc -std=c99 -Wpedantic -Werror` ("ISO
+        // C forbids empty initializer braces", "zero or negative size
+        // array"), and the `sizeof/sizeof`-derived TABLE_SIZE would make
+        // the `select_for_region` loop bound `unsigned < 0`
+        // (`-Werror=type-limits`). Emit one all-zero sentinel row whose
+        // `source` is the out-of-range `_COUNT` state id. The array is then
+        // a well-formed non-empty C99 array (TABLE_SIZE == 1, no
+        // type-limits), and because no active leaf is ever `>= _COUNT` the
+        // `row->source != s` test always continues — the sentinel can never
+        // be selected, so dispatch behaviour is identical to "no table".
+        s.push_str(&format!(
+            "    /* TD-BUG-1 sentinel: unmatchable (source == _COUNT). */\n    {{ {macro}_STATE__COUNT, 0, {macro}_STATE__COUNT, 0, 0, 0 }},\n",
+            macro = macro_prefix,
+        ));
+    }
     for row in rows {
         let source_c = ctx.index.get(row.source).c_name.clone();
         let target_c = ctx.index.get(row.target).c_name.clone();
@@ -222,6 +240,14 @@ fn emit_execute_transition(ctx: &MachineEmitCtx<'_>, rows: &[EmittedTransRow]) -
         prefix = prefix,
     ));
     s.push_str("    (void)ev;\n");
+    // TD-BUG-1: with zero transitions the switch below has only `default:
+    // break;`, so `m` is never read (a transition body is the only thing
+    // that touches `m`). `row` IS still used (the switch discriminant
+    // `row->row_idx`), so it is deliberately NOT cast. When rows exist a
+    // transition body references `m`, so the cast must be conditional.
+    if rows.is_empty() {
+        s.push_str("    (void)m;\n");
+    }
     s.push_str("    switch (row->row_idx) {\n");
     for row in rows {
         s.push_str(&format!("    case {}: {{\n", row.row_idx));
