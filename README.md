@@ -96,6 +96,7 @@ build commands, repository layout, and role-based reading guides.
 | [15 — Conformance Test Suite](docs/15-Conformance-Test-Suite.md) | Test categories, trace format, coverage requirements, CI runner |
 | [18 — CLI Specification](docs/18-CLI-Specification.md) | All `fsm` subcommands, flags, exit codes, `fsm.toml` config |
 | [19 — Formatter Specification](docs/19-Formatter-Specification.md) | Canonical formatting rules, alignment algorithm, idempotency |
+| [25 — Integration Guide](docs/25-Integration-Guide.md) | Generated-C ABI, C/C++/Rust recipes, Make/CMake/PlatformIO fragments, troubleshooting; worked examples in [`examples/integration/`](examples/integration/) |
 
 ### Editor Integration
 

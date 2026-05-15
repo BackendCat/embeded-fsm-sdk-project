@@ -1,0 +1,23 @@
+# Standalone crate — deliberately NOT a member of the FSM Studio
+# workspace. The empty `[workspace]` table below makes this its own
+# workspace root so `cargo build` here does not get absorbed by the
+# parent workspace (cargo walks up the directory tree for a workspace
+# root until it finds one). A user copying this directory anywhere gets a
+# self-contained, buildable crate.
+[workspace]
+
+[package]
+name = "fsm-cargo-integration"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "fsm-cargo-integration"
+path = "src/main.rs"
+
+[build-dependencies]
+# Compiles the FSM-generated C (and the hand-written HAL + extern impls)
+# into a static lib that this crate links. Standard build.rs + cc-crate
+# FFI pattern.
+cc = "1.2"

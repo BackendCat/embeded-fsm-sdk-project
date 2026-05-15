@@ -1,0 +1,6 @@
+# A standalone copy of this crate builds into a local target/. (Inside
+# this repo's worktree it instead routes to the shared CARGO_TARGET_DIR
+# from the repo .cargo/config.toml — see that file's WHY note.) Cargo.lock
+# IS committed: this is a binary application crate, so a pinned lockfile
+# gives reproducible builds.
+/target/

@@ -1,0 +1,4 @@
+# PlatformIO build tree + the `fsm generate` output (recreated by the
+# pre-build script on every `pio run`).
+.pio/
+src/gen/

@@ -1,0 +1,3 @@
+# CMake build tree (incl. build/gen/ from `fsm generate`) — recreated by
+# `cmake -S . -B build && cmake --build build`.
+/build/
