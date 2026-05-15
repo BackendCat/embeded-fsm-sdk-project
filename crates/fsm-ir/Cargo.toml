@@ -17,10 +17,26 @@ fsm-diagnostics = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# Optional: only pulled in when the `schema-validate` feature is on, which
+# powers the analyzer-boundary IR-invariant gate (PD-3). Release builds that
+# don't want the dependency at all can `--no-default-features`; in any case
+# the gate call itself is `#[cfg(debug_assertions)]` so an optimized build
+# pays zero runtime cost regardless of feature selection.
+jsonschema = { version = "0.17", default-features = false, optional = true }
+
+[features]
+# On by default so `cargo test`/dev builds wire the IR-schema gate without
+# extra flags. The expensive part (compiling the schema + validating) is
+# additionally `#[cfg(debug_assertions)]`-gated in the analyzer, so a
+# `--release` build is zero-cost even with the feature enabled. A consumer
+# that wants the jsonschema dependency gone entirely builds with
+# `--no-default-features`.
+default = ["schema-validate"]
+schema-validate = ["dep:jsonschema"]
 
 [dev-dependencies]
-# Used only by tests/schema_validation.rs to validate that the JSON Schema
-# under `schema/ir/1.0.0/model.json` accepts representative IR documents
-# and rejects malformed ones. Pinned per task brief.
-jsonschema = { version = "0.17", default-features = false }
+# tests/schema_validation.rs validates that the JSON Schema under
+# `schema/ir/1.0.0/model.json` accepts representative IR documents and
+# rejects malformed ones. The dep is declared above (optional, behind the
+# default `schema-validate` feature) so tests get it via the default set.
 serde_json = { workspace = true }

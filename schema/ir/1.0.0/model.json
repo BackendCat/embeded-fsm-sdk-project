@@ -60,12 +60,12 @@
 
     "DiagnosticObject": {
       "title": "DiagnosticObject",
-      "description": "Diagnostic embedded in the IR (Doc 09 §14). Shape comes from fsm-diagnostics so the code catalogue has one source of truth.",
+      "description": "Diagnostic embedded in the IR (Doc 09 §14). Shape comes from fsm-diagnostics so the code catalogue has one source of truth. `DiagnosticObject` is a `#[serde(transparent)]` newtype over `fsm_diagnostics::Diagnostic`, so the wire form is the inner struct verbatim. `code` is the bare `DiagnosticCode` variant (`\"E0101\"`, not `\"FSM-E0101\"` — the `FSM-` prefix is presentation-only, added by `Display`). `severity` is the `Severity` enum with NO `rename_all`, so it serializes PascalCase (`\"Error\"`, not `\"error\"`).",
       "type": "object",
       "required": ["code", "severity", "message", "span"],
       "properties": {
-        "code":    { "type": "string" },
-        "severity": { "type": "string", "enum": ["error", "warning", "info", "hint"] },
+        "code":    { "type": "string", "description": "Bare DiagnosticCode variant, e.g. \"E0101\" / \"W0300\" / \"I0001\" / \"H0004\"." },
+        "severity": { "type": "string", "enum": ["Error", "Warning", "Info", "Hint"] },
         "message": { "type": "string" },
         "span":    { "$ref": "#/$defs/Span" },
         "related": {
@@ -203,23 +203,17 @@
 
     "GuardOperand": {
       "title": "GuardOperand",
-      "description": "RHS of a field comparison: literal or another field reference (Doc 04 §8.5).",
+      "description": "RHS of a field comparison: literal or another field reference (Doc 04 §8.5). Serde representation: the `Literal` arm is the externally-tagged Literal with an extra `kind:\"literal\"` discriminator; the `FieldRef` arm collapses to the inner `FieldRef` shape (`kind` is `ctx`/`payload`, NOT `field_ref`) because both the outer GuardOperand tag and the inner FieldRef tag serialize to the same `kind` key and the inner one wins on parse. The schema accepts exactly what `serde_json` emits for `fsm_ir::GuardOperand` (verified against model.rs).",
       "oneOf": [
         {
           "type": "object",
-          "required": ["kind"],
+          "required": ["kind", "literalKind"],
           "properties": {
             "kind": { "const": "literal" }
           },
           "allOf": [{ "$ref": "#/$defs/Literal" }]
         },
-        {
-          "type": "object",
-          "required": ["kind"],
-          "properties": {
-            "kind": { "const": "field_ref" }
-          }
-        }
+        { "$ref": "#/$defs/FieldRef" }
       ]
     },
 
@@ -397,29 +391,29 @@
         },
         {
           "type": "object",
-          "required": ["kind", "eventId", "args"],
+          "required": ["kind", "event_id", "args"],
           "properties": {
-            "kind":    { "const": "raise" },
-            "eventId": { "type": "string" },
-            "args":    { "type": "array", "items": { "$ref": "#/$defs/Expr" } }
+            "kind":     { "const": "raise" },
+            "event_id": { "type": "string", "description": "snake_case: `Statement` is an externally-tagged enum (`#[serde(tag=\"kind\", rename_all=\"snake_case\")]`) — `rename_all` renames the variant tag, NOT struct-variant fields, so the Rust field `event_id` serializes verbatim." },
+            "args":     { "type": "array", "items": { "$ref": "#/$defs/Expr" } }
           }
         },
         {
           "type": "object",
-          "required": ["kind", "eventId", "args", "machineId"],
+          "required": ["kind", "event_id", "args", "machine_id"],
           "properties": {
-            "kind":      { "const": "send" },
-            "eventId":   { "type": "string" },
-            "args":      { "type": "array", "items": { "$ref": "#/$defs/Expr" } },
-            "machineId": { "type": "string" }
+            "kind":       { "const": "send" },
+            "event_id":   { "type": "string" },
+            "args":       { "type": "array", "items": { "$ref": "#/$defs/Expr" } },
+            "machine_id": { "type": "string" }
           }
         },
         {
           "type": "object",
-          "required": ["kind", "eventId"],
+          "required": ["kind", "event_id"],
           "properties": {
-            "kind":    { "const": "defer" },
-            "eventId": { "type": "string" }
+            "kind":     { "const": "defer" },
+            "event_id": { "type": "string" }
           }
         }
       ]
@@ -427,7 +421,7 @@
 
     "Trigger": {
       "title": "Trigger",
-      "description": "Transition trigger (Doc 09 §6 TriggerObject).",
+      "description": "Transition trigger (Doc 09 §6 TriggerObject). `Trigger` is an externally-tagged enum (`#[serde(tag=\"kind\", rename_all=\"camelCase\")]`): `rename_all` renames variant tags, NOT struct-variant fields. Only fields with an explicit `#[serde(rename=...)]` are camelCased — hence `eventId` (renamed) but `payload_binding`, `duration_ms`, `period_ms`, `timer_id` keep their snake_case Rust names. `timer_id` (audit P0-4, post-schema-authoring) is `skip_serializing_if String::is_empty`, so it is optional in the wire form.",
       "oneOf": [
         {
           "type": "object",
@@ -435,23 +429,25 @@
           "properties": {
             "kind":            { "const": "event" },
             "eventId":         { "type": "string" },
-            "payloadBinding": { "type": "string" }
+            "payload_binding": { "type": "string" }
           }
         },
         {
           "type": "object",
-          "required": ["kind", "durationMs"],
+          "required": ["kind", "duration_ms"],
           "properties": {
-            "kind":       { "const": "after" },
-            "durationMs": { "type": "integer", "minimum": 0 }
+            "kind":        { "const": "after" },
+            "duration_ms": { "type": "integer", "minimum": 0 },
+            "timer_id":    { "type": "string", "description": "IR TimerObject.id this transition is bound to (audit P0-4). Omitted when empty." }
           }
         },
         {
           "type": "object",
-          "required": ["kind", "periodMs"],
+          "required": ["kind", "period_ms"],
           "properties": {
-            "kind":     { "const": "every" },
-            "periodMs": { "type": "integer", "minimum": 0 }
+            "kind":      { "const": "every" },
+            "period_ms": { "type": "integer", "minimum": 0 },
+            "timer_id":  { "type": "string", "description": "IR TimerObject.id this transition is bound to (audit P0-4). Omitted when empty." }
           }
         },
         {

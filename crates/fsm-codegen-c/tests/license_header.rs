@@ -1,5 +1,15 @@
 //! License-header test — Doc 00 §10.4. Each generated file MUST carry the
 //! configured SPDX identifier verbatim.
+//!
+//! ## Test classification (v1.1-W0 / SUBAGENT_CONVENTIONS §5.4, PD-2)
+//!
+//! These `.contains()` are a **legitimate structural invariant**, not a
+//! P0-1-class behaviour proxy. "Every emitted file carries the exact SPDX
+//! string `SPDX-License-Identifier: <id>` and the previous license does
+//! NOT survive a license change" is a verbatim file-content contract
+//! (Doc 00 §10.4). It has no executable behaviour to observe — a license
+//! header is a comment; asserting its presence/absence in the generated
+//! text IS the correct and only meaningful check. Not converted.
 
 #[path = "common/mod.rs"]
 mod common;

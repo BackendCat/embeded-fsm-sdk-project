@@ -1,6 +1,31 @@
 //! Golden test for the 3-state Motor IR — asserts the full set of files is
 //! emitted with the expected paths + roles. Snapshot bodies are stored
 //! under `tests/snapshots/`.
+//!
+//! ## Test classification (v1.1-W0 / SUBAGENT_CONVENTIONS §5.4, PD-2)
+//!
+//! Every `.contains()` here is a **legitimate structural-invariant /
+//! secondary check**, NOT a P0-1-class behaviour proxy, on two grounds:
+//!
+//!  1. The Motor IR's *behaviour* is already proven end-to-end by
+//!     `gcc_compile.rs::motor_compiles_with_gcc_werror` — it emits the
+//!     same `common::motor_ir()`, compiles with
+//!     `gcc -std=c99 -Wall -Wextra -Wpedantic -Werror`, RUNS it, and
+//!     asserts the state machine transitions (IDLE→RUNNING on START,
+//!     →IDLE on STOP, clock advance). So Motor is behaviourally covered;
+//!     §5.4's last paragraph explicitly permits symbol-presence *alongside*
+//!     a real behavioural test.
+//!  2. The specific surface asserted here — the file SET + `FileRole`s
+//!     (`*_emits_five_files`, `*_file_roles_match_path`) and the public
+//!     API symbol set (`Motor_init`/`_dispatch`/`_post`/… per Doc 11 §3,
+//!     SPDX headers per Doc 00 §10.4) — IS the stable codegen contract.
+//!     "These exact files with these roles and these public symbols are
+//!     emitted" is a structural invariant by definition; presence is the
+//!     correct tool, and a precise "Motor.h lost Motor_dispatch" failure
+//!     localizes an API regression faster than a runtime exit code.
+//!
+//! These are intentionally NOT converted to gcc-RUN tests: doing so would
+//! duplicate `gcc_compile.rs` without adding behavioural signal.
 
 #[path = "common/mod.rs"]
 mod common;

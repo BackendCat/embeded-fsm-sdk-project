@@ -69,12 +69,64 @@ pub fn analyze_with_source(parse_result: &ParseResult, file: &str, src: &str) ->
     diagnostics.extend(check_diags);
 
     let ir = lower_file(&ast, &st, file, src, &diagnostics);
+    debug_assert_ir_schema(&ir);
     AnalysisResult {
         ir: Some(ir),
         diagnostics,
         symbol_table: st,
     }
 }
+
+/// Internal-invariant gate (PD-3): the IR the analyzer just produced MUST
+/// satisfy the canonical wire-format schema (`schema/ir/1.0.0/model.json`).
+///
+/// A violation is a **lowering bug**, never user error — the analyzer
+/// already rejected malformed *source* with diagnostics; reaching here with
+/// schema-invalid *IR* means a producer defect. We `debug_assert!` with the
+/// concrete schema error path so a malformed-IR bug fails loudly at the
+/// analyzer boundary instead of corrupting codegen / the simulator three
+/// crates downstream — the exact failure mode of the Wave-1.9
+/// `region.initial` contract bug.
+///
+/// `#[cfg(debug_assertions)]`: dev + `cargo test` builds enforce it; an
+/// optimized `--release` build compiles this to nothing (zero cost), the
+/// same discipline `debug_assert!` itself uses. Feature-gated on
+/// `schema-validate` so a `--no-default-features` build drops the
+/// `jsonschema` dependency.
+#[cfg(all(debug_assertions, feature = "schema-validate"))]
+fn debug_assert_ir_schema(ir: &Ir) {
+    if let Err(errors) = fsm_ir::validate_ir_against_schema(ir) {
+        // Cap the rendered list so a structurally-broken IR doesn't dump
+        // thousands of lines; the first few violations localize the bug.
+        let shown: Vec<&String> = errors.iter().take(8).collect();
+        let extra = errors.len().saturating_sub(shown.len());
+        let suffix = if extra > 0 {
+            format!("\n  … and {extra} more violation(s)")
+        } else {
+            String::new()
+        };
+        debug_assert!(
+            false,
+            "INTERNAL: analyzer produced IR that violates \
+             schema/ir/1.0.0/model.json — this is a lowering bug, not user \
+             error. Schema violations:\n  {}{}",
+            shown
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  "),
+            suffix,
+        );
+    }
+}
+
+/// Release / `--no-default-features` no-op counterpart — see the
+/// `cfg(debug_assertions)` variant above for the rationale. Kept as a
+/// separate item (rather than an inline `cfg!`) so the gate adds literally
+/// zero instructions to an optimized build.
+#[cfg(not(all(debug_assertions, feature = "schema-validate")))]
+#[inline(always)]
+fn debug_assert_ir_schema(_ir: &Ir) {}
 
 // ---------------------------------------------------------------------------
 // Top-level lowering

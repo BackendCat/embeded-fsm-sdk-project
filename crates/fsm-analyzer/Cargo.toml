@@ -15,8 +15,19 @@ fsm-diagnostics = { workspace = true }
 # Consumed: the typed AST view (`fsm_parser::ast::*`) plus `ParseResult`.
 fsm-parser = { path = "../fsm-parser" }
 # Produced: the canonical IR document.
-fsm-ir = { path = "../fsm-ir" }
+fsm-ir = { path = "../fsm-ir", default-features = false }
 thiserror = { workspace = true }
+
+[features]
+# Forwards to `fsm-ir/schema-validate`, which compiles the IR-invariant
+# gate (PD-3). On by default so dev/test builds validate the IR the
+# analyzer emits against `schema/ir/1.0.0/model.json` at the lowering
+# boundary. The gate *call* in `lower.rs` is additionally
+# `#[cfg(debug_assertions)]`, so `cargo build --release` is zero runtime
+# cost even with the feature on. `--no-default-features` drops the gate and
+# the `jsonschema` dependency entirely.
+default = ["schema-validate"]
+schema-validate = ["fsm-ir/schema-validate"]
 
 [dev-dependencies]
 insta = { workspace = true }

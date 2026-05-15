@@ -1,6 +1,16 @@
 //! P0-4 regression — a `after N ms -> X` timer MUST be armed when the
 //! owning state is entered (Doc 08 §13.1), not only at `Motor_init`.
 //!
+//! ## Test classification (v1.1-W0 / SUBAGENT_CONVENTIONS §5.4, PD-2)
+//!
+//! The whole test IS the §5.4 behavioural guard: it emits the IR,
+//! compiles with `gcc -…-Werror`, RUNS it, drives Idle→Running, advances
+//! the virtual clock past the timer, and asserts the machine reaches
+//! Faulted. The two `header.contains("MOTOR_EVENT_TIMER_")` /
+//! `"_FIRED,"` assertions are a **secondary structural sanity check**
+//! (§5.4 last paragraph) on the emitted header *shape*, guarded by the
+//! same test's runtime assertions. Not converted — already behavioural.
+//!
 //! Pre-fix the generated `Motor_init` armed the timer slot for the initial
 //! state only. Entering a timer-owning state via a later transition left
 //! the slot at zero and `Motor_advance_clock` did nothing for the rest of
