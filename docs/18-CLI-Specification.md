@@ -655,6 +655,30 @@ injection). v1.0 hardens both at parse time.
   errors (canonicalization failure / out-of-workspace).
 - Per Doc 00 §11.12 / commit `bccc46f`.
 
+### 10.1.1 Header-Import Path Resolution (v1.1, SEC-P0-1)
+
+`fsm generate` can import `extern`s from a C header via the `--import-header`
+CLI flag or the `fsm.toml [generate] import_headers` array (§5/§6). Both feed
+the same file-read surface and are hardened per Doc 00 §G-02 / §11.28 by
+**reusing the §10.1 primitive** (no separate path-validation implementation):
+
+- **`fsm.toml import_headers`** — the `fsm.toml` travels *with* the project
+  tree, so its entries are treated as attacker-controlled and resolved
+  through the *same* shape-check → `canonicalize` → workspace-root
+  containment as a DSL `import "..."`. A `..`/absolute/symlink escape is
+  rejected (exit 1; the file is never read).
+- **`--import-header`** — invocation-supplied input at the same trust level
+  as the `.fsm` path argument; an absolute vendored-HAL path is a supported
+  normal use and is NOT containment-rejected. A NUL byte is still rejected.
+- **Opt-in** `[generate] allow_unscoped_import_headers = true` (default
+  `false`) downgrades `import_headers` to the trusted-invoker level so an
+  out-of-tree vendored header may be listed in `fsm.toml`. This is an
+  explicit, never-silent widening.
+- **Size cap (DoS):** every header read AND the `fsm.toml` read itself are
+  capped at `max_input_bytes` (the §10.3 1 MiB ceiling) *before* allocation;
+  an oversized or unsized input (`/dev/zero`) is rejected with a clean exit
+  (header → 3, `fsm.toml` → 4), never an OOM or panic.
+
 ## 10.2 Opaque Type Validation
 
 - Content matched against `^[A-Za-z_][A-Za-z0-9_ *]*$`. Semicolons,

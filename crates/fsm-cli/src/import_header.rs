@@ -134,8 +134,17 @@ pub fn parse_header(src: &str, header_label: &str) -> ImportedHeader {
 }
 
 /// Convenience: read + parse a header file from disk.
+///
+/// SECURITY (SEC-P0-1): the read is **size-capped** at the same ceiling the
+/// parser enforces on `.fsm` source, via the shared bounded-read primitive,
+/// BEFORE the unbounded `read_to_string` + the tokenizer's `O(n)`
+/// `String::with_capacity` allocations. `--import-header /dev/zero` or a
+/// multi-GB header is rejected with a clean `io::Error` (mapped to a
+/// non-zero exit by the caller), never an OOM/panic. Path *containment* is
+/// enforced separately at the call site (`cmd::generate`) per the trust
+/// model — this function only owns the DoS cap.
 pub fn parse_header_file(path: &Path) -> std::io::Result<ImportedHeader> {
-    let src = std::fs::read_to_string(path)?;
+    let src = crate::safe_io::read_to_string_capped(path, crate::safe_io::MAX_INPUT_BYTES)?;
     let label = path.to_string_lossy().into_owned();
     Ok(parse_header(&src, &label))
 }

@@ -76,8 +76,32 @@ pub struct GenerateSection {
     /// `--import-header` flags are *appended* to this list (both sources
     /// contribute; neither shadows the other, mirroring how multiple
     /// `--import-header` flags accumulate).
+    ///
+    /// SECURITY (Doc 00 §G-02 / Doc 18 §10 / SEC-P0-1): `fsm.toml` travels
+    /// **with the project tree**, so an attacker who can influence it can
+    /// otherwise point a build on shared CI at an arbitrary file
+    /// (`import_headers = ["../../../etc/shadow"]`). Entries here are
+    /// therefore resolved through the SAME containment check as a DSL
+    /// `import "..."` (shape-reject `..`/NUL/absolute, `canonicalize`,
+    /// workspace-root prefix) — see `cmd::generate::resolve_header_path`.
     #[serde(default)]
     pub import_headers: Vec<PathBuf>,
+    /// Opt-in escape hatch (SEC-P0-1, deliberate decision): when `true`,
+    /// `import_headers` entries are treated at the **trusted-invoker** trust
+    /// level instead of being workspace-contained — i.e. an *absolute*
+    /// header path (a vendored HAL at `/opt/vendor/stm32/hal.h`) listed in
+    /// `fsm.toml` is permitted. It is still **shape-sane** (NUL rejected)
+    /// and still **size-capped** (the DoS ceiling always applies); only the
+    /// `..`/absolute/containment rejection is relaxed.
+    ///
+    /// Default `false` (secure-by-default). This key is the *explicit,
+    /// named, documented* opt-in the threat-model review requires for the
+    /// genuine vendored-HAL-via-config use case — it is never a silent
+    /// allow: a project must consciously write
+    /// `allow_unscoped_import_headers = true` to widen the surface, and the
+    /// DoS cap is non-negotiable regardless.
+    #[serde(default)]
+    pub allow_unscoped_import_headers: bool,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -116,10 +140,19 @@ pub fn load(start_dir: &Path) -> Result<Option<(PathBuf, FsmToml)>, ConfigError>
     while let Some(dir) = cur {
         let candidate = dir.join("fsm.toml");
         if candidate.is_file() {
-            let raw = std::fs::read_to_string(&candidate).map_err(|e| ConfigError::Io {
-                path: candidate.clone(),
-                source: e,
-            })?;
+            // SEC-P0-1 / REL-P2-1 (same defect class, folded in per the
+            // audit): cap the `fsm.toml` read at the SAME ceiling the
+            // parser enforces on `.fsm` input, via the shared helper. A
+            // multi-GB `fsm.toml` (or a `/dev/zero`-symlinked one) is
+            // rejected with a clean exit-4 config error instead of an
+            // unbounded `read_to_string` OOM. Uses the one converged
+            // bounded-read primitive — no second cap implementation.
+            let raw =
+                crate::safe_io::read_to_string_capped(&candidate, crate::safe_io::MAX_INPUT_BYTES)
+                    .map_err(|e| ConfigError::Io {
+                        path: candidate.clone(),
+                        source: e,
+                    })?;
             let cfg = toml::from_str::<FsmToml>(&raw).map_err(|e| ConfigError::Parse {
                 path: candidate.clone(),
                 source: e,

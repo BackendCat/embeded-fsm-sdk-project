@@ -20,7 +20,7 @@
 //! of workspace) IS a hard error because it indicates an unsafe import
 //! regardless of file presence.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
 use fsm_analyzer::analyze_with_source;
@@ -30,7 +30,6 @@ use fsm_parser::import_resolver::{resolve_import, ImportError};
 use fsm_parser::{parse, ParseResult};
 
 use crate::cli::CheckArgs;
-use crate::config;
 use crate::diagnostics;
 
 pub fn run(args: CheckArgs) -> ExitCode {
@@ -52,7 +51,12 @@ pub fn run(args: CheckArgs) -> ExitCode {
         // the most permissive position the resolver can hold without
         // exposing escape paths (everything outside that directory is
         // still rejected by `resolve_import`).
-        let workspace_root = workspace_root_for(path);
+        //
+        // SEC-P0-1 convergence: this is the SINGLE shared definition in
+        // `safe_io`, used identically by `fsm generate`'s header-path
+        // containment, so the boundary is the same for a DSL `import` and
+        // an `fsm.toml import_headers` entry.
+        let workspace_root = crate::safe_io::workspace_root_for(path);
         let mut import_diags = security_check_imports(&pr, path, &workspace_root);
         let result = analyze_with_source(&pr, &label, &src);
         let mut diags = result.diagnostics;
@@ -139,26 +143,6 @@ fn emit_json_aggregate(entries: &[(fsm_diagnostics::Diagnostic, String, String)]
     }
     let s = serde_json::to_string_pretty(&out).unwrap_or_else(|_| "[]".to_string());
     println!("{}", s);
-}
-
-/// Find the workspace root for an input file. Walks upwards looking for
-/// `fsm.toml`; if none is found, the file's parent directory is used as
-/// a permissive fallback. The result is canonicalized so symlinks are
-/// followed before containment checks happen downstream.
-fn workspace_root_for(path: &Path) -> PathBuf {
-    let start = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    if let Ok(Some((toml_path, _))) = config::load(&start) {
-        if let Some(parent) = toml_path.parent() {
-            if let Ok(canon) = parent.canonicalize() {
-                return canon;
-            }
-        }
-    }
-    start.canonicalize().unwrap_or(start)
 }
 
 /// Run every `import "..."` declaration through `resolve_import` so any

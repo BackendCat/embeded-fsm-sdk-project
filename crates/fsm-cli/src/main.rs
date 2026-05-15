@@ -16,6 +16,7 @@ mod cmd;
 mod config;
 mod diagnostics;
 mod import_header;
+mod safe_io;
 
 use cli::{Cli, Command};
 
