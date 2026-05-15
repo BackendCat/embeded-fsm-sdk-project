@@ -149,6 +149,22 @@ A machine MUST declare:
 - State hierarchy (at least one state, one initial declaration)
 - One or more target profiles
 
+#### 3.2.1 Context Field Defaults
+
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
+A context field MAY declare a default value using `name: type = default_value`
+syntax. The default is applied by both pathways:
+
+- **Codegen** — `M_init` initialises the field to the declared default before
+  executing the initial-state entry sequence.
+- **Simulator** — `Interpreter::init` applies the same defaults to its runtime
+  context record before stepping.
+
+A field with no declared default is zero-initialised (per C99 rules in
+generated code; explicit `Value::default_for(type)` in the simulator). Defaults
+MUST be literal expressions (no extern calls, no field references).
+
 ### 3.3 Hierarchical States
 
 - Composite states MAY contain nested child states to any depth.
@@ -173,9 +189,14 @@ A machine MUST declare:
 
 ### 3.6 History
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 - **Shallow history** restores the most recently active direct child of the region.
 - **Deep history** restores the most recently active leaf of the full subtree.
-- A history pseudo-state MUST declare a default target (used if no history recorded).
+- A history pseudo-state MUST declare a `default ->` target. Absence is a hard
+  compile error (`FSM-E0111`) per Doc 00 §B-14; this removes the previous
+  undefined-on-first-entry behaviour. The runtime field holds the most-recently
+  exited descendant, falling back to the declared default on first entry.
 - History pseudo-states SHOULD have `@id` annotations (compiler warns `FSM-H0001` otherwise).
 
 ### 3.7 Fork and Join
@@ -279,9 +300,18 @@ External transition from S to T with LCA L:
 
 ### 5.3 Deferred Events
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 - `defer EVENT` in state body: hold this event while in this state.
 - Deferred events re-inserted at front of queue on transition to non-deferring state.
 - Deferral cycle (event deferred in all reachable states): `FSM-E0400`.
+
+**v1.0 status — defer rejected at analysis.** The `defer EVENT` construct is
+rejected by the analyzer with `FSM-E0903` ("`defer` not yet supported; v1.0
+limitation, lands in v1.1") rather than emitted as a runtime no-op. The
+grammar still parses the construct so the diagnostic span is accurate. Full
+defer-queue semantics (per-region bitmask, re-enqueue on exit) are deferred
+to v1.1 per Doc 00 §B-08 / §11.7.
 
 ### 5.4 Raised Events
 
@@ -309,19 +339,45 @@ These are called from the user's extern action functions, not directly from the 
 
 ### 5.6 Completion Events
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 - Auto-generated when a region's active state reaches a final state.
 - Processed before externally queued events.
 - Triggers `done` transitions on the enclosing composite state.
+
+**Auto-fire behaviour by state kind (per Doc 00 §B-08 / §11.8):**
+
+| Source state | `done` semantics |
+|---|---|
+| Simple state | The completion event is enqueued the moment the entry sequence finishes (auto-fire on entry). |
+| Composite state | The completion event is enqueued when the (single-region) active leaf reaches a `final` state. |
+| Parallel state | The completion event is enqueued only when **every** region's active leaf is a `final` state (all-regions-done rule, UML 2.5.1 §14.2.3.4.5). |
+
+The all-regions-done rule on Parallel states preserves the standard UML
+contract that the parent does not finish until every orthogonal partition has.
 
 ---
 
 ## 6. Timer Model
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 - `after N ms -> T` — one-shot. Starts on state entry. Cancelled on state exit.
 - `every N ms : a` — periodic. Starts on state entry. Cancelled on state exit.
 - `N` MUST be a compile-time constant (integer or `const` reference).
-- Timer implementation is provided via a user-supplied HAL adapter.
+- `N` MUST be **strictly positive**. `after 0 ms` and `every 0 ms` are rejected
+  at compile time with `FSM-E0410` ("Timer duration must be greater than zero")
+  per Doc 00 §B-13. Compile-time constant expressions are folded before the
+  check.
+- Timer implementation is provided via a user-supplied HAL adapter; v1.0
+  requires the HAL contract (`fsm_hal_clock_now_ms`) — see Doc 16 and Doc 11 §11.
 - Virtual clock in simulator replaces wall time for deterministic replay.
+
+**Per-timer distinct event IDs.** Each timer trigger receives its own distinct
+event ID at codegen time (`<MACHINE>_EVENT_TIMER_<TIMER_ID>_FIRED`). This
+prevents collision with the shared completion event ID. The IR captures the
+`timer_id` field on `Trigger::After` and `Trigger::Every` (Doc 09 §6); the
+codegen emits one armed-on-entry / disarmed-on-exit pair per timer.
 
 ---
 
@@ -433,6 +489,13 @@ Guards remain a separate, strictly restricted sublanguage. No arithmetic assignm
 
 See Section 8.2 for the guard grammar.
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+>
+> This section defines the action expression language. Its formal grammar
+> lives in Doc 04 §8.7; its semantics in Doc 08 §6.2. When a fact about the
+> language disagrees between this document and Doc 04 / Doc 08, the latter
+> two win.
+
 ---
 
 ## 10. Stable Node IDs
@@ -482,62 +545,14 @@ Profiles are named capability sets for code generation targets.
 
 ## 13. Static Analysis Requirements
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 Every diagnostic MUST carry: stable code, severity, file, line, column, span, message.
 
-### 13.1 Structural Errors
-
-| Code | Condition |
-|---|---|
-| `FSM-E0001` | Region missing `initial`. |
-| `FSM-E0002` | Region has multiple `initial`. |
-| `FSM-E0003` | Duplicate name in scope. |
-| `FSM-E0004` | Transition targets undefined state. |
-| `FSM-E0005` | Region contains no states. |
-
-### 13.2 Semantic Errors
-
-| Code | Condition |
-|---|---|
-| `FSM-E0100` | Nondeterministic: unresolvable transition conflict. |
-| `FSM-E0101` | Equal-priority transitions with non-disjoint guards. |
-| `FSM-E0102` | Transition crosses region boundary illegally. |
-| `FSM-E0103` | LCA computation failure (disconnected graph). |
-| `FSM-E0110` | Local transition (`~>`) target is not a descendant. |
-| `FSM-E0105` | Internal transition has an explicit target. |
-| `FSM-E0106` | Circular submachine reference. |
-| `FSM-E0107` | Fork/join structure mismatch. |
-
-### 13.3 Type Errors
-
-| Code | Condition |
-|---|---|
-| `FSM-E0300` | Type mismatch in guard comparison. |
-| `FSM-E0301` | Undefined identifier in guard expression. |
-| `FSM-E0302` | Non-`pure` extern used in guard. |
-| `FSM-E0303` | `opaque` field used in field-comparison guard. |
-
-### 13.4 Event Model Errors
-
-| Code | Condition |
-|---|---|
-| `FSM-E0400` | Deferral cycle detected. |
-| `FSM-E0401` | Undefined event referenced. |
-
-### 13.5 Reachability Warnings
-
-| Code | Condition |
-|---|---|
-| `FSM-W0001` | State unreachable from initial configuration. |
-| `FSM-W0002` | Transition guard statically always false. |
-| `FSM-W0003` | Final state has outgoing transitions. |
-| `FSM-W0200` | Loop in action block. Consider extracting to a named extern function. |
-
-### 13.6 Hints
-
-| Code | Condition |
-|---|---|
-| `FSM-H0001` | History pseudo-state missing `@id`. |
-| `FSM-H0002` | Composite state with history child missing `@id`. |
+**All diagnostic codes are defined in [Doc 10 — Diagnostic Code Catalog](10-Diagnostic-Code-Catalog.md).**
+Implementations MUST emit codes per Doc 10 (single normative source).
+This document does not redefine codes; the previous sub-tables (§13.1–§13.6)
+were retired in v1.0 doc reconciliation per Doc 00 §B-01 / §8.
 
 ---
 
@@ -575,6 +590,8 @@ void M_tick(M_t *m, uint32_t elapsed_ms);  /* for bare-metal timer integration *
 
 ### 15.2 C++17 Target
 
+> _Updated 2026-05-14: C++17 codegen is deferred to v1.1 per Doc 00 §B-12 / §6 D-01._
+
 - Machine as a class: `class M`.
 - User overrides virtual methods for extern actions.
 - Or: non-virtual with function pointer table (configurable).
@@ -590,9 +607,14 @@ parallel region combinations.
 
 ## 16. Simulation Requirements
 
-See `FSM-REQ-INFRA` for full simulator specification.
-Summary: WebSocket JSON-RPC 2.0 API, virtual clock, deterministic replay, step/run/pause,
-event injection, context inspection, trace collection.
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
+The simulator is specified in detail by [Doc 13 — Simulator Protocol](13-Simulator-Protocol.md).
+
+**v1.0 status.** The simulator runs **in-process** as a Rust library backing
+`fsm test` and `fsm simulate`. It produces deterministic JSON traces in the
+`StepRecord` format (Doc 13 §11) with a virtual clock. No WebSocket server is
+exposed — that protocol is deferred to v1.1 per Doc 00 §B-02 / §6 D-02.
 
 ---
 
@@ -614,9 +636,14 @@ A FSM-Lang implementation is conformant when:
 
 ## 18. Explicitly Out of Scope
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 - Probabilistic / stochastic state machines
 - Distributed multi-node FSM synchronisation
 - Formal model checking integration (future plugin)
 - Non-deterministic automata
-- Inline computation (arithmetic, assignment, if/else) in the DSL
-- A general-purpose type system or expression language
+- **A general-purpose user-defined expression language.** The constrained
+  action expression language and guard expression language defined in
+  Doc 04 §8.7 and §8.2 ARE in scope; arbitrary user-defined computation
+  outside those grammars is not.
+- A general-purpose type system beyond §7.

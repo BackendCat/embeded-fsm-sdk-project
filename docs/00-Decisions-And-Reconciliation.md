@@ -1265,4 +1265,37 @@ decision that benefits from real customer signal. No v1.0 spec impact.
 
 ---
 
-*End of FSM-SPEC-DEC v1.0.0 (TL-amended 2026-05-11)*
+## 11. Phase 1 Implementation-Time Decisions
+
+> _Added 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
+Decisions made during implementation that go beyond Doc 00's original
+reconciliation scope. Each row links the deciding wave and commit. These
+build on §2 (BLOCKER fixes) and §10 (TL escalation decisions); for any
+future change of similar magnitude, append §11.N here with the same column
+shape.
+
+| ID | Decision | Reasoning | Wave / Commit |
+|---|---|---|---|
+| §11.1 | Add `fsm-diagnostics` foundation crate (zero workspace deps) holding `Span`, `SourceLocation`, `Severity`, `DiagnosticCode` (75 variants), `Diagnostic` | Breaks cyclic dep risk; rust-analyzer / Roslyn precedent for shared diagnostic types | Wave 1.0 / `db5ef83` |
+| §11.2 | `RegionObject.initial: StateId` always points at an Initial pseudo-state in `region.states` (not a bare state name string) | Doc 09 §4.4 + §18 example mandate it; bare-name caused simulator init failure | Wave 1.9 / `c4f372d` |
+| §11.3 | Multi-active-leaf representation: `m->_active[MAX_PARALLEL_REGIONS]` array, NOT `m->_state + _state_region_N` slots | Uniform handling; non-parallel = N=1 slot; matches simulator's `RuntimeState.active_states` Vec | P0-2/P0-3 / `e4884bc` |
+| §11.4 | B-11 collect-then-execute table dispatch: per-region ancestor walk → `selected[]` buffer → execute pass | Doc 00 §7.8 normative; eliminates first-match-return bug for parallel | P0-2/P0-3 / `e4884bc` |
+| §11.5 | Per-timer distinct event IDs (`MOTOR_EVENT_TIMER_<TIMER_ID>_FIRED`); `timer_id` field on `Trigger::After`/`Every` | Prevents collision with `done` completion's shared EVENT__COMPLETION | P0-4 / `cde56e2` |
+| §11.6 | Timer arm-on-entry to timer-owning state; disarm-on-exit | Doc 08 §13 semantics; previous arm-at-init broke for any non-initial timer-owning state | P0-4 / `cde56e2` |
+| §11.7 | `defer EVENT` rejected at analyzer with `FSM-E0903` in v1.0 (option-b downgrade) | Honesty-over-broken: silent-drop violated G1; full defer queue deferred to v1.1 | P0-5 / `6ec5268` |
+| §11.8 | `done` auto-fire scoped to Simple states only; Composite/Parallel `done` still gates on region-Final (B-08) | UML completion semantics; preserves parallel-completion contract | R1 / `a94ff91` |
+| §11.9 | Codegen panics → `Result<_, EmitError>` propagated to CLI exit code 2 | P1-8; pre-flight validation makes `must_lookup` unreachable in production | R1 / `a94ff91` |
+| §11.10 | HashMap → BTreeMap for all serialized public types (`StepRecord.payload`/`context`, `InterpreterSnapshot.history`) | Doc 13 §11 wire-format byte-exact determinism; 100-iter regression test | Sim polish / `e6dba2c` |
+| §11.11 | Guard-eval errors propagate via `StepError::GuardEval(EvalError)` instead of silent `unwrap_or(false)` | Audit P1-7; runtime guard errors surface rather than disabling transitions | Sim polish / `e6dba2c` |
+| §11.12 | Import path security: `resolve_import` with `Path::canonicalize` + workspace-root prefix check | Doc 00 §7.12 G-02; symlink escape detection beyond shape check | P1 security / `bccc46f` |
+| §11.13 | Parser DoS limits: `max_input_bytes`=1MiB, `max_recursion_depth`=256, `max_token_count`≈262k; RAII depth guard | Doc 00 §7.12; stack/RAM exhaustion blocked at `parse()` entry | P1 security / `bccc46f` |
+| §11.14 | Multi-strategy codegen exposed: `--strategy {switch,table,auto}` CLI flag; Auto picks switch if state count < 64, else table | Doc 11 §8 + Doc 00 §5.1; both strategies share `emit/transition.rs` for behaviour equivalence | P0-2/P0-3 / `e4884bc` |
+| §11.15 | Empty `expected` in `.trace` files is now a hard fail (was silent pass); `--allow-empty-expected` opt-in | Doc 23 §9 G6 gate was unverifiable | P1 wave / `1f5d7de` |
+| §11.16 | gcc tests for ALL 3 shipped examples (motor, traffic-light, vending-machine); skip is opt-in via `FSM_SKIP_GCC_TESTS` env var | P1-3; previously silent skip on missing gcc | P1 wave / `1f5d7de` |
+| §11.17 | CGEN-002 conformance fixture asserts on structural strings (`parent_table`, ancestor-walk loop pattern), not literal comment text | Comments are reword-fragile; structural code proves B-10 | Trace refresh / `e400bc1` |
+| §11.18 | Context field defaults emitted in `Motor_init` AND applied in `Interpreter::init` | Closed silent data-loss path; users' declared defaults now take effect | R1 / `a94ff91` |
+
+---
+
+*End of FSM-SPEC-DEC v1.0.0 (TL-amended 2026-05-11; §11 appended 2026-05-14)*

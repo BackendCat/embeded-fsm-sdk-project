@@ -362,6 +362,37 @@ Trigger: Two or more `initial` declarations in the same region.
 
 ---
 
+### FSM-E0110 — Local transition target is not a proper descendant of source
+
+> _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §B-01._
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | A local transition `S ~> T` requires `T` to be a proper descendant of `S` in the state hierarchy. If `T` is not nested inside `S`, the local-transition semantics (no exit/entry of `S`) are undefined. |
+| **Fix** | Use an external transition `S -> T` if `T` is outside `S`, or correct the target reference. |
+
+---
+
+### FSM-E0111 — History pseudo-state has no `default ->` declaration
+
+> _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §B-14._
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | A `shallow_history` or `deep_history` pseudo-state was declared without the mandatory `default ->` target. Embedded targets cannot accept undefined-on-first-entry behaviour. |
+| **Fix** | Add `default -> StateName` inside the history declaration. |
+
+**Example:**
+```
+shallow_history Recall { }   // FSM-E0111: no default target
+```
+
+---
+
 # 6. Type and Semantic Errors (FSM-E0200 – FSM-E0299)
 
 ---
@@ -461,6 +492,19 @@ context {
 
 ---
 
+### FSM-E0210 — Opaque field used in field-comparison guard
+
+> _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §B-01 / §I-04._
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | A guard expression compares against `ctx.f` or `payload.f` where `f` has an `opaque "C_type"` declared type. The compiler cannot statically reason about opaque-typed values. |
+| **Fix** | Declare a `pure extern` predicate that takes the opaque value and use the extern call in the guard. |
+
+---
+
 # 7. Determinism Errors (FSM-E0300 – FSM-E0399)
 
 ---
@@ -489,8 +533,12 @@ on START [ctx.speed > 10] -> Fast   // FSM-E0300: overlaps with above guard
 
 ### FSM-E0301 — Guard on completion transition
 
-Trigger: A completion transition (no event trigger) has a guard. Completion transitions
-MUST be unconditional.
+> _Status: **Deprecated** — no longer emitted (2026-05-14 doc reconciliation).
+> Completion transitions MAY carry a guard per Doc 00 §B-07 / §I-22. The
+> failure modes that previously motivated E0301 are covered by FSM-E0300
+> (nondeterministic conflict) and FSM-W0101 (dead transition)._
+
+Historical: A completion transition had a guard. Now allowed.
 
 ---
 
@@ -503,6 +551,9 @@ MUST be unconditional.
 ---
 
 ### FSM-E0304 — Parallel state region has no initial declaration
+
+> _Status: **Deprecated** — duplicate of FSM-E0600 (2026-05-14 doc reconciliation,
+> per Doc 00 §B-01 / §I-06). FSM-E0600 is the canonical code for this condition._
 
 ---
 
@@ -546,6 +597,28 @@ parallel Monitor {
 
 ---
 
+### FSM-E0610 — Construct used without required `feature` flag
+
+> _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §B-01 / §I-05._
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | A construct (parallel, history, deferred, submachine, fork/join, …) was used without declaring the corresponding `feature` flag at file scope. |
+| **Fix** | Add `feature <name>` to the file header, or remove the construct. |
+
+**Example:**
+```
+language fsm 1.0
+// missing: feature submachines
+machine Parent {
+    state Link is ConnectionHandler { }   // FSM-E0610: feature submachines not enabled
+}
+```
+
+---
+
 ### FSM-E0750 — Fork target is not a parallel region
 
 | | |
@@ -584,7 +657,28 @@ Trigger: A self-transition on a composite state using `->` (external) instead of
 
 ---
 
-# 9. Submachine Errors (FSM-E0500 – FSM-E0599)
+### FSM-E0410 — Timer duration must be greater than zero
+
+> _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §B-13. Supersedes
+> the deprecated FSM-W0400._
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | An `after` or `every` timer has a duration that is zero (literal `0`, or a `const NAME = 0` reference). Zero-duration timers mix internal/external queue invariants and have no well-defined semantics in v1.0. |
+| **Fix** | Use a positive duration, or use an `entry` action that issues `raise EVENT` if "fire immediately on entry" is intended. |
+
+**Example:**
+```
+after 0 ms -> Timeout   // FSM-E0410: timer duration must be > 0
+const RETRY_MS = 0
+every RETRY_MS ms : tick   // FSM-E0410: const folds to 0
+```
+
+---
+
+# 9. Submachine + Module Errors (FSM-E0500 – FSM-E0799)
 
 ---
 
@@ -599,6 +693,20 @@ Trigger: A self-transition on a composite state using `->` (external) instead of
 | **Severity** | Error |
 | **Recoverable** | No |
 | **Description** | Machine A includes a submachine reference to B, and B (directly or transitively) includes a submachine reference to A. Cycles are forbidden. |
+
+---
+
+### FSM-E0700 — Circular import detected
+
+> _Added 2026-05-14 in v1.0 doc reconciliation. Already implicitly referenced
+> by Doc 02 §11 and Doc 04 §2.1; formalized here as the single source._
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | No |
+| **Description** | The import graph contains a cycle: file A imports B (transitively) which imports A. Import resolution cannot terminate. |
+| **Fix** | Break the cycle: extract shared declarations into a third file imported by both. |
 
 ---
 
@@ -618,17 +726,33 @@ Trigger: A self-transition on a composite state using `->` (external) instead of
 
 ---
 
+### FSM-E0903 — `defer` not yet supported in v1.0 (or: too many event types for defer bitmask)
+
+> _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §11.7 (option-b
+> downgrade) and §G-08._
+
+| | |
+|---|---|
+| **Severity** | Error |
+| **Recoverable** | Yes |
+| **Description** | Two related conditions share this code: **(a)** in v1.0, the analyzer rejects every `defer EVENT` declaration with `FSM-E0903` ("v1.0 limitation; lands in v1.1"); **(b)** when defer ships in v1.1, machines with more than 256 declared events also raise `FSM-E0903` because no fixed-width bitmask is wide enough for the defer table. |
+| **Fix** | Remove the `defer EVENT` declaration in v1.0; track v1.1 milestone for the runtime defer queue. When the v1.1 bitmask form is shipped, reduce the event count or split the machine. |
+
+---
+
 # 11. Warning Codes (FSM-W0xxx)
 
 ---
 
 ### FSM-W0100 — History state has no stored value and no default
 
+> _Status: superseded by `FSM-E0111` (history default is mandatory; absence is
+> a fatal error per Doc 00 §B-14). Retained for the deprecation policy._
+
 | | |
 |---|---|
 | **Severity** | Warning |
-| **Description** | A transition targeting a history pseudo-state (`-> History`) is reachable before any exit from the parent state has been recorded. Behavior on first entry is unspecified unless a `default ->` is declared. |
-| **Fix** | Add `default -> StateName` to the history declaration. |
+| **Description** | (Historical) Behaviour on first entry without a stored history was undefined. Resolved by promoting "no default" to a fatal error. |
 
 ---
 
@@ -675,8 +799,12 @@ Trigger: A self-transition on a composite state using `->` (external) instead of
 
 ### FSM-W0400 — Timer duration is zero
 
+> _Status: **Deprecated** (2026-05-14 doc reconciliation). The condition is
+> now a fatal error `FSM-E0410` per Doc 00 §B-13. Retained per Doc 10 §14
+> deprecation policy; suppression annotations still parse._
+
 ```
-after 0ms -> Timeout   // FSM-W0400: zero-duration timer fires immediately on entry
+after 0ms -> Timeout   // Historical FSM-W0400; now emitted as FSM-E0410
 ```
 
 ---
@@ -770,6 +898,24 @@ on STOP [ctx.x > 0 && ctx.x < 0] -> Error  // FSM-W0603: guard always evaluates 
 
 ---
 
+### FSM-W0604 — Possible precision loss in float cast
+
+> _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §B-01._
+
+| | |
+|---|---|
+| **Severity** | Warning |
+| **Suppressible** | Yes |
+| **Description** | An `as` cast between floating-point widths (`f64 as f32`) or between an integer of >= 24 significant bits and `f32` (or 53 bits for `f64`) may lose precision. The cast is valid; the warning is informational. |
+| **Fix** | Verify the precision loss is acceptable, or suppress with `// fsm-lint:disable FSM-W0604`. |
+
+**Example:**
+```
+ctx.f32_value = ctx.f64_value as f32   // FSM-W0604: possible precision loss
+```
+
+---
+
 # 12. Info Codes (FSM-I0xxx)
 
 ---
@@ -830,6 +976,18 @@ parallel Redundant {
 ```
 // Hint: "Use 'every Xms: action()' instead of a self-transition with 'after Xms'."
 after 100ms -> Self
+```
+
+### FSM-H0006 — Stable `@id` placed before doc comment (suggest swap)
+
+> _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §B-01._
+
+```
+@id("Idle")
+/// Idle state — waiting for events.
+state Idle { }
+// Hint: "Place doc comment before @id annotation so tools attach docs to the
+//        stable identifier first."
 ```
 
 ---

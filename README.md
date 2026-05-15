@@ -9,10 +9,38 @@ A production-grade platform for industrial FSM development.
 ### What v1.0 ships
 
 - **FSM-Lang DSL** — formal text grammar for hierarchical state machines (parser + analyzer + IR emitter)
-- **C99 code generator** — deterministic, heap-free output safe for embedded targets
-- **In-process simulator** — virtual-clock interpreter for trace-based testing
-- **Canonical formatter** — `fsm fmt` for idempotent `.fsm` source layout
-- **CLI** — `fsm check`, `fsm generate`, `fsm fmt`, `fsm test`, `fsm parse`
+- **C99 code generator** — deterministic, heap-free output safe for embedded targets.
+  Two dispatch strategies via `fsm generate --strategy {switch,table,auto}`
+  (`auto` picks `switch` when state count < 64, else `table`).
+- **In-process simulator** — virtual-clock interpreter for trace-based testing.
+  Emits `StepRecord` JSON (Doc 13 §11) — byte-deterministic.
+- **Canonical formatter** — `fsm fmt` for idempotent `.fsm` source layout.
+- **CLI** — `fsm check`, `fsm generate`, `fsm fmt`, `fsm test`, `fsm parse`,
+  `fsm simulate`, `fsm doc`, `fsm decompile`, `fsm init`.
+
+### Generated code
+
+Every emitted `.c` / `.h` carries an SPDX header (default `MIT`, override with
+`fsm generate --license <SPDX>`). The user MUST supply the HAL contract:
+
+```c
+// fsm_hal.h provided by the user once per project
+uint32_t fsm_hal_clock_now_ms(void);                     // wall-clock or virtual
+void     fsm_hal_assert(const char *file, int line,      // assertion handler
+                        const char *msg);
+```
+
+On Arduino:
+
+```c
+uint32_t fsm_hal_clock_now_ms(void) { return millis(); }
+void fsm_hal_assert(const char *f, int l, const char *m) {
+    (void)f; (void)l; (void)m; for (;;) {}
+}
+```
+
+The HAL is **mandatory** in v1.0 (Doc 00 §10.3): codegen unconditionally emits
+`#include "fsm_hal.h"`. Trivial integration is ≤ 10 lines per project.
 
 ### Roadmap (post-v1.0)
 
@@ -21,6 +49,7 @@ A production-grade platform for industrial FSM development.
 - Web IDE — browser-based editor, diagram, and simulator (Doc 05)
 - C++17 code generator (Doc 12)
 - LSP server (Doc 14)
+- `defer EVENT` runtime support (currently rejected at analysis with `FSM-E0903`)
 
 ## Getting Started
 
@@ -104,7 +133,13 @@ MIT
 v1.0 in active development.
 
 - **Phase 0 scaffolded:** 2026-05-11
+- **Doc reconciliation pass:** 2026-05-14 — see [`CHANGELOG.md`](CHANGELOG.md)
 - **Scope:** full UML semantics → C99 codegen → CLI tool only
-- **Deferred to v1.1+:** C++17 codegen, LSP, VS Code extension, Web IDE
-- **Normative TL decisions:** see `docs/00-Decisions-And-Reconciliation.md`
-- **Developer entry:** see `docs/23-Developer-Onboarding.md`
+- **Deferred to v1.1+:** C++17 codegen, LSP, VS Code extension, Web IDE,
+  WebSocket simulator, TextMate grammar, `defer` runtime support
+- **Why X?** — read [`docs/00-Decisions-And-Reconciliation.md`](docs/00-Decisions-And-Reconciliation.md).
+  The 14 blocker resolutions (§2), TL escalation decisions (§10), and the
+  Phase-1 implementation-time decisions table (§11) cover every "why is it
+  this way" question.
+- **What changed in v1.0?** — see [`CHANGELOG.md`](CHANGELOG.md).
+- **Developer entry:** [`docs/23-Developer-Onboarding.md`](docs/23-Developer-Onboarding.md).

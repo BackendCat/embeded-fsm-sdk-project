@@ -2,8 +2,17 @@
 
 **Document ID:** FSM-SPEC-UI
 **Version:** 1.0.0
-**Status:** Normative Draft
+**Status:** _Reserved — v1.1 surface._ Updated 2026-05-14 in v1.0 doc
+reconciliation; see CHANGELOG.
 **Applies to:** VS Code Extension v1.x · Web IDE v1.x
+
+> **v1.0 NOTE.** Per Doc 00 §6 D-06 / D-07, the rendered-UI portions of this
+> specification (VS Code WebView panels, Web IDE) are **deferred to v1.1+**.
+> v1.0 ships **CLI only**. Implementer waves for v1.0 do not consume this
+> doc; non-UI parts (information architecture, command vocabulary) may still
+> inform CLI design, but the canonical CLI surface is [Doc 18](18-CLI-Specification.md).
+> The VS Code extension manifest is [Doc 22](22-VSCode-Extension-Manifest.md)
+> (also Reserved for v1.1).
 
 All measurements are in logical pixels (CSS px / dp). All timing values are in milliseconds.
 All UI behaviour described in this document is normative for implementation.

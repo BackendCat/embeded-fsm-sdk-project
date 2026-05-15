@@ -65,6 +65,17 @@ doc_comment   = "///" , { ? not newline ? } ;  (* attaches to next declaration *
 
 ## 1.5 Keywords
 
+> **KEYWORDS — AUTHORITATIVE LIST.** _Updated 2026-05-14 in v1.0 doc
+> reconciliation; see CHANGELOG._
+>
+> This section is the **single normative keyword list** for FSM-Lang per
+> Doc 00 §B-03 / §4 (single-source-of-truth registry). All other documents
+> (Doc 19 formatter, future Doc 14 LSP, future Doc 21 TextMate, future
+> Doc 22 VS Code) MUST cross-reference this section and MUST NOT redefine
+> the list inline. Additions to this list are minor-version events
+> (append-only); removals are forbidden under Doc 10 §14 deprecation
+> policy applied analogously.
+
 ```
 after       as              bool        cancel      choice
 composite   const           context     deep_history defer
@@ -80,7 +91,7 @@ u16         u32             u64
 ```
 
 The `as` keyword is reserved for explicit type casting (see §3.1).
-The `submachine` keyword is reserved for future submachine syntax (see §15).
+The `submachine` keyword is reserved for submachine syntax (see §15).
 
 ## 1.6 Operators and Delimiters
 
@@ -146,7 +157,11 @@ feature_decl = "feature" , identifier ;
 | `submachines` | Submachine state references (`is`). |
 | `fork_join` | Fork and join pseudo-states. |
 
-Using a construct without the corresponding feature flag is `FSM-E0600`.
+Using a construct without the corresponding feature flag is `FSM-E0610`.
+
+> _Updated 2026-05-14: code changed from FSM-E0600 to FSM-E0610 per Doc 00
+> §B-01 (E0600 retained its "parallel region has no initial" meaning; new
+> E0610 was allocated for the feature-flag check). See CHANGELOG._
 
 ## 2.3 Constants
 
@@ -235,7 +250,11 @@ type =
 ```
 
 `opaque "my_struct_t"` maps to the C type verbatim. No field-comparison guards allowed
-on opaque fields (`FSM-E0303`).
+on opaque fields (`FSM-E0210`).
+
+> _Updated 2026-05-14: code changed from FSM-E0303 to FSM-E0210 per Doc 00 §B-01
+> (E0303 retained its original "join source not in parallel region" meaning;
+> a new E0210 was allocated for opaque-field-in-guard). See CHANGELOG._
 
 ## 3.1 Type Casting — `as` Operator
 
@@ -480,6 +499,8 @@ Each region executes independently. Requires `feature parallel`.
 
 ## 7.1 Shallow History
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 ```ebnf
 shallow_history_decl =
     [ doc_comment ] ,
@@ -488,10 +509,15 @@ shallow_history_decl =
     "{" , initial_decl , "}" ;
 ```
 
-Restores the most recently active direct child. Falls back to `initial` if no history.
+Restores the most recently active **direct child of the composite region**.
+The `initial_decl` inside the history block is the **mandatory default
+target**, used when no history has been recorded yet (per Doc 00 §B-14).
+Absence of the default declaration is a hard compile error `FSM-E0111`.
 Requires `feature history`.
 
 ## 7.2 Deep History
+
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
 
 ```ebnf
 deep_history_decl =
@@ -501,7 +527,9 @@ deep_history_decl =
     "{" , initial_decl , "}" ;
 ```
 
-Restores the most recently active leaf of the subtree. Requires `feature history`.
+Restores the most recently active leaf of the subtree. As with shallow
+history, the `initial_decl` is the **mandatory default target** (`FSM-E0111`
+if missing) per Doc 00 §B-14. Requires `feature history`.
 
 ## 7.3 Choice Pseudo-State
 
@@ -713,21 +741,39 @@ send_action =
 
 defer_stmt = "defer" , identifier ;
 
-(* Action expression language *)
-expr =
-      unary_expr
-    | expr , bin_op , expr
-    | "(" , expr , ")"
-    | identifier , "(" , [ expr , { "," , expr } ] , ")"
-    | field_ref
-    | literal ;
+(* Action expression language.
 
-unary_expr = ( "!" | "-" | "~" ) , expr ;
+   NORMATIVE NOTE — _Updated 2026-05-14 in v1.0 doc reconciliation; see
+   CHANGELOG._
 
-bin_op =
-    "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
-    | "<<" | ">>" | "&&" | "||"
-    | "==" | "!=" | "<" | ">" | "<=" | ">=" ;
+   The EBNF below is **presentation-only**. The normative grammar for
+   expression parsing is the Pratt operator-precedence table in §8.7.1.
+   Implementations MUST use that table or an equivalent precedence-climbing
+   algorithm. The naive `expr = expr , bin_op , expr` form is left-recursive
+   and unimplementable as a recursive-descent rule (per Doc 00 §B-05).
+
+   The rewrite below is the non-left-recursive layered form (one rule per
+   precedence level) and is presentation-equivalent to §8.7.1.
+*)
+expr        = expr_or ;
+expr_or     = expr_and , { "||" , expr_and } ;
+expr_and    = expr_cmp , { "&&" , expr_cmp } ;
+expr_cmp    = expr_bit ,  [ cmp_op , expr_bit ] ;
+expr_bit    = expr_shift, { bitwise_op , expr_shift } ;
+expr_shift  = expr_add  , { shift_op   , expr_add } ;
+expr_add    = expr_mul  , { add_op     , expr_mul } ;
+expr_mul    = expr_cast , { mul_op     , expr_cast } ;
+expr_cast   = unary_expr, { "as" , type_ref } ;
+unary_expr  = { "!" | "-" | "~" } , postfix_expr ;
+postfix_expr= primary , { "." , identifier | "(" , [ arg_list ] , ")" } ;
+primary     = literal | field_ref | identifier | "(" , expr , ")" ;
+
+arg_list    = expr , { "," , expr } ;
+
+bitwise_op  = "&" | "|" | "^" ;
+shift_op    = "<<" | ">>" ;
+add_op      = "+" | "-" ;
+mul_op      = "*" | "/" | "%" ;
 
 literal = integer | boolean | string | qualified_name ;
 ```
@@ -801,6 +847,12 @@ declared `extern` function may be called.
 
 # 9. Timers
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
+`const_expr` MUST evaluate to a **strictly positive** integer at compile time.
+Zero-duration timers (`after 0 ms`, `every 0 ms`, `after CONST ms` where
+`CONST == 0`) are rejected with `FSM-E0410` per Doc 00 §B-13.
+
 ## 9.1 One-Shot Timer
 
 ```ebnf
@@ -837,12 +889,19 @@ every_internal_decl =
 
 ## 9.4 Deferred Events
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 ```ebnf
 defer_decl = "defer" , identifier ;
 ```
 
 Holds this event type while in this state. Released on exit to a non-deferring state.
 Requires `feature deferred`.
+
+**v1.0 limitation.** The construct parses but is rejected by the analyzer with
+`FSM-E0903` ("`defer` not yet supported; v1.0 limitation, lands in v1.1") per
+Doc 00 §B-08 / §11.7 (option-b downgrade). Full defer-queue semantics
+(per-region bitmask, re-enqueue on exit) land in v1.1.
 
 ---
 
@@ -853,13 +912,27 @@ stable_id = "@id" , "(" , string , ")" ;
 ```
 
 Unique within the machine. Preserved across renames. Used for history storage,
-trace records, and toolchain references. Duplicate IDs: `FSM-E0750`.
+trace records, and toolchain references. Duplicate IDs: `FSM-E0025`.
+
+> _Updated 2026-05-14: duplicate-ID code aligned to FSM-E0025 (also used in
+> §14.2) per Doc 00 §B-01 / §I-03. The earlier FSM-E0750 was a stray label;
+> see CHANGELOG._
 
 ---
 
 # 11. Formal Transition Selection Algorithm
 
-This section is normative. Implementations MUST produce identical results.
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+>
+> **This algorithm is informational.** The normative transition-selection
+> semantics live in [Doc 08 §4](08-Formal-Execution-Semantics.md). Where
+> this section and Doc 08 disagree, Doc 08 wins (per Doc 00 §B-08 / §I-19).
+> The completion-event rule for Parallel states is the all-regions-final
+> rule (Doc 00 §B-08); the LCA for external self-transitions consults the
+> transition kind (Doc 00 §B-09 / §I-21).
+
+This section is informational. Implementations MUST produce results that
+match Doc 08 §4 (which this section reflects).
 
 ```
 SELECT(active_config, event):
@@ -1318,10 +1391,18 @@ and toolchain references.
 
 ---
 
-# 15. Submachine Syntax [Future — Post-v1.0]
+# 15. Submachine Syntax
 
-The `submachine` construct is **feature-flagged** (`feature submachines`) and is
-reserved for post-v1.0. The grammar production is included here for forward reference.
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+>
+> Submachines are **in v1.0 scope** per Doc 00 §10.1 (TL decision: IN as
+> production, not preview). The "[Future — Post-v1.0]" header that previously
+> hung over this section has been removed. IR schema (Doc 09), analyzer
+> support, and conformance tests are required for v1.0; codegen for
+> submachine state references (`is`) lands incrementally (silent no-op on
+> the codegen surface in v1.0.0; full lowering in v1.0.1+).
+
+The `submachine` construct is **feature-flagged** (`feature submachines`).
 
 ```ebnf
 submachine_decl =
@@ -1337,7 +1418,6 @@ A submachine creates an independent execution context that can be referenced fro
 a parent machine via the `is` keyword:
 
 ```fsm
-// [future] — not available in v1.0
 feature submachines
 
 submachine ConnectionHandler {
@@ -1351,7 +1431,7 @@ machine Parent {
 }
 ```
 
-Implementations MUST reject `submachine` declarations with `FSM-E0600` ("feature
+Implementations MUST reject `submachine` declarations with `FSM-E0610` ("feature
 `submachines` is not enabled") unless `feature submachines` is declared. Semantics
 are defined in FSM-SPEC-SEM §12.
 

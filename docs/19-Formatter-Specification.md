@@ -2,8 +2,15 @@
 
 **Document ID:** FSM-SPEC-FMT
 **Version:** 1.0.0
-**Status:** Normative Draft
+**Status:** Normative — Updated 2026-05-14 in v1.0 doc reconciliation;
+see CHANGELOG.
 **Depends on:** FSM-SPEC-DSL
+
+> **Keyword sourcing.** All keywords cited in this document are the
+> authoritative list at [Doc 04 §1.5](04-DSL-Specification.md) (per Doc 00
+> §B-03). The keywords `composite`, `parallel`, `shallow_history`,
+> `deep_history`, `fork`, `join`, `final`, `initial`, etc. are used here
+> exactly as they appear in the grammar.
 
 Specifies the canonical formatting rules for `fsm fmt`. The formatter is deterministic
 and idempotent: running `fsm fmt` twice on the same file MUST produce identical output.
@@ -294,8 +301,12 @@ on STOP                            -> Idle
 
 **Internal transition:**
 ```fsm
-internal on PING: { updateTimestamp(); }
+internal on PING : { updateTimestamp(); }
 ```
+
+> _Updated 2026-05-14: `internal on EVENT :` is the canonical form per
+> Doc 04 §8.2 — a space surrounds the colon (matches Pratt-table token
+> spacing). See CHANGELOG._
 
 **Priority clause** (inline after transition):
 ```fsm
@@ -324,16 +335,24 @@ every  500ms: { poll(); }
 
 # 12. Composite and Parallel States
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG. The grammar
+> uses the `state` keyword for every state regardless of whether it is
+> simple, composite, or parallel. Doc 04 §3.3 / §3.4 govern; the legacy
+> `composite Operational {` / `parallel Monitor {` forms are retired._
+
 ```fsm
-composite Operational {
+state Operational {
     initial Normal
-    history shallow
+
+    shallow_history Recall {
+        default -> Normal
+    }
 
     state Normal { }
     state Degraded { }
 }
 
-parallel Monitor {
+state Monitor parallel {
     region Sensors {
         initial Idle
         state Idle { }
@@ -347,10 +366,11 @@ parallel Monitor {
 ```
 
 **Rules:**
-- `composite NAME {` / `parallel NAME {` on one line.
+- `state NAME {` for every composite or simple state.
+- Add the `parallel` modifier after the name for orthogonal composites:
+  `state NAME parallel { region ... }`.
 - `initial StateName` before any `state` declarations.
-- `history shallow` / `history deep` on its own line, before states.
-- `history shallow default -> StateName` on its own line.
+- `shallow_history NAME {` / `deep_history NAME {` block, with `default -> StateName` on its own line **inside** the block. The default is mandatory per Doc 00 §B-14.
 - **Blank line between regions** in a parallel state.
 - Each `region NAME {` / `}` follows the same indent rules as state bodies.
 
@@ -574,6 +594,102 @@ The CI pipeline MUST verify this:
 ```bash
 fsm fmt --check $(find . -name "*.fsm") || (echo "FAIL: run fsm fmt"; exit 1)
 ```
+
+---
+
+# 18. Top-Level Constructs (added 2026-05-14)
+
+> _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §8 Doc 19 patch
+> "Coverage gap"; see CHANGELOG._
+
+The previous version of this document did not specify formatting for several
+top-level constructs the grammar (Doc 04 §2) supports. The canonical forms:
+
+## 18.1 Language Header
+
+```fsm
+language fsm 1.0
+```
+
+One per file, first non-comment line.
+
+## 18.2 `feature` Declarations
+
+```fsm
+feature parallel
+feature history
+```
+
+One per line, after `language` header, before any other declaration. Sorted
+alphabetically by the formatter.
+
+## 18.3 `import` Declarations
+
+```fsm
+import "common/events.fsm" as Common
+import "common/types.fsm" { PacketType, ErrorCode }
+```
+
+After `feature` declarations. Sorted alphabetically by path string. Aliased
+imports use `as` followed by an identifier; item-selection imports list items
+in `{ }` separated by `, `.
+
+## 18.4 `const` Declarations
+
+```fsm
+const MAX_RETRIES = 3
+const TIMEOUT_MS  = 5000
+```
+
+Right-align the `=` across consecutive `const` declarations.
+
+## 18.5 `enum` Declarations
+
+```fsm
+enum PacketType {
+    HEARTBEAT = 0,
+    DATA      = 1,
+    ERROR     = 2,
+}
+```
+
+Variants comma-terminated (trailing comma after the last variant is
+canonical). `=` aligned within the block when explicit values are used.
+
+## 18.6 `queue` and `target` Blocks
+
+```fsm
+machine Motor {
+    queue {
+        capacity = 16
+        overflow = assert
+    }
+
+    target {
+        profile     = C99
+        strategy    = switch_based
+        allow_float = false
+        max_nesting = 8
+    }
+
+    /* ... */
+}
+```
+
+`=` aligned within each block. Both blocks appear before the state hierarchy
+(after `context` / `events` / `externs`).
+
+## 18.7 `raise` / `send` / `as` Statements
+
+```fsm
+on TICK : { raise UPDATE }
+on DATA : { send DATA(payload.value) to UpstreamPipe }
+ctx.kmph = ctx.mph as u32
+```
+
+`as` keyword surrounded by one space on each side. `raise EVENT` and `send
+EVENT to Machine` use single spaces; argument lists use `( arg, arg )` with
+spaces inside the parens only when the line breaks.
 
 ---
 

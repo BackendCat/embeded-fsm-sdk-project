@@ -38,7 +38,13 @@ For a machine named `Motor`, the compiler generates exactly four files:
 | `Motor_impl.h` | User contract: extern declarations the user MUST implement |
 | `Motor_conf.h` | Compile-time configuration macros |
 
-The user includes `Motor.h` and implements the functions declared in `Motor_impl.h`.
+The user includes `Motor.h`, provides the HAL (`fsm_hal.h` — Doc 16), and
+implements the functions declared in `Motor_impl.h`.
+
+> _Updated 2026-05-14: every generated `.c` and `.h` carries an SPDX license
+> header (`SPDX-License-Identifier: MIT` by default; user-overridable via
+> `fsm generate --license <SPDX>`) per Doc 00 §10.4. See Doc 18 for the
+> flag, Doc 11 §27 for the header shape._
 
 ---
 
@@ -88,15 +94,29 @@ typedef union {
 } Motor_Event_t;
 
 /* ── Context struct ─────────────────────────────────────────────────────── */
+/* _Updated 2026-05-14 in v1.0 doc reconciliation per Doc 00 §11.3 (multi-
+   active-leaf representation); see CHANGELOG._ */
 typedef struct {
     /* User context fields */
     uint16_t speed;
     bool     running;
-    /* Internal FSM state — DO NOT access directly */
-    Motor_StateId_t _state;
-    Motor_StateId_t _history_Main;   /* one per history pseudo-state */
-    uint8_t         _join_bits;      /* one per join pseudo-state */
-    uint32_t        _timer_AfterIdle_remaining_ms;
+    /* Internal FSM state — DO NOT access directly.
+
+       Multi-active-leaf representation: `_active[]` holds one StateId per
+       active region. For non-parallel machines, `_active_count == 1`. This
+       replaces the older `_state` + `_state_region_N` slot scheme so
+       non-parallel and parallel machines share one dispatch path. */
+    Motor_StateId_t _active[MOTOR_MAX_PARALLEL_REGIONS];
+    uint8_t         _active_count;
+    /* Per-history-pseudo-state storage (direct-child slot; per-region when
+       parent is Parallel — see §14 / §21). */
+    Motor_StateId_t _history_Main;
+    /* Per-join-pseudo-state bit-vector (one bit per join source). */
+    uint8_t         _join_bits;
+    /* Per-timer arm-on-entry countdown (one per declared timer). */
+    uint32_t        _timer_after_idle_remaining_ms;
+    /* Per-instance completion-depth counter (was file-scope; now isolated). */
+    uint8_t         _completion_depth;
     /* Internal event queue */
     Motor_Event_t   _queue[MOTOR_QUEUE_CAPACITY];
     uint8_t         _queue_head;
@@ -205,128 +225,162 @@ void Motor_action_stopMotor (Motor_t *m, const Motor_Event_t *ev);
 
 ---
 
-# 8. Switch-Based Strategy — `MOTOR_CODEGEN_STRATEGY FSM_STRATEGY_SWITCH`
+# 8. Dispatch Strategies — Overview
 
-The dispatch function uses a nested `switch` on current state × event ID.
+> _Updated 2026-05-14 in v1.0 doc reconciliation per Doc 00 §B-10 / §B-11 /
+> §5.1 / §11.14; see CHANGELOG._
+
+Two strategies are normative for v1.0. The `--strategy` CLI flag (Doc 18) and
+the `MachineObject.target.strategy` IR field (Doc 09 §3) both can select.
+
+| Strategy | When to pick | Cost — ROM | Cost — dispatch latency | Mechanism |
+|---|---|---|---|---|
+| `switch` | Small-to-medium machines (≲ 64 states); single best when the C compiler can fold the nested switch into a jump table | Lower fixed overhead; one `Motor_try_transitions_in_state` per state | O(depth × per-state-events) | B-10: nested `switch` + leaf-to-root walk on a static `parent_table[]` |
+| `table` | Larger machines, parallel-region heavy code, or ROM-vs-flash tradeoffs that favour `.rodata` | Single `Motor_TransRow_t[]` table; cheaper-per-extra-state | O(N transitions × regions) — linear scan | B-11: collect-then-execute, one selected row per region |
+| `auto` (default) | The CLI default when neither IR nor flag picks. Heuristic: `state count < 64` ⇒ `switch`, else `table`. | — | — | Same emit/transition.rs shared semantics either way; pick is structural. |
+
+Both strategies share the same `emit/transition.rs` exit/action/entry
+sequencer so behaviour is bit-equivalent across strategies (verified by the
+CGEN-002 conformance fixture).
+
+## 8.1 Switch Strategy — `--strategy=switch`
+
+> Implements Doc 00 §B-10 leaf-to-root ancestor walk on a static
+> `parent_table[]`. Without this walk, transitions declared on a composite
+> parent silently fail to fire from nested leaves (classic HSM codegen bug).
 
 ```c
-/* Motor.c — switch-based dispatch (excerpt) */
+/* Motor.c — switch-based dispatch with ancestor walk */
 #include "Motor.h"
 #include "Motor_impl.h"
+#include "fsm_hal.h"
+
+/* parent_table[s] = direct parent of state s, or ROOT_SENTINEL for top-level.
+   Populated by walking IR.MachineObject.root at codegen time. */
+static const Motor_StateId_t Motor_parent_table[MOTOR_STATE__COUNT] = {
+    [MOTOR_STATE_OPERATIONAL]         = MOTOR_STATE__ROOT_SENTINEL,
+    [MOTOR_STATE_OPERATIONAL_RUNNING] = MOTOR_STATE_OPERATIONAL,
+    [MOTOR_STATE_ERROR]               = MOTOR_STATE__ROOT_SENTINEL,
+    /* ... */
+};
+
+static bool Motor_try_transitions_in_state(
+    Motor_t *m, Motor_StateId_t s, const Motor_Event_t *ev)
+{
+    switch (s) {
+    case MOTOR_STATE_OPERATIONAL:
+        switch (ev->id) {
+        case MOTOR_EVENT_FAULT:
+            /* Composite transition fires regardless of which descendant is active. */
+            Motor_execute_transition(m, /*src=*/MOTOR_STATE_OPERATIONAL,
+                                         /*tgt=*/MOTOR_STATE_ERROR,
+                                         /*kind=*/MOTOR_TKIND_EXTERNAL, ev);
+            return true;
+        default: break;
+        }
+        break;
+    case MOTOR_STATE_OPERATIONAL_RUNNING:
+        switch (ev->id) {
+        /* ... per-state generated cases ... */
+        default: break;
+        }
+        break;
+    default: break;
+    }
+    return false;
+}
 
 void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev) {
-    switch (m->_state) {
-
-    case MOTOR_STATE_IDLE:
-        switch (ev->id) {
-        case MOTOR_EVENT_START:
-            if (Motor_guard_isSpeedValid(m, ev)) {
-                /* Transition: Idle -> Running */
-                /* LCA: ROOT — exit Idle, enter Running */
-                Motor_exit_Idle(m);
-                Motor_action_startMotor(m, ev);
-                m->_state = MOTOR_STATE_RUNNING;
-                Motor_entry_Running(m);
-                m->_timer_AfterIdle_remaining_ms = 0;  /* cancel Idle timer */
+    /* For each active leaf (one per region), walk leaf -> ... -> root. */
+    for (uint8_t r = 0; r < m->_active_count; r++) {
+        Motor_StateId_t s = m->_active[r];
+        while (s != MOTOR_STATE__ROOT_SENTINEL) {
+            if (Motor_try_transitions_in_state(m, s, ev)) {
+                goto next_region;
             }
-            break;
-        default:
-            break;
+            s = Motor_parent_table[s];
         }
-        break;
-
-    case MOTOR_STATE_RUNNING:
-        switch (ev->id) {
-        case MOTOR_EVENT_STOP:
-            Motor_exit_Running(m);
-            Motor_action_stopMotor(m, ev);
-            m->_state = MOTOR_STATE_IDLE;
-            Motor_entry_Idle(m);
-            break;
-        case MOTOR_EVENT_FAULT:
-            Motor_exit_Running(m);
-            m->_state = MOTOR_STATE_ERROR;
-            Motor_entry_Error(m);
-            break;
-        default:
-            break;
-        }
-        break;
-
-    case MOTOR_STATE_ERROR:
-        /* No transitions from Error */
-        break;
-
-    default:
-        FSM_ASSERT(0 && "Motor: invalid state");
-        break;
+        /* No ancestor of m->_active[r] defined a transition for ev. */
+    next_region:;
     }
 }
 ```
 
----
+The `parent_table[]` costs ≤ 1 byte per state on ≤256-state machines. Per
+`MachineObject.root` walk happens at codegen time. Priority and document-order
+within a single state are resolved inside `Motor_try_transitions_in_state` by
+emitting cases in `(priority, document_order)` order. The leaf-tried-first
+rule handles "inner-beats-outer" implicitly. Confirms Doc 00 §B-10
+implementation per P0-2/P0-3 wave.
 
-# 9. Table-Driven Strategy — `MOTOR_CODEGEN_STRATEGY FSM_STRATEGY_TABLE`
+## 8.2 Table Strategy — `--strategy=table`
+
+> Implements Doc 00 §B-11 collect-then-execute. The early-return form (first
+> match wins) loses transitions in parallel composites where the second
+> region never gets a turn.
 
 ```c
-/* Motor.c — table-driven dispatch (excerpt) */
+/* Motor.c — table-driven dispatch, two-phase collect-then-execute */
 
 typedef bool (*Motor_GuardFn_t)(const Motor_t *, const Motor_Event_t *);
 typedef void (*Motor_ActionFn_t)(Motor_t *, const Motor_Event_t *);
-typedef void (*Motor_EntryExitFn_t)(Motor_t *);
+
+typedef enum {
+    MOTOR_TKIND_EXTERNAL = 0,
+    MOTOR_TKIND_LOCAL    = 1,
+    MOTOR_TKIND_INTERNAL = 2,
+    MOTOR_TKIND_COMPLETION = 3,
+} Motor_TKind_t;
 
 typedef struct {
     Motor_StateId_t  source;
     Motor_EventId_t  trigger;
-    Motor_GuardFn_t  guard;     /* NULL = unconditional */
-    Motor_ActionFn_t action;    /* NULL = no action */
+    Motor_GuardFn_t  guard;       /* NULL = unconditional */
+    Motor_ActionFn_t action;      /* NULL = no action */
     Motor_StateId_t  target;
+    Motor_TKind_t    kind;
     uint8_t          priority;
-    /* LCA depth pre-computed: how many levels to exit/enter */
-    uint8_t          exit_depth;
-    uint8_t          enter_depth;
+    uint16_t         action_idx;  /* deterministic per-row id; doc order */
 } Motor_TransRow_t;
 
+/* Sorted by (source, priority asc, document_order asc) at codegen time. */
 static const Motor_TransRow_t Motor_trans_table[] = {
-    /* source             trigger              guard                       action                       target              pri  exit enter */
-    { MOTOR_STATE_IDLE,   MOTOR_EVENT_START,   Motor_guard_isSpeedValid,   Motor_action_startMotor,     MOTOR_STATE_RUNNING, 100, 1,   1 },
-    { MOTOR_STATE_RUNNING, MOTOR_EVENT_STOP,   NULL,                       Motor_action_stopMotor,      MOTOR_STATE_IDLE,    100, 1,   1 },
-    { MOTOR_STATE_RUNNING, MOTOR_EVENT_FAULT,  NULL,                       NULL,                        MOTOR_STATE_ERROR,   100, 1,   1 },
+    /* ... rows ... */
 };
 #define MOTOR_TRANS_TABLE_SIZE  (sizeof(Motor_trans_table) / sizeof(Motor_trans_table[0]))
 
-/* Exit/entry function tables (indexed by StateId) */
-static const Motor_EntryExitFn_t Motor_exit_fns[MOTOR_STATE__COUNT] = {
-    [MOTOR_STATE_IDLE]    = Motor_exit_Idle,
-    [MOTOR_STATE_RUNNING] = Motor_exit_Running,
-    [MOTOR_STATE_ERROR]   = Motor_exit_Error,
-};
-static const Motor_EntryExitFn_t Motor_entry_fns[MOTOR_STATE__COUNT] = {
-    [MOTOR_STATE_IDLE]    = Motor_entry_Idle,
-    [MOTOR_STATE_RUNNING] = Motor_entry_Running,
-    [MOTOR_STATE_ERROR]   = Motor_entry_Error,
-};
-
 void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev) {
-    for (uint8_t i = 0; i < MOTOR_TRANS_TABLE_SIZE; i++) {
-        const Motor_TransRow_t *row = &Motor_trans_table[i];
-        if (row->source != m->_state)   continue;
-        if (row->trigger != ev->id)     continue;
-        if (row->guard && !row->guard(m, ev)) continue;
+    /* Phase 1 — collect: one matching row per active region. */
+    const Motor_TransRow_t *selected[MOTOR_MAX_PARALLEL_REGIONS];
+    uint8_t selected_count = 0;
 
-        /* Execute: exit → action → enter */
-        Motor_exit_fns[m->_state](m);
-        if (row->action) row->action(m, ev);
-        m->_state = row->target;
-        Motor_entry_fns[m->_state](m);
-        return;
+    for (uint8_t r = 0; r < m->_active_count; r++) {
+        Motor_StateId_t s = m->_active[r];
+        const Motor_TransRow_t *best = NULL;
+        while (s != MOTOR_STATE__ROOT_SENTINEL) {
+            for (uint16_t i = 0; i < MOTOR_TRANS_TABLE_SIZE; i++) {
+                const Motor_TransRow_t *row = &Motor_trans_table[i];
+                if (row->source  != s)      continue;
+                if (row->trigger != ev->id) continue;
+                if (row->guard && !row->guard(m, ev)) continue;
+                if (!best || row->priority < best->priority) best = row;
+            }
+            if (best) break;
+            s = Motor_parent_table[s];
+        }
+        if (best) selected[selected_count++] = best;
     }
-    /* No transition matched — event discarded */
+
+    /* Phase 2 — execute: sequence the selected transitions deterministically. */
+    for (uint8_t i = 0; i < selected_count; i++) {
+        Motor_execute_transition(m, selected[i], ev);
+    }
 }
 ```
 
-The table-driven strategy places the transition table in `.rodata` (constant data
-section), making it suitable for ROM-constrained targets.
+`Motor_execute_transition` sequences `exit / action / entry` per Doc 08 §6/§7,
+consuming the row's `kind` to apply the correct exit/entry-set rules (B-09).
+This confirms Doc 00 §B-11 per P0-2/P0-3 wave.
 
 ---
 
@@ -355,25 +409,57 @@ void Motor_init(Motor_t *m) {
 
 # 11. Timer Integration
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation per Doc 00 §10.3 (HAL
+> mandatory) and §11.5/§11.6 (per-timer event IDs, arm-on-entry); see CHANGELOG._
+
+**HAL is mandatory.** Generated `Motor.c` unconditionally includes
+`fsm_hal.h` (Doc 16). The user MUST provide
+`uint32_t fsm_hal_clock_now_ms(void)` and `void fsm_hal_assert(...)` symbols
+at link time. The codegen uses `fsm_hal_clock_now_ms()` (not wall time, not a
+hand-rolled tick counter) to read elapsed milliseconds; the simulator emulates
+the same surface deterministically. Zero-duration timers were rejected
+upstream by the analyzer with `FSM-E0410` per Doc 00 §B-13.
+
+**Per-timer event IDs.** Every declared timer receives a distinct synthetic
+event ID `MOTOR_EVENT_TIMER_<TIMER_ID>_FIRED` so that two timers — and the
+shared completion event ID — never collide. Per Doc 00 §11.5 / P0-4 wave.
+
+**Arm-on-entry, disarm-on-exit.** A timer is armed when its owner state is
+entered and cleared when the state is exited. Previously the timer was armed
+at `Motor_init`, which broke for any timer-owning state that wasn't the
+initial state. Per Doc 00 §11.6.
+
 ```c
 void Motor_tick(Motor_t *m, uint32_t elapsed_ms) {
-    /* Decrement AfterIdle timer */
-    if (m->_state == MOTOR_STATE_IDLE && m->_timer_AfterIdle_remaining_ms > 0) {
-        if (elapsed_ms >= m->_timer_AfterIdle_remaining_ms) {
-            m->_timer_AfterIdle_remaining_ms = 0;
-            /* Fire: inject internal timer event */
-            Motor_Event_t timer_ev = { .id = MOTOR_EVENT__TIMER_AFTER_IDLE };
-            Motor_dispatch(m, &timer_ev);
+    /* Decrement after_idle timer (armed on entry to Idle). */
+    if (m->_timer_after_idle_remaining_ms > 0) {
+        if (elapsed_ms >= m->_timer_after_idle_remaining_ms) {
+            m->_timer_after_idle_remaining_ms = 0;
+            /* Fire: distinct per-timer event ID, NOT shared completion. */
+            Motor_Event_t ev = { .id = MOTOR_EVENT_TIMER_AFTER_IDLE_FIRED };
+            Motor_dispatch(m, &ev);
         } else {
-            m->_timer_AfterIdle_remaining_ms -= elapsed_ms;
+            m->_timer_after_idle_remaining_ms -= elapsed_ms;
         }
     }
 }
+
+/* Inside Motor_entry_Idle, the timer is armed: */
+static void Motor_entry_Idle(Motor_t *m) {
+    m->_timer_after_idle_remaining_ms = 5000;  /* arm on entry */
+    /* ... entry actions ... */
+}
+
+/* Inside Motor_exit_Idle, the timer is disarmed: */
+static void Motor_exit_Idle(Motor_t *m) {
+    m->_timer_after_idle_remaining_ms = 0;     /* disarm on exit */
+    /* ... exit actions ... */
+}
 ```
 
-Timer events use a reserved internal event ID range (`MOTOR_EVENT__TIMER_*`) that is
-never exposed in the public `Motor_EventId_t` enum. They are synthesized only by
-`Motor_tick()`.
+Timer synthetic events use the dedicated `MOTOR_EVENT_TIMER_<ID>_FIRED` IDs
+which are part of the public `Motor_EventId_t` enum (so users can match on
+them in `internal on` handlers) but are synthesized only by `Motor_tick()`.
 
 ---
 
@@ -417,78 +503,97 @@ is not a power of 2.
 
 # 13. Parallel Region Dispatch
 
-When the active state is inside a parallel state, the event is delivered to ALL active
-regions:
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
 
-```c
-case MOTOR_STATE_MONITOR_REGION_A_IDLE:
-    /* handle event in region A */
-    /* FALL THROUGH to also dispatch to region B */
-case MOTOR_STATE_MONITOR_REGION_B_IDLE:
-    /* handle event in region B */
-    break;
-```
-
-In the table-driven strategy, all rows matching the current event with source states
-in parallel regions are executed in order.
+Parallel composites are handled by the multi-active-leaf representation
+described in §11 (Doc 00 §11.3 / P0-2/P0-3 wave) — `m->_active[N]` stores one
+active leaf per region. Dispatch is delegated to §8.2's collect-then-execute
+loop, which selects one matching transition per active region before
+executing any of them. The earlier "fall-through across cases" sketch is
+retired; behaviour for non-parallel machines is the single-slot
+(`_active_count == 1`) special case of the same code path.
 
 ---
 
 # 14. History State Implementation
 
-History is stored as one `Motor_StateId_t` field per history pseudo-state:
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
+History is stored as one `Motor_StateId_t` field per history pseudo-state.
+The stored value is the **direct child of the composite region** (the
+two-level abstraction, not the deepest leaf), so the deepest descendant is
+re-expanded via the initial-substate walk on entry. The `default ->` target
+is **mandatory** per Doc 00 §B-14; the analyzer rejects defaultless history
+declarations with `FSM-E0111`. The historical "no default at runtime" branch
+is therefore unreachable in production.
 
 ```c
 typedef struct {
     /* ... */
-    Motor_StateId_t _history_Operational;   /* shallow history of Operational */
+    Motor_StateId_t _history_Operational;   /* shallow history: direct child slot */
 } Motor_t;
 ```
 
-On exit from a composite state with history, the implementation records the current
-active child before calling exit actions:
+On exit from a composite state with history, the implementation records the
+**direct child of the composite region** before calling exit actions. The
+direct-child resolution helper is generated at codegen time:
 
 ```c
 /* Before calling exit_Running() when exiting Operational: */
-m->_history_Operational = m->_state;   /* record the leaving substate */
+m->_history_Operational = Motor_get_direct_child_of_Operational(m);
 ```
 
-On history (`-> History`) entry:
+On history (`-> History`) entry, the default is unconditionally available
+(FSM-E0111 ensures it):
 
 ```c
-Motor_StateId_t restore = m->_history_Operational;
-if (restore == MOTOR_STATE_ROOT) {
-    restore = MOTOR_STATE_RUNNING_NORMAL;   /* default */
-}
-m->_state = restore;
+Motor_StateId_t restore = (m->_history_Operational != MOTOR_STATE__ROOT_SENTINEL)
+                          ? m->_history_Operational
+                          : MOTOR_STATE_RUNNING_NORMAL;   /* declared default */
+m->_active[region_idx] = restore;
 Motor_entry_fns[restore](m);
 ```
+
+For Deep history whose parent is a Parallel state, one storage slot is
+emitted **per region** (not a single `StateId`), per the per-region history
+slots rule (Doc 00 §I-26).
 
 ---
 
 # 15. Completion Event Handling
 
-After each entry sequence, the dispatcher checks whether the new state is `final`:
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
+After each entry sequence, the dispatcher invokes `maybe_enqueue_completion`
+implementing the Doc 08 §9.1 algorithm: Simple states auto-fire on entry;
+Composite states fire when their single-region active leaf is Final;
+**Parallel states fire only when every region's active leaf is Final** (the
+all-regions-done rule per Doc 00 §B-08). The B-08 simulator and codegen now
+match.
 
 ```c
-static void Motor_handle_completion(Motor_t *m) {
-    if (m->_state == MOTOR_STATE_DONE) {   /* DONE is final */
-        /* Generate completion event — process immediately */
-        Motor_Event_t comp = { .id = MOTOR_EVENT__COMPLETION };
+static void Motor_handle_completion(Motor_t *m, Motor_StateId_t just_entered) {
+    /* Simple = auto-fire on entry */
+    if (Motor_state_is_simple[just_entered]) {
+        Motor_Event_t comp = { .id = MOTOR_EVENT__COMPLETION,
+                               .completion_from = just_entered };
         Motor_dispatch(m, &comp);
+        return;
     }
+    /* Composite / parallel handled by maybe_enqueue_completion checking all
+       regions per Doc 08 §9.1; only enqueues completion when the all-regions
+       rule holds. */
 }
 ```
 
-The completion event is an internal synthetic event processed immediately (not queued
-in the user-facing queue). Infinite loop protection:
+`_completion_depth` is a **per-instance field on `Motor_t`** (not a file-scope
+`static`), so two machine instances can run independently without sharing
+state. Loop protection unchanged at 100 (Doc 10 FSM-E0900):
 
 ```c
-static uint8_t _completion_depth = 0;
-
-static void Motor_handle_completion(Motor_t *m) {
-    _completion_depth++;
-    FSM_ASSERT(_completion_depth <= 100 && "FSM-E0900: completion chain depth exceeded");
+static void Motor_dispatch_completion(Motor_t *m, Motor_StateId_t from) {
+    m->_completion_depth++;
+    FSM_ASSERT(m->_completion_depth <= 100 && "FSM-E0900: completion chain depth exceeded");
     /* ... */
     _completion_depth--;
 }
@@ -698,77 +803,36 @@ Contrast with **shallow history** (§14): shallow history stores only the direct
 
 # 22. Deferred Event Codegen
 
-Deferred events use a per-state bitmask and a circular buffer for re-queued events.
+> _Updated 2026-05-14 in v1.0 doc reconciliation per Doc 00 §11.7 (option-b
+> downgrade); see CHANGELOG._
 
-**Defer mask:**
+**v1.0 STATUS — DEFERRED.** The analyzer rejects every `defer EVENT`
+declaration at compile time with `FSM-E0903` ("`defer` not yet supported;
+v1.0 limitation, lands in v1.1"). **No runtime defer path is emitted in
+v1.0.** The defer-queue codegen sketch below is the v1.1 reference and is
+kept for forward planning only.
+
+The decision to reject-rather-than-silent-drop preserves Doc 02 G1 (no
+undefined behaviour). A silent drop would have shipped a violating but
+plausible-looking compile, which the audit found and which Doc 00 §11.7
+specifies must be honest-instead.
+
+## 22.1 v1.1 Reference Sketch (informative)
+
+When `defer` ships in v1.1, per-region bitmask arrays (one bitmask per active
+region, NOT a flat per-machine mask) drive the gate; codegen picks the bitmask
+width based on declared event count (`uint32_t` / `uint64_t` /
+`uint8_t[ceil(N/8)]`); if `N > 256`, the analyzer raises `FSM-E0903`
+("too many event types for defer bitmask — reduce or split machine") per
+Doc 00 §G-08.
+
 ```c
-/* Per-state defer bitmask — bit N = event ID N is deferred in this state */
+/* v1.1 reference — not emitted in v1.0. */
 static const uint32_t Motor_defer_mask[MOTOR_STATE__COUNT] = {
-    [MOTOR_STATE_IDLE]       = 0x00000000u,   /* defers nothing */
-    [MOTOR_STATE_CONNECTING] = (1u << MOTOR_EVENT_DATA_RECEIVED),  /* defers DATA_RECEIVED */
-    [MOTOR_STATE_CONNECTED]  = 0x00000000u,
+    [MOTOR_STATE_CONNECTING] = (1u << MOTOR_EVENT_DATA_RECEIVED),
+    /* ... */
 };
-```
-
-**Deferred event queue:**
-```c
-/* Circular buffer for deferred events */
-typedef struct {
-    Motor_Event_t buffer[MOTOR_DEFER_QUEUE_CAPACITY];
-    uint8_t head;
-    uint8_t tail;
-    uint8_t count;
-} Motor_DeferQueue_t;
-
-static void Motor_defer_enqueue(Motor_DeferQueue_t *q, const Motor_Event_t *ev) {
-    FSM_ASSERT(q->count < MOTOR_DEFER_QUEUE_CAPACITY && "defer queue overflow");
-    q->buffer[q->tail] = *ev;
-    q->tail = (q->tail + 1u) & (MOTOR_DEFER_QUEUE_CAPACITY - 1u);
-    q->count++;
-}
-
-static bool Motor_defer_dequeue(Motor_DeferQueue_t *q, Motor_Event_t *out) {
-    if (q->count == 0u) return false;
-    *out = q->buffer[q->head];
-    q->head = (q->head + 1u) & (MOTOR_DEFER_QUEUE_CAPACITY - 1u);
-    q->count--;
-    return true;
-}
-```
-
-**Integration with dispatch loop:**
-```c
-void Motor_dispatch(Motor_t *m, const Motor_Event_t *ev) {
-    /* Check if event is deferred in the current state */
-    if (Motor_defer_mask[m->_state] & (1u << ev->id)) {
-        Motor_defer_enqueue(&m->_defer_queue, ev);
-        return;  /* event deferred — not dispatched */
-    }
-
-    Motor_StateId_t prev_state = m->_state;
-    /* ... normal dispatch logic ... */
-
-    /* On state change: release deferred events if new state does not defer them */
-    if (m->_state != prev_state) {
-        Motor_release_deferred(m);
-    }
-}
-
-static void Motor_release_deferred(Motor_t *m) {
-    Motor_Event_t ev;
-    Motor_DeferQueue_t tmp = {0};  /* temporary queue for events still deferred */
-
-    while (Motor_defer_dequeue(&m->_defer_queue, &ev)) {
-        if (Motor_defer_mask[m->_state] & (1u << ev.id)) {
-            /* Still deferred in new state — keep in queue */
-            Motor_defer_enqueue(&tmp, &ev);
-        } else {
-            /* Released — prepend to external queue for processing */
-            Motor_queue_push_front(m, &ev);
-        }
-    }
-    m->_defer_queue = tmp;
-}
+/* Per-region defer queue, release-on-exit semantics per Doc 08 §10. */
 ```
 
 ---

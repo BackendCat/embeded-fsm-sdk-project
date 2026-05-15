@@ -2,10 +2,18 @@
 
 **Document ID:** FSM-DEV-ONBOARD
 **Version:** 1.0.0
-**Status:** Normative Draft
+**Status:** Normative — Updated 2026-05-14 in v1.0 doc reconciliation;
+see CHANGELOG.
 
 This is the primary entry point for developers and AI agents starting implementation.
 It covers the tech stack, repository structure, build commands, and role-based reading guides.
+
+> **v1.0 scope reminder.** Per Doc 00 §6, v1.0 ships **CLI only** (no LSP, no
+> VS Code extension, no Web IDE, no WebSocket simulator, no C++17 codegen).
+> When this document discusses LSP / WebSocket / VS Code / WASM surfaces,
+> treat those as **v1.1 reference content** — they do not exist on day 1.
+> Day-1 scope is `fsm check / generate / fmt / parse / test / doc /
+> decompile / init` (Doc 18) plus the in-process simulator library.
 
 ---
 

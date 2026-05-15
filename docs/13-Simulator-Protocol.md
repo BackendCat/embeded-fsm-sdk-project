@@ -2,8 +2,20 @@
 
 **Document ID:** FSM-SPEC-SIM
 **Version:** 1.0.0
-**Status:** Normative Draft
+**Status:** _**Reserved — v1.1 surface.**_ Updated 2026-05-14 in v1.0 doc
+reconciliation; see CHANGELOG.
 **Depends on:** FSM-SPEC-IR, FSM-SPEC-SEM
+
+> **v1.0 NOTE.** Per Doc 00 §B-02 / §6 D-02, this protocol does NOT activate
+> in v1.0. The simulator runs **in-process** as a Rust library backing
+> `fsm test` and `fsm simulate` (no JSON-RPC, no port 7842, no auth). The
+> security gap (server on `0.0.0.0` with no auth, Doc 00 §G-02) is removed
+> by deletion, not hardening. The protocol shape below is the authoritative
+> **future** reference: slash-form method names (`sim/init`, `sim/step`, …)
+> are normative; dot-form is forbidden. The `StepRecord` schema in §11
+> remains the single normative trace format consumed in v1.0 by
+> conformance `.trace` files and by the in-process interpreter when run
+> under `fsm test`.
 
 Defines the JSON-RPC 2.0 over WebSocket protocol between the FSM simulator daemon and
 its clients (VS Code extension, Web IDE, test scripts). All tooling that needs to

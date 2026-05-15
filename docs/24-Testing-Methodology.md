@@ -2,8 +2,25 @@
 
 **Document ID:** FSM-DEV-TEST-METH
 **Version:** 2.0.0
-**Status:** Normative Draft
+**Status:** Normative — Updated 2026-05-14 in v1.0 doc reconciliation;
+see CHANGELOG.
 **Depends on:** FSM-SPEC-TEST (15), FSM-SPEC-DSL (04), FSM-SPEC-SEM (08), FSM-SPEC-DIAG (10)
+
+> **v1.0 status (as of 2026-05-14):**
+>
+> - **~491 tests passing** across the 9 v1.0 crates (`cargo test --workspace`).
+> - **All 3 shipped examples** (`motor`, `traffic-light`, `vending-machine`)
+>   pass the full chain: `fsm check` → `fsm generate` → `gcc -std=c99
+>   -Wall -Wextra -pedantic -Werror` → `fsm fmt --check` → simulator-trace-match.
+> - The `gcc -Werror` integration tests are now wired for every example
+>   (Doc 00 §11.16); skipping requires opting in via `FSM_SKIP_GCC_TESTS=1`.
+> - `fsm test` walks `MANIFEST.json` files under the test suite root and
+>   executes each fixture deterministically.
+> - Empty `expected` arrays in `.trace` fixtures are a **hard fail** by
+>   default (`--allow-empty-expected` opt-in only); previously silent-pass
+>   per Doc 00 §11.15.
+> - The 4 broken PARSE-NEG codes (001/005/008/010) have been re-anchored to
+>   the correct diagnostic codes (§3.2 below; Doc 00 §G-11).
 
 This document is both a methodology description and an **executable test plan**. Each test
 case includes: unique ID, pre-conditions, exact input data, exact command to run, exact
@@ -405,8 +422,11 @@ machine NoInitial {
 }
 ```
 **Expected exit code:** `1`
-**Expected stderr must contain:** `FSM-E0020`
-**Pass:** exit 1 AND stderr contains `FSM-E0020`
+**Expected stderr must contain:** `FSM-E0107` (per Doc 00 §G-11; previously incorrect `FSM-E0020`)
+**Pass:** exit 1 AND stderr contains `FSM-E0107`
+
+> _Updated 2026-05-14: code corrected from `FSM-E0020` (duplicate machine
+> name) to `FSM-E0107` (no initial declaration). See CHANGELOG._
 
 ---
 
@@ -479,8 +499,11 @@ machine MultiInitial {
 }
 ```
 **Expected exit code:** `1`
-**Expected stderr must contain:** `FSM-E0024`
-**Pass:** exit 1 AND stderr contains `FSM-E0024`
+**Expected stderr must contain:** `FSM-E0108` (per Doc 00 §G-11; previously incorrect `FSM-E0024`)
+**Pass:** exit 1 AND stderr contains `FSM-E0108`
+
+> _Updated 2026-05-14: code corrected from `FSM-E0024` (duplicate extern
+> name) to `FSM-E0108` (multiple initial declarations). See CHANGELOG._
 
 ---
 
@@ -538,8 +561,11 @@ machine UndefinedField {
 }
 ```
 **Expected exit code:** `1`
-**Expected stderr must contain:** `FSM-E0102`
-**Pass:** exit 1 AND stderr contains `FSM-E0102`
+**Expected stderr must contain:** `FSM-E0104` (per Doc 00 §G-11; previously incorrect `FSM-E0102`)
+**Pass:** exit 1 AND stderr contains `FSM-E0104`
+
+> _Updated 2026-05-14: code corrected from `FSM-E0102` (unknown extern) to
+> `FSM-E0104` (unknown context field). See CHANGELOG._
 
 ---
 
@@ -583,8 +609,11 @@ machine TypeMismatch {
 }
 ```
 **Expected exit code:** `1`
-**Expected stderr must contain:** `FSM-E0200`
-**Pass:** exit 1 AND stderr contains `FSM-E0200`
+**Expected stderr must contain:** `FSM-E0201` (per Doc 00 §G-11; previously incorrect `FSM-E0200`)
+**Pass:** exit 1 AND stderr contains `FSM-E0201`
+
+> _Updated 2026-05-14: code corrected from `FSM-E0200` (guard type mismatch)
+> to `FSM-E0201` (assignment type mismatch). See CHANGELOG._
 
 ---
 

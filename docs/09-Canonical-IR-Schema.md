@@ -42,11 +42,15 @@ writes the IR; none reads `.fsm` source directly.
 
 # 2. Top-Level Schema
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 ```json
 {
   "irVersion": "1.0.0",
   "sourceHash": "sha256:a3f9c1...",
   "sourceFiles": ["path/to/device.fsm"],
+  "features": ["parallel", "history"],
+  "imports": [ ],
   "machines": [ ],
   "diagnostics": [ ]
 }
@@ -57,18 +61,46 @@ writes the IR; none reads `.fsm` source directly.
 | `irVersion` | string | YES | Semantic version of this IR schema |
 | `sourceHash` | string | YES | `sha256:` prefix + hex of concatenated source files |
 | `sourceFiles` | string[] | YES | Absolute or workspace-relative paths of source files |
+| `features` | string[] | YES | Declared `feature` flag names (may be empty); per Doc 00 §B-06 |
+| `imports` | ImportDecl[] | YES | Top-level `import` declarations (may be empty); per Doc 00 §B-06 |
 | `machines` | MachineObject[] | YES | All machine declarations (may be empty) |
 | `diagnostics` | DiagnosticObject[] | YES | All diagnostics from compilation (may be empty) |
+
+### ImportDecl
+
+```json
+{
+  "path": "common/events.fsm",
+  "alias": "Common",
+  "items": ["PacketType", "ErrorCode"],
+  "loc": { }
+}
+```
+
+`alias` is `null` when the import uses item selection (`{ Item1, Item2 }`);
+`items` is `null` when the import is aliased. Path resolution applies the
+security constraints in Doc 18 §10 (canonicalize + workspace-root prefix).
 
 ---
 
 # 3. Machine Object Schema
+
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
 
 ```json
 {
   "id": "m-motor",
   "stableId": "Motor",
   "name": "Motor",
+  "consts": [ ],
+  "queue": { "capacity": 32, "overflow": "assert", "loc": { } },
+  "target": {
+    "profile": "C99",
+    "strategy": "switch_based",
+    "allowFloat": false,
+    "maxNesting": 8,
+    "loc": { }
+  },
   "context": { },
   "events": [ ],
   "externs": [ ],
@@ -83,12 +115,63 @@ writes the IR; none reads `.fsm` source directly.
 | `id` | string | YES | Compiler-assigned unique ID within this IR document |
 | `stableId` | string | YES | Stable identifier for toolchain continuity |
 | `name` | string | YES | Machine name as declared in DSL |
+| `consts` | ConstDecl[] | YES | `const` declarations (may be empty); per Doc 00 §B-06 |
+| `queue` | QueueConfig | YES | Event queue configuration; per Doc 00 §B-06 |
+| `target` | TargetConfig | YES | Codegen target configuration; per Doc 00 §B-06 |
 | `context` | ContextSchema | YES | Context field declarations |
 | `events` | EventObject[] | YES | Event declarations |
 | `externs` | ExternObject[] | YES | Extern function declarations |
 | `root` | RegionObject | YES | Root region containing all top-level states |
 | `submachines` | MachineObject[] | YES | Submachine definitions (may be empty array) |
 | `loc` | SourceLocation | YES | Location of `machine` keyword in source |
+
+### ConstDecl
+
+```json
+{
+  "id": "c-MAX-RETRIES",
+  "stableId": "Motor:const:MAX_RETRIES",
+  "name": "MAX_RETRIES",
+  "type": { "kind": "primitive", "name": "u8" },
+  "value": { "literalKind": "int", "value": 3 },
+  "loc": { }
+}
+```
+
+### QueueConfig
+
+```json
+{
+  "capacity": 32,
+  "overflow": "assert",
+  "loc": { }
+}
+```
+
+`overflow` ∈ `"assert"` | `"drop_oldest"` | `"drop_newest"`. Power-of-two
+`capacity` is recommended (lets codegen use a mask instead of a modulo).
+
+### TargetConfig
+
+```json
+{
+  "profile": "C99",
+  "strategy": "switch_based",
+  "allowFloat": false,
+  "maxNesting": 8,
+  "loc": { }
+}
+```
+
+`profile` ∈ `"C99"` | `"C99-RTOS"` | `"Cpp17"` | `"Simulation"` (C++17 deferred
+to v1.1). `strategy` ∈ `"switch_based"` | `"table_driven"` — the CLI
+`--strategy` flag (Doc 18) can override this at codegen time.
+
+### Context Field Defaults
+
+> _Updated 2026-05-14: `ContextField.default: Option<Literal>` is functional —
+> codegen `M_init` and simulator `Interpreter::init` both apply declared
+> defaults. Per Doc 00 §11.1 / R1 wave._
 
 ---
 
@@ -161,9 +244,20 @@ Additional fields beyond simple state:
 
 ## 4.4 Pseudo-State: Initial
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 ```json
 { "kind": "initial", "id": "ps-initial-0", "target": "s-idle", "loc": { } }
 ```
+
+**Normative reference contract.** `RegionObject.initial` is a `StateId` that
+MUST point at an Initial pseudo-state contained in `region.states`. It is
+NOT a bare state-name string or a direct pointer at the target state; the
+target is reached via the Initial pseudo-state's `target` field. This
+preserves the two-hop indirection in the UML metamodel and lets analyzers
+attach entry actions / guards to the initial pseudo-state without special
+casing. Per Doc 00 §B-01 / §11.2 (analyzer↔simulator contract fix, Wave 1.9
+/ commit c4f372d).
 
 ## 4.5 Pseudo-State: Final
 
@@ -204,6 +298,8 @@ semantic, not structural — both use the same JSON shape with `"kind": "junctio
 
 ## 4.8 Pseudo-State: History
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 ```json
 {
   "kind": "history",
@@ -218,7 +314,7 @@ semantic, not structural — both use the same JSON shape with `"kind": "junctio
 | Field | Type | Values | Description |
 |---|---|---|---|
 | `historyKind` | string | `"shallow"` \| `"deep"` | Shallow records direct child; deep records deepest active descendant |
-| `defaultTarget` | string \| null | state ID | Target when no history is stored yet; null triggers FSM-W0100 |
+| `defaultTarget` | string | state ID | **REQUIRED** target when no history is stored yet. Absence is `FSM-E0111` per Doc 00 §B-14. |
 
 ## 4.9 Pseudo-State: Fork
 
@@ -297,6 +393,8 @@ semantic, not structural — both use the same JSON shape with `"kind": "junctio
 
 # 6. Transition Object Schema
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 ```json
 {
   "id": "t-idle-running",
@@ -307,6 +405,7 @@ semantic, not structural — both use the same JSON shape with `"kind": "junctio
   "guard": null,
   "actions": [],
   "priority": 100,
+  "kind": "external",
   "internal": false,
   "loc": { }
 }
@@ -322,20 +421,37 @@ semantic, not structural — both use the same JSON shape with `"kind": "junctio
 | `guard` | GuardExpr \| null | YES | null = unconditional |
 | `actions` | Statement[] | YES | Action list (may be empty) |
 | `priority` | integer | YES | Priority (lower number = higher priority; default 100) |
-| `internal` | boolean | YES | true = internal transition (no exit/entry) |
+| `kind` | string | YES | `"external"` \| `"local"` \| `"internal"` \| `"completion"` — see Doc 00 §B-06 / §I-21 |
+| `internal` | boolean | YES (deprecated) | true ⟺ `kind == "internal"`. Kept for one cycle; remove in v1.1 per Doc 00 §B-06. New consumers MUST read `kind`. |
 | `loc` | SourceLocation | YES | Location of transition declaration |
 
 ### TriggerObject
 
-```json
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
+Discriminated on `kind`. The four normative shapes (per Doc 00 §11.5 /
+P0-4 wave) are:
+
+```jsonc
+// Event trigger
 { "kind": "event", "eventId": "ev-start" }
+
+// After (one-shot timer); `timerId` is the codegen-stable identifier used
+// to construct `MOTOR_EVENT_TIMER_<TIMER_ID>_FIRED`. Per Doc 00 §11.5.
+{ "kind": "after", "durationMs": 1000, "timerId": "after_idle" }
+
+// Every (periodic timer); same `timerId` semantics as after.
+{ "kind": "every", "periodMs": 250, "timerId": "every_tick" }
+
+// Completion trigger; `from` is the source state whose entry produced the
+// completion event (Simple = auto-fire on entry; Composite/Parallel =
+// all-regions-final per B-08).
+{ "kind": "completion", "from": "s-done" }
 ```
 
-or for timer triggers (internal synthetic events):
-
-```json
-{ "kind": "timer", "timerId": "tm-after-idle" }
-```
+Each timer trigger receives its own distinct synthetic event ID at codegen
+time so that timer fires never collide with the shared completion event ID
+(per Doc 00 §11.5).
 
 ---
 
@@ -389,15 +505,34 @@ Example `assign`:
 
 # 9. Expression Schema
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
 Discriminated on `kind`:
 
 | Kind | Fields |
 |---|---|
 | `"field_ref"` | `ref: FieldRef` |
-| `"literal"` | `literalKind: "int"|"bool"|"string"`, `value: number|boolean|string` |
+| `"literal"` | `literalKind: "int"|"bool"|"string"|"float"|"enum_variant"`, plus literal-kind-specific fields (see below) |
 | `"call"` | `callee: string` (extern ID), `args: Expr[]` |
 | `"unary"` | `op: "!"|"-"|"~"`, `operand: Expr` |
 | `"binary"` | `op: BinOp`, `left: Expr`, `right: Expr` |
+| `"cast"` | `operand: Expr`, `targetType: TypeRef` — per Doc 00 §B-06 |
+
+### Literal Variants
+
+```jsonc
+// int / bool / string (pre-v1.0 forms, unchanged)
+{ "kind": "literal", "literalKind": "int",    "value": 42 }
+{ "kind": "literal", "literalKind": "bool",   "value": true }
+{ "kind": "literal", "literalKind": "string", "value": "hello" }
+
+// float — per Doc 00 §B-06; only emitted when target.allowFloat is true
+{ "kind": "literal", "literalKind": "float",  "value": 1.5 }
+
+// enum_variant — per Doc 00 §B-06
+{ "kind": "literal", "literalKind": "enum_variant",
+  "enumName": "PacketType", "variant": "HEARTBEAT" }
+```
 
 `FieldRef`:
 ```json

@@ -63,19 +63,16 @@ The SDK MUST provide a single unified CLI binary: `fsm`.
 
 Subcommands:
 
-```
-fsm parse      [OPTIONS] <file>...          Parse and print AST / check syntax
-fsm validate   [OPTIONS] <file>...          Validate + semantic check
-fsm analyze    [OPTIONS] <file>...          Full static analysis
-fsm compile    [OPTIONS] <file>...          Full pipeline to IR
-fsm generate   [OPTIONS] <ir>              Generate code from IR
-fsm simulate   [OPTIONS] <ir>              Launch simulator
-fsm doc        [OPTIONS] <file>...          Generate documentation
-fsm fmt        [OPTIONS] <file>...          Format source files
-fsm check      [OPTIONS] <file>...          Parse + validate + analyze (CI usage)
-fsm version                                 Print version info
-fsm help       [SUBCOMMAND]                 Print help
-```
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+
+The authoritative CLI surface is [Doc 18 — CLI Specification](18-CLI-Specification.md);
+this section is a high-level overview. Where this document and Doc 18 disagree,
+Doc 18 wins. Notable mappings (per Doc 00 §I-17 / §I-18):
+
+- `fsm compile` is an **alias for `fsm generate`** (Doc 18 §5.4). To emit only
+  the IR JSON, use `fsm ir`.
+- **Exit codes** are defined authoritatively in [Doc 18 §3](18-CLI-Specification.md);
+  this document does not redefine them.
 
 ## 1.2 Input/Output
 
@@ -84,7 +81,7 @@ fsm help       [SUBCOMMAND]                 Print help
 - Output path MUST be configurable via `--output` or `-o`.
 - Diagnostic output MUST go to stderr.
 - Generated artifacts MUST go to stdout or the specified output path.
-- Exit codes: `0` = success, `1` = error (parse/validate), `2` = internal error.
+- **Exit codes:** see [Doc 18 §3](18-CLI-Specification.md) for the authoritative table.
 
 ## 1.3 Diagnostic Output Formats
 
@@ -378,406 +375,42 @@ configurations MUST be provided (FreeRTOS, Zephyr, POSIX).
 
 # 7. Simulator Requirements
 
-## 7.1 Architecture
+> _Status: Largely deferred to v1.1 — see Doc 00 §B-02 / §6 D-02. Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
 
-The simulator MUST be a self-contained process (`fsm-sim`) that:
+## 7.1 v1.0 Behaviour
 
-- Loads a canonical IR (JSON model).
-- Executes the machine using the formally defined semantics.
-- Exposes a WebSocket API for external control.
-- Uses a virtual clock (not wall time) for deterministic behavior.
+In v1.0 the simulator is an in-process Rust library backing the conformance
+test runner and the `fsm simulate` / `fsm test` CLI subcommands. No JSON-RPC
+server, no WebSocket transport, no network surface — the security gap of an
+unauthenticated `0.0.0.0` server has been removed by deletion, not hardening.
 
-## 7.2 WebSocket Protocol
+For the in-process simulator contract see Doc 13 (Reserved — v1.1 protocol
+surface, currently used only as the trace-record schema source) and
+[Doc 18 §5.7](18-CLI-Specification.md) (`fsm simulate` v1.0 behaviour).
 
-The simulator MUST expose a JSON-RPC 2.0 API over WebSocket on a configurable port (default: 7842).
+## 7.2 WebSocket Protocol (v1.1 — Reserved)
 
-### 7.2.1 Required Methods
-
-| Method | Description |
-|---|---|
-| `sim.init` | Load a machine IR and initialize to initial state. |
-| `sim.step` | Execute one event dispatch cycle. |
-| `sim.run` | Execute until breakpoint, final state, or `sim.pause`. |
-| `sim.pause` | Pause execution. |
-| `sim.reset` | Reset to initial state. |
-| `sim.inject` | Inject an event with payload. |
-| `sim.getConfig` | Get active state configuration (all active states). |
-| `sim.getContext` | Get current context field values. |
-| `sim.setContext` | Set a context field value. |
-| `sim.getTimers` | Get active timers and remaining time. |
-| `sim.advanceClock` | Advance virtual clock by N milliseconds. |
-| `sim.setBreakpoint` | Set a breakpoint (state entry, transition, guard). |
-| `sim.clearBreakpoint` | Remove a breakpoint. |
-| `sim.getTrace` | Retrieve the execution trace. |
-| `sim.replay` | Load and replay a trace. |
-| `sim.getSchema` | Return the protocol schema version. |
-
-### 7.2.1.1 Method Schemas (Normative)
-
-All methods use JSON-RPC 2.0. Parameters and results are defined using TypeScript-style interfaces.
-
-**`sim.init` — Load and initialize a machine**
-```typescript
-// Params
-interface SimInitParams {
-  ir: IrDocument;                    // Full IR JSON document
-  instanceId?: string;               // Optional custom instance ID (default: auto-generated)
-  initialContext?: Record<string, any>; // Override context field defaults
-}
-// Result
-interface SimInitResult {
-  instanceId: string;                // Assigned instance ID
-  configuration: { active: string[] }; // Initial active state IDs
-  context: Record<string, any>;      // Initial context values
-}
-```
-
-**`sim.step` — Execute one event dispatch cycle**
-```typescript
-// Params
-interface SimStepParams {
-  instanceId: string;
-}
-// Result
-interface SimStepResult {
-  stepped: boolean;                  // true if an event was available to process
-  event?: { name: string; payload?: Record<string, any> }; // Event that was processed
-  configuration: { active: string[] };
-  trace: TraceRecord[];              // Records generated during this step
-}
-```
-
-**`sim.run` — Execute until breakpoint, final state, or pause**
-```typescript
-// Params
-interface SimRunParams {
-  instanceId: string;
-  maxSteps?: number;                 // Safety limit (default: 10000)
-}
-// Result
-interface SimRunResult {
-  stoppedReason: "breakpoint" | "final_state" | "paused" | "max_steps";
-  stepsExecuted: number;
-  configuration: { active: string[] };
-}
-```
-
-**`sim.pause` — Pause execution**
-```typescript
-// Params
-interface SimPauseParams {
-  instanceId: string;
-}
-// Result
-interface SimPauseResult {
-  paused: true;
-  configuration: { active: string[] };
-}
-```
-
-**`sim.reset` — Reset to initial state**
-```typescript
-// Params
-interface SimResetParams {
-  instanceId: string;
-  context?: Record<string, any>;     // Optional context override on reset
-}
-// Result
-interface SimResetResult {
-  configuration: { active: string[] };
-  context: Record<string, any>;
-}
-```
-
-**`sim.inject` — Inject an event**
-```typescript
-// Params
-interface SimInjectParams {
-  instanceId: string;
-  event: { name: string; payload?: Record<string, any> };
-  position?: "front" | "back";       // Queue position (default: "back")
-}
-// Result
-interface SimInjectResult {
-  queued: true;
-  queueDepth: number;
-}
-```
-
-**`sim.getConfig` — Get active configuration**
-```typescript
-// Params
-interface SimGetConfigParams {
-  instanceId: string;
-}
-// Result
-interface SimGetConfigResult {
-  configuration: {
-    active: string[];                // Active state IDs (leaf states)
-    parent: string[];                // Active composite state IDs
-  };
-}
-```
-
-**`sim.getContext` — Get current context values**
-```typescript
-// Params
-interface SimGetContextParams {
-  instanceId: string;
-}
-// Result
-interface SimGetContextResult {
-  context: Record<string, any>;      // All context field name-value pairs
-}
-```
-
-**`sim.setContext` — Set a context field value**
-```typescript
-// Params
-interface SimSetContextParams {
-  instanceId: string;
-  field: string;                     // Context field name
-  value: any;                        // New value (must match field type)
-}
-// Result
-interface SimSetContextResult {
-  previousValue: any;
-  newValue: any;
-}
-```
-
-**`sim.getTimers` — Get active timers**
-```typescript
-// Params
-interface SimGetTimersParams {
-  instanceId: string;
-}
-// Result
-interface SimGetTimersResult {
-  timers: Array<{
-    id: string;                      // Timer stable ID
-    ownerState: string;              // State that owns this timer
-    type: "after" | "every";
-    durationMs: number;
-    remainingMs: number;
-    firedCount: number;              // 0 for "after", ≥0 for "every"
-  }>;
-}
-```
-
-**`sim.advanceClock` — Advance virtual clock**
-```typescript
-// Params
-interface SimAdvanceClockParams {
-  instanceId: string;
-  deltaMs: number;                   // Milliseconds to advance (must be > 0)
-}
-// Result
-interface SimAdvanceClockResult {
-  clockMs: number;                   // New virtual clock value
-  timersFired: number;               // Number of timers that fired
-  trace: TraceRecord[];              // All records from timer-triggered dispatches
-}
-```
-
-**`sim.setBreakpoint` — Set a breakpoint**
-```typescript
-// Params
-interface SimSetBreakpointParams {
-  instanceId: string;
-  breakpoint: {
-    type: "state_entry" | "state_exit" | "transition" | "guard_eval" | "timer_fire";
-    stateId?: string;                // For state_entry/state_exit
-    transitionId?: string;           // For transition
-    eventName?: string;              // For any type — filter by event
-  };
-}
-// Result
-interface SimSetBreakpointResult {
-  breakpointId: string;
-}
-```
-
-**`sim.clearBreakpoint` — Remove a breakpoint**
-```typescript
-// Params
-interface SimClearBreakpointParams {
-  instanceId: string;
-  breakpointId: string;
-}
-// Result
-interface SimClearBreakpointResult {
-  removed: true;
-}
-```
-
-**`sim.getTrace` — Get execution trace**
-```typescript
-// Params
-interface SimGetTraceParams {
-  instanceId: string;
-  fromIndex?: number;                // Start index (default: 0)
-  limit?: number;                    // Max records (default: all)
-}
-// Result
-interface SimGetTraceResult {
-  records: TraceRecord[];
-  totalCount: number;
-}
-
-interface TraceRecord {
-  index: number;
-  clockMs: number;
-  type: "init" | "dispatch" | "state_entry" | "state_exit" |
-        "transition" | "timer_fired" | "context_mutated" |
-        "event_deferred" | "event_released" | "completion" | "queue_overflow";
-  data: Record<string, any>;         // Type-specific fields
-}
-```
-
-**`sim.replay` — Load and replay a trace**
-```typescript
-// Params
-interface SimReplayParams {
-  instanceId: string;
-  trace: TraceRecord[];
-  speed?: number;                    // Replay speed multiplier (default: 1.0, 0 = instant)
-}
-// Result
-interface SimReplayResult {
-  replayed: number;                  // Number of records replayed
-  finalConfiguration: { active: string[] };
-}
-```
-
-**`sim.getSchema` — Return protocol schema version**
-```typescript
-// Params: none (empty object)
-// Result
-interface SimGetSchemaResult {
-  protocolVersion: string;           // e.g., "1.0.0"
-  methods: string[];                 // List of supported method names
-  notifications: string[];           // List of supported notification names
-}
-```
-
-### 7.2.1.2 Reconnection Protocol
-
-When the WebSocket connection is lost, the client follows this reconnection sequence:
-
-```
-Client                              Server
-  │                                    │
-  │  [connection lost]                 │
-  │                                    │
-  │  WebSocket connect (retry)         │
-  │ ──────────────────────────────────►│
-  │                                    │
-  │  sim.reconnect                     │
-  │    { lastKnownInstanceId: "X" }    │
-  │ ──────────────────────────────────►│
-  │                                    │
-  │  result: full state snapshot       │
-  │    { instanceId, configuration,    │
-  │      context, timers, traceIndex } │
-  │ ◄──────────────────────────────────│
-  │                                    │
-  │  [resume normal operation]         │
-  │                                    │
-```
-
-The `sim.reconnect` method:
-```typescript
-// Params
-interface SimReconnectParams {
-  lastKnownInstanceId: string;
-}
-// Result
-interface SimReconnectResult {
-  instanceId: string;
-  configuration: { active: string[] };
-  context: Record<string, any>;
-  timers: SimGetTimersResult["timers"];
-  traceIndex: number;                // Current trace position for incremental sync
-  clockMs: number;
-}
-```
-
-If the instance no longer exists (server restarted), the server responds with error code `-32002` ("instance not found"). The client MUST then re-initialize with `sim.init`.
-
-### 7.2.1.3 Virtual Clock Synchronization
-
-The virtual clock is the sole time source for all simulation. Normative rules:
-
-1. `sim.advanceClock(deltaMs)` advances the virtual clock by exactly `deltaMs` milliseconds.
-2. All `after` and `every` timers reference the virtual clock, NOT wall time.
-3. `sim.step` processes one event from the queue. If no event is queued but a timer would fire, `sim.step` advances the clock to the nearest timer expiry and fires it.
-4. `sim.run` repeatedly calls the equivalent of `sim.step` until a stop condition.
-5. Timer ordering: when multiple timers expire at the same virtual timestamp, they fire in declaration order (source order in the DSL).
-6. The clock MUST NOT advance during event processing (RTC step is instantaneous).
-
-```typescript
-// Explicit clock control
-interface SimSetClockParams {
-  instanceId: string;
-  clockMs: number;                   // Set absolute clock value (must be ≥ current)
-}
-interface SimSetClockResult {
-  previousClockMs: number;
-  newClockMs: number;
-  timersFired: number;
-}
-```
-
-### 7.2.2 Required Notifications (Server → Client)
-
-| Notification | Description |
-|---|---|
-| `sim.onStateEntry` | A state was entered. Includes state ID and timestamp. |
-| `sim.onStateExit` | A state was exited. |
-| `sim.onTransition` | A transition was executed. Includes source, target, event, guard. |
-| `sim.onBreakpoint` | Execution paused at a breakpoint. |
-| `sim.onFinalState` | A region reached its final state. |
-| `sim.onCompletion` | A completion event was generated. |
-| `sim.onTimerFired` | A timer event was generated. |
-| `sim.onQueueOverflow` | Event queue overflow with policy applied. |
-
-### 7.2.3 Protocol Version
-
-- The WebSocket protocol MUST carry a version in the handshake.
-- Protocol version MUST follow semantic versioning.
-- The `sim.getSchema` method MUST return the protocol version and method catalog.
+The full JSON-RPC 2.0 / WebSocket protocol previously specified here moved to
+Doc 13 (currently marked Reserved — v1.1 surface). When the WebSocket server
+is shipped in v1.1, Doc 13 is the single authoritative source for methods,
+notifications, schemas, reconnection protocol, and virtual-clock semantics.
+The slash form (`sim/init`, `sim/step`, …) is normative per Doc 00 §B-02.
 
 ## 7.3 Trace Format
 
-Traces MUST be serializable as JSON arrays of event records. Each record MUST include:
-
-- Record type (event_dispatched, state_entered, state_exited, transition_executed,
-  timer_fired, context_mutated, queue_overflow).
-- Virtual clock timestamp (milliseconds).
-- Node IDs (stable IDs of involved states/transitions).
-- Event data (event name, payload fields).
-- Guard evaluation result (for transition records).
-
-A trace MUST be sufficient for deterministic replay without access to the original IR.
+The canonical trace record shape is `StepRecord` defined in **Doc 13 §11**.
+Both the in-process simulator and the conformance `.trace` files MUST emit
+this exact JSON shape (per Doc 00 §B-02 / §11.10 BTreeMap-determinism note).
+The older trace shapes previously sketched here and in Doc 24 are retired.
 
 ## 7.4 Virtual Clock
 
-- The virtual clock starts at 0.
-- `sim.step` and `sim.run` advance the clock by the minimum timer expiry or no time if
-  no timer is active.
-- `sim.advanceClock(N)` advances the clock by N milliseconds, firing all expired timers.
-- Wall time MUST NOT be used in any simulation computation.
-
-## 7.5 Hardware-in-the-Loop (HiL) Mode
-
-- The simulator MAY operate in HiL mode where events come from a real hardware source
-  via a serial/CAN/USB bridge.
-- HiL mode MUST replace `sim.inject` with an external event source driver.
-- HiL mode MUST still allow context inspection and trace collection.
+- The simulator uses a virtual clock; wall-time is never read.
+- `fsm_hal_clock_now_ms()` is the codegen contract surface (Doc 16); the
+  simulator emulates it deterministically.
+- HiL operation is deferred along with the WebSocket protocol to v1.1.
 
 ---
-
 # 8. VS Code Extension Requirements
 
 ## 8.1 Extension Identity

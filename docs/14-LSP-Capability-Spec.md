@@ -2,8 +2,16 @@
 
 **Document ID:** FSM-SPEC-LSP
 **Version:** 1.0.0
-**Status:** Normative Draft
+**Status:** _**Deferred to v1.1.**_ Updated 2026-05-14 in v1.0 doc
+reconciliation; see CHANGELOG.
 **Depends on:** FSM-SPEC-DSL, FSM-SPEC-DIAG, FSM-SPEC-IR
+
+> **v1.0 NOTE.** Per Doc 00 §B-03 / §6 D-03, the LSP server is deferred to
+> v1.1. No `fsm-lang-server` binary ships in v1.0. When this surface is
+> revived, the **authoritative keyword list** lives at
+> [Doc 04 §1.5](04-DSL-Specification.md) (per Doc 00 §B-03); diagnostic
+> codes come from [Doc 10](10-Diagnostic-Code-Catalog.md). This document
+> MUST NOT inline-redefine either.
 
 Specifies all LSP 3.17 capabilities provided by the `fsm-lang-server`. Each section
 defines the exact shape of requests, responses, and the behavior expected from a

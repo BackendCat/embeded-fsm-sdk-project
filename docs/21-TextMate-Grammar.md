@@ -2,8 +2,15 @@
 
 **Document ID:** FSM-SPEC-TM
 **Version:** 1.0.0
-**Status:** Normative Draft
+**Status:** _**Deferred to v1.1.**_ Updated 2026-05-14 in v1.0 doc
+reconciliation; see CHANGELOG.
 **Depends on:** FSM-SPEC-DSL, FSM-SPEC-LSP
+
+> **v1.0 NOTE.** Per Doc 00 §B-03 / §6 D-04, the TextMate grammar is
+> deferred to v1.1 along with the VS Code extension. When this surface is
+> revived, the keyword scopes MUST be generated from the **authoritative
+> keyword list** at [Doc 04 §1.5](04-DSL-Specification.md); this document
+> MUST NOT inline-redefine the list.
 
 Specifies the TextMate grammar for `.fsm` files and the mapping of FSM-Lang constructs
 to VS Code theme colors. The grammar file lives at:

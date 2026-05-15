@@ -691,63 +691,69 @@ This means the Web IDE has zero backend dependency — it runs fully in the brow
 
 # 11.5 Crate Dependency Graph
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation per Doc 00 §11.1; see CHANGELOG._
+>
+> The foundation crate `fsm-diagnostics` (zero workspace deps; owns `Span`,
+> `SourceLocation`, `Severity`, `DiagnosticCode` — 75 variants — and
+> `Diagnostic`) was added in Wave 1.0 / commit `db5ef83` to break cyclic
+> dep risk. Every pipeline crate consumes it instead of redefining
+> diagnostic types locally (rust-analyzer / Roslyn precedent).
+>
+> v1.0 ships **9 crates** (added `fsm-diagnostics`). The crates
+> `fsm-lsp`, `fsm-codegen-cpp`, and `fsm-wasm` previously listed are
+> **not present in v1.0** — LSP/C++17/WASM are deferred to v1.1 per Doc 00
+> §6 D-01..D-05.
+
 ```
-fsm-lexer          (no_std, no deps)
-    │
-    └──► fsm-parser        (depends on: fsm-lexer)
-              │
-              └──► fsm-analyzer     (depends on: fsm-parser, fsm-ir)
-                        │
-                        └──► fsm-ir          (depends on: serde, serde_json, fsm-parser [SourceLocation only])
-                                  │
-                        ┌─────────┴──────────────────────┐
-                        │                                │
-                   fsm-codegen-c                  fsm-codegen-cpp
-                   (depends on: fsm-ir)           (depends on: fsm-ir)
-                        │                                │
-                        └───────────┬────────────────────┘
-                                    │
-                              fsm-simulator
-                              (depends on: fsm-ir, fsm-analyzer)
-                              (WASM feature: fsm-wasm wraps this)
-                                    │
-                              fsm-lsp
-                              (depends on: fsm-lexer, fsm-parser,
-                               fsm-analyzer, fsm-ir, fsm-codegen-c,
-                               fsm-simulator [embedded mode])
-                                    │
-                              fsm-formatter
-                              (depends on: fsm-lexer, fsm-parser)
+fsm-diagnostics    (no workspace deps; owns Span, SourceLocation,
+                    Severity, DiagnosticCode, Diagnostic)
+        │
+        ├──► fsm-lexer        (depends on: fsm-diagnostics)
+        │
+        ├──► fsm-parser       (depends on: fsm-diagnostics, fsm-lexer)
+        │
+        ├──► fsm-ir           (depends on: fsm-diagnostics, serde, serde_json)
+        │
+        ├──► fsm-analyzer     (depends on: fsm-diagnostics, fsm-parser, fsm-ir)
+        │
+        ├──► fsm-codegen-c    (depends on: fsm-diagnostics, fsm-ir)
+        │
+        ├──► fsm-simulator    (depends on: fsm-diagnostics, fsm-ir,
+        │                                  fsm-analyzer)
+        │
+        ├──► fsm-formatter    (depends on: fsm-diagnostics, fsm-lexer,
+        │                                  fsm-parser)
+        │
+        └──► fsm-cli          (binary; depends on: ALL crates above)
 
-                              fsm-cli (binary)
-                              (depends on: ALL crates above via clap)
-
-                              fsm-wasm (WASM lib)
-                              (depends on: fsm-parser, fsm-analyzer,
-                               fsm-ir, fsm-codegen-c, fsm-simulator)
+Not in v1.0 (deferred):
+  - fsm-codegen-cpp   (v1.1 — Doc 12 deferred)
+  - fsm-lsp           (v1.1 — Doc 14 deferred)
+  - fsm-wasm          (v1.1 — Web IDE deferred)
+  - fsm-rpc-server    (v1.1 — WebSocket simulator deferred)
 ```
 
 **Key rules:**
-- `fsm-ir` depends on `fsm-parser` for `SourceLocation` only — no other parser types are imported.
-- `fsm-codegen-*` MUST depend on `fsm-ir` only — not on the parser or analyzer.
-- `fsm-simulator` depends on `fsm-ir` and `fsm-analyzer` (for semantic validation at load time).
-- `fsm-lsp` is the only crate that imports the full pipeline.
-- `fsm-formatter` depends only on the CST — it does NOT need `fsm-analyzer` or IR.
-- `fsm-wasm` re-exports the full pipeline with `#[wasm_bindgen]` attributes.
+- `fsm-diagnostics` is the foundation crate; everyone else consumes it for
+  `Span`, `SourceLocation`, and `Diagnostic`. No crate redefines these
+  types locally.
+- `fsm-codegen-c` depends on `fsm-ir` only (not on parser or analyzer).
+- `fsm-simulator` depends on `fsm-ir` and `fsm-analyzer` (for semantic
+  validation at load time).
+- `fsm-formatter` depends only on the CST (lexer + parser); it does NOT
+  need analyzer or IR.
 
 **Build system: Cargo**
 ```bash
-# Build all crates
+# Build all crates (9 crates ship in v1.0)
 cargo build --workspace
 
-# Build WASM
-wasm-pack build crates/fsm-wasm --target web --out-dir ../../editors/web-ide/public
+# Run the full test suite
+cargo test --workspace
 
-# Build VS Code extension
-cd editors/vscode && npm install && npm run compile
-
-# Package VS Code extension
-cd editors/vscode && npx vsce package
+# Clippy / fmt gates
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
 ```
 
 ---
@@ -895,9 +901,14 @@ impl Interpreter {
 
 ## 12.8 `fsm-ir` Visitor Pattern
 
-The `IrVisitor` trait provides a default traversal of the IR tree. Implementations
-override specific `visit_*` methods. The `walk_*` methods provide default traversal
-that calls child visitors.
+> _Updated 2026-05-14 in v1.0 doc reconciliation per Doc 00 §8 (Doc 20 §12.8
+> patch) and §B-06 (new IR types); see CHANGELOG._
+
+The `IrVisitor` trait provides a default traversal of the IR tree.
+Implementations override specific `visit_*` methods. Crucially: `walk_machine`
+descends into `machine.root` (a `RegionObject`) — NOT a flat `m.states` /
+`m.transitions` list. The Doc 09 schema has a region-tree shape; walking the
+flat fields would miss every nested state.
 
 ```rust
 pub trait IrVisitor {
@@ -912,31 +923,42 @@ pub trait IrVisitor {
     fn visit_timer(&mut self, t: &TimerDecl)              {}
     fn visit_context_field(&mut self, f: &FieldDecl)      {}
     fn visit_event(&mut self, e: &EventDecl)              {}
-    fn visit_region(&mut self, r: &RegionNode)            { self.walk_region(r); }
+    fn visit_extern(&mut self, x: &ExternDecl)            {}
+    fn visit_const(&mut self, c: &ConstDecl)              {}     // NEW per B-06
+    fn visit_import(&mut self, i: &ImportDecl)            {}     // NEW per B-06
+    fn visit_queue(&mut self, q: &QueueConfig)            {}     // NEW per B-06
+    fn visit_target(&mut self, t: &TargetConfig)          {}     // NEW per B-06
+    fn visit_region(&mut self, r: &RegionObject)          { self.walk_region(r); }
 
-    // Default traversal methods
+    // Default traversal methods — descend the region tree, NOT flat lists.
     fn walk_document(&mut self, doc: &IrDocument) {
+        for i in &doc.imports  { self.visit_import(i); }
         for m in &doc.machines { self.visit_machine(m); }
     }
     fn walk_machine(&mut self, m: &MachineObject) {
-        for f in &m.context.fields { self.visit_context_field(f); }
-        for e in &m.events { self.visit_event(e); }
-        for s in &m.states { self.visit_state(s); }
-        for t in &m.transitions { self.visit_transition(t); }
-        for tmr in &m.timers { self.visit_timer(tmr); }
+        for c in &m.consts            { self.visit_const(c); }
+        self.visit_queue(&m.queue);
+        self.visit_target(&m.target);
+        for f in &m.context.fields    { self.visit_context_field(f); }
+        for e in &m.events            { self.visit_event(e); }
+        for x in &m.externs           { self.visit_extern(x); }
+        self.visit_region(&m.root);   // ← descend the root region
+        for sm in &m.submachines      { self.visit_machine(sm); }
     }
     fn walk_state(&mut self, s: &StateNode) {
-        for child in &s.children { self.visit_state(child); }
-        for r in &s.regions { self.visit_region(r); }
+        for t in s.transitions()      { self.visit_transition(t); }
+        for tmr in s.timers()         { self.visit_timer(tmr); }
+        for r in s.regions()          { self.visit_region(r); }
     }
-    fn walk_region(&mut self, r: &RegionNode) {
+    fn walk_region(&mut self, r: &RegionObject) {
         for s in &r.states { self.visit_state(s); }
     }
 }
 ```
 
-Used by: `fsm-codegen-c` (CodegenPlan builder), `fsm-codegen-cpp` (same),
-`fsm-analyzer` (reachability analysis), `fsm-simulator` (interpreter traversal).
+Used by: `fsm-codegen-c` (CodegenPlan builder), `fsm-analyzer` (reachability
+analysis), `fsm-simulator` (interpreter traversal). C++17 codegen reuse is
+deferred to v1.1.
 
 ## 12.9 Formatter CST API
 

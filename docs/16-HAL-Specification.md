@@ -2,8 +2,27 @@
 
 **Document ID:** FSM-SPEC-HAL
 **Version:** 1.0.0
-**Status:** Normative Draft
+**Status:** Normative — **HAL is MANDATORY for v1.0 codegen.** Updated
+2026-05-14 in v1.0 doc reconciliation; see CHANGELOG.
 **Depends on:** FSM-SPEC-GEN-C
+
+> **HAL IS MANDATORY FOR v1.0.** Per Doc 00 §10.3 (TL decision):
+>
+> - Generated `Motor.c` unconditionally emits `#include "fsm_hal.h"`. The
+>   user MUST provide implementations of `fsm_hal_clock_now_ms()` and
+>   `fsm_hal_assert()` before the firmware will link. There is no
+>   "without-HAL" codepath in v1.0.
+> - Trivial integration is ≤10 lines on Arduino:
+>   ```c
+>   uint32_t fsm_hal_clock_now_ms(void) { return millis(); }
+>   void fsm_hal_assert(const char *file, int line, const char *msg) {
+>       (void)file; (void)line; (void)msg; for (;;) {}
+>   }
+>   ```
+> - Mandatory HAL is the single contract that makes the simulator and
+>   codegen produce bit-identical traces (the codegen-vs-simulator
+>   equivalence gate G6); it removes the dual-codepath maintenance cost
+>   that an optional HAL would create.
 
 Defines all C functions the user must provide to port the generated FSM runtime to
 their target platform. The generated runtime is platform-agnostic; the HAL is the

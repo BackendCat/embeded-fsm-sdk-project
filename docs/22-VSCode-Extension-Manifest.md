@@ -2,8 +2,16 @@
 
 **Document ID:** FSM-SPEC-VSCE
 **Version:** 1.0.0
-**Status:** Normative Draft
+**Status:** _**Deferred to v1.1.**_ Updated 2026-05-14 in v1.0 doc
+reconciliation; see CHANGELOG.
 **Depends on:** FSM-SPEC-LSP, FSM-SPEC-UI, FSM-SPEC-TM
+
+> **v1.0 NOTE.** Per Doc 00 §B-04 / §6 D-05, no VS Code extension ships in
+> v1.0. This document is designated the **future authority** over Doc 03 /
+> Doc 05 conflicts (command IDs, settings keys, language ID). When the
+> extension is revived, the canonical command-prefix convention is
+> `FSM Studio:` (not `FSM:`); the setting key is `fsmLang.compilerPath`
+> (not `fsmLang.lspPath`) per Doc 00 §I-28.
 
 Specifies the exact `package.json` contributions for the VS Code extension: language
 registration, commands, keybindings, configuration schema, menus, and activation events.

@@ -48,6 +48,11 @@ These flags apply to every subcommand:
 
 # 3. Exit Codes
 
+> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+>
+> **This table is the single authoritative source for exit codes.** Other
+> docs (Doc 03, Doc 23) cross-reference here and MUST NOT redefine.
+
 | Code | Meaning |
 |---|---|
 | `0` | Success — no errors |
@@ -55,6 +60,10 @@ These flags apply to every subcommand:
 | `2` | Tool error — internal compiler bug, I/O error, invalid flags |
 | `3` | Not found — input file does not exist |
 | `4` | Configuration error — invalid `fsm.toml` or conflicting flags |
+
+`fsm generate` panics in the codegen layer are converted to `EmitError`
+(Doc 00 §11.9 / P1-8 wave) and surface as exit code 2; user-fixable input
+problems remain at exit code 1.
 
 ---
 
@@ -167,14 +176,16 @@ fsm generate [OPTIONS] <FILE>...
 **Options:**
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--target <TARGET>` | `-t` | `c99` | `c99` \| `cpp17` — code generation target |
+| `--target <TARGET>` | `-t` | `c99` | `c99` (C++17 deferred to v1.1) |
 | `--out <DIR>` | `-o` | `./generated/` | Output directory |
-| `--strategy <S>` | | `switch_based` | `switch_based` \| `table_driven` — codegen strategy |
+| `--strategy <S>` | | `auto` | `switch` \| `table` \| `auto` — dispatch strategy (Doc 11 §8). `auto` picks `switch` when state count < 64, else `table`. Per Doc 00 §11.14. |
+| `--license <SPDX>` | | `MIT` | SPDX license identifier emitted in generated `.c` / `.h` header. Validated against the SPDX list. Per Doc 00 §10.4. |
+| `--report-memory` | | off | Print computed per-machine memory budget (`sizeof(M_t)` breakdown) to stderr. Per Doc 00 §G-01. |
 | `--queue-size <N>` | | `8` | Event queue capacity (must be power of 2) |
 | `--queue-overflow <P>` | | `assert` | `assert` \| `drop_oldest` \| `drop_newest` |
 | `--isr-safe` | | off | Enable ISR-safe queue |
-| `--no-stl` | | off | Disable STL (C++ target only) |
-| `--impl-style <S>` | | `crtp` | `crtp` \| `vtable` (C++ target only) |
+| `--no-stl` | | off | Disable STL (C++ target only — DEFERRED v1.1) |
+| `--impl-style <S>` | | `crtp` | `crtp` \| `vtable` (C++ target only — DEFERRED v1.1) |
 | `--emit-offsets` | | off | Emit `M_asm_offsets.h` with struct byte offsets |
 | `--stdout` | | off | Write generated source to stdout instead of files |
 | `--emit-ir` | | off | Also write the IR JSON to `--out` directory |
@@ -244,37 +255,44 @@ fsm fmt --stdin < motor.fsm    # Pipe usage
 
 ## `fsm simulate`
 
-Start the simulator daemon. Clients connect via WebSocket (FSM-SPEC-SIM).
+> _Updated 2026-05-14 in v1.0 doc reconciliation per Doc 00 §B-02; see CHANGELOG._
+
+Launch the in-process simulator and print active states / step traces to
+stdout. **v1.0 does NOT start a WebSocket server.** The WebSocket transport
+is deferred to v1.1; the network-facing flags below are reserved for that
+revival and currently a no-op (passing `--port` produces a deprecation
+notice on stderr).
 
 ```bash
 fsm simulate [OPTIONS] [FILE]...
 ```
 
-**Options:**
+**Options (v1.0):**
 | Flag | Default | Description |
 |---|---|---|
-| `--port <N>` | `7842` | WebSocket listen port |
-| `--host <ADDR>` | `127.0.0.1` | Listen address (`0.0.0.0` for remote access) |
-| `--virtual-clock` | off | Start in virtual clock mode |
+| `--virtual-clock` | on | Use virtual clock (only mode in v1.0) |
 | `--load <FILE>` | | Pre-load machine(s) from `.fsm` file |
 | `--load-ir <FILE>` | | Pre-load machine(s) from IR JSON file |
-| `--once` | off | Exit after first client disconnects |
+| `--trace` | off | Emit `StepRecord` JSON per step (Doc 13 §11 schema) |
+
+**Reserved for v1.1 (Doc 13 revival):**
+| Flag | Default | Description |
+|---|---|---|
+| `--port <N>` | — | WebSocket listen port (v1.1) |
+| `--host <ADDR>` | — | Listen address (v1.1) |
+| `--once` | — | Exit after first client disconnects (v1.1) |
 
 **Examples:**
 ```bash
-fsm simulate motor.fsm                     # Start daemon, pre-load Motor machine
-fsm simulate --port 8080 --virtual-clock   # Custom port, virtual clock
-```
-
-The daemon prints its listen address to stderr:
-```
-info: FSM simulator listening on ws://127.0.0.1:7842
-info: loaded machine 'Motor' (instanceId: default)
+fsm simulate motor.fsm                     # Load and print initial state
+fsm simulate motor.fsm --trace             # Print StepRecord JSON per step
 ```
 
 ---
 
 ## `fsm lsp`
+
+> _DEFERRED to v1.1 — no `fsm-lang-server` ships in v1.0 (Doc 00 §6 D-03)._
 
 Start the Language Server in stdio mode. Called by VS Code extension automatically.
 
@@ -313,7 +331,11 @@ fsm doc [OPTIONS] <FILE>...
 
 ## `fsm test`
 
-Run the conformance test suite (FSM-SPEC-TEST).
+> _Updated 2026-05-14 in v1.0 doc reconciliation per Doc 00 §11.15 / §11.16;
+> see CHANGELOG._
+
+Run the conformance test suite. Walks `MANIFEST.json` files under the test
+suite root and executes each fixture.
 
 ```bash
 fsm test [OPTIONS]
@@ -330,6 +352,12 @@ fsm test [OPTIONS]
 | `--update-golden` | Regenerate golden files for formatter and codegen tests |
 | `--format <F>` | `human` (default) \| `junit` \| `json` |
 | `--verbose` | Show diff for every failing test |
+| `--allow-empty-expected` | Opt-in: accept empty `expected` arrays in `.trace` files as a passing trace. Default is **hard fail** (Doc 00 §11.15 / §G6) so silently-empty fixtures cannot accidentally claim conformance. |
+
+**Environment variables:**
+| Variable | Description |
+|---|---|
+| `FSM_SKIP_GCC_TESTS` | If set to `1`, skip integration tests that invoke `gcc -Werror` (gates Doc 11 G4 in CI). Use only when gcc is unavailable; the default is to **fail** the run with a clear "missing gcc" diagnostic, not silently skip. Per Doc 00 §11.16. |
 
 ---
 
@@ -510,6 +538,52 @@ fmt:
 fmt-check:
 	fsm fmt --check $(FSM_SOURCES)
 ```
+
+---
+
+# 10. Security
+
+> _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §G-02 / §11.12 /
+> §11.13; see CHANGELOG._
+
+The compiler runs in CI environments. The DSL has two surfaces an attacker
+could exploit: `import "path"` (path traversal) and `opaque "C_type"` (code
+injection). v1.0 hardens both at parse time.
+
+## 10.1 Import Path Resolution
+
+- Paths are resolved with `Path::canonicalize` (symlinks resolved before the
+  check, not after).
+- The resolved canonical path MUST start with the workspace root prefix.
+  `..` segments that escape the workspace are rejected as `FSM-E0700`-class
+  errors (canonicalization failure / out-of-workspace).
+- Per Doc 00 §11.12 / commit `bccc46f`.
+
+## 10.2 Opaque Type Validation
+
+- Content matched against `^[A-Za-z_][A-Za-z0-9_ *]*$`. Semicolons,
+  parentheses, brackets, and string literals are rejected at parse time.
+- The validated string is the only thing emitted into generated C, so a
+  rejected input cannot escape the regex into the compiled `.c`.
+
+## 10.3 Parser DoS Limits
+
+Default limits, applied at `parse()` entry:
+
+| Limit | Value | Rationale |
+|---|---|---|
+| `max_input_bytes` | 1 MiB | Bounds peak parser RAM |
+| `max_recursion_depth` | 256 | RAII guard, prevents stack overflow on deeply nested input |
+| `max_token_count` | ~262k | Bounds the lexer's token buffer |
+
+Per Doc 00 §11.13. Configurable via `fsmLang.parser.*` in `fsm.toml`.
+
+## 10.4 Simulator WebSocket — Not in v1.0
+
+The Doc 03 / Doc 13 simulator WebSocket is **not running** in v1.0. The
+security gap from "server on `0.0.0.0` with no auth" is closed by deletion
+(per Doc 00 §B-02). When v1.1 revives Doc 13, transport security is a
+release-blocker for that revival.
 
 ---
 
