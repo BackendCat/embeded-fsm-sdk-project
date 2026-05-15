@@ -90,3 +90,13 @@ The tag and the ~40 unpushed commits are **local only** (the owner controls the 
 ## 6. Sign-off
 
 v1.1.0 meets the release gate: 0 open P0, the one P0 found by the gate (SEC-P0-1) fixed and cold-quad-verified, scope statements code-verified and conservative (no overstatement; the recurring submachine prose-vs-code class confirmed absent and the one stale *audit* claim corrected not propagated), all residual findings explicitly tracked in CHANGELOG `[1.1.0]` and the ROADMAP. Tagging `v1.1.0` (annotated, local) with `checkpoint/2026-05-15` as the rollback anchor.
+
+---
+
+## 7. Tag topology & cold-quad-evidence validity (post-tag clarification, 2026-05-15)
+
+The post-tag metrics wave flagged an apparent tag-topology concern; verified definitively and recorded here so the release record is self-consistent:
+
+- **`v1.1.0` and `checkpoint/2026-05-15` both resolve to the same commit `abc7004`.** `v1.1.0` is an *annotated* tag — its object SHA `9634c7e` is the tag **object**, which dereferences to commit **`abc70044…`** (`git rev-list -1 v1.1.0` == `git rev-parse checkpoint/2026-05-15` == `abc7004`, byte-identical). The earlier "v1.1.0 points one commit after `abc7004`" reading was the classic annotated-tag-object-SHA-vs-commit confusion — **there is no tag mismatch**.
+- **Cold-quad commit vs tag commit — bounded and build-invariant.** §4's cold-from-source quad ran with `HEAD = eb35d4b` (the W8 doc-honesty / CHANGELOG-roll commit). The `v1.1.0` tag is at `abc7004 = eb35d4b + exactly one commit`, and `git diff --stat eb35d4b abc7004` is **one file: `docs/GATE_VERIFICATION_v1_1.md` (+92, this document itself)** — a pure-documentation addition with zero source/test/build/manifest surface. A Markdown-only delta cannot change `cargo build/test/clippy/fmt` or `fsm test` outcomes, so the §4 evidence (673/0, `-wt-`=0, 5/5, 25/25) **validly carries to the tagged commit `abc7004`**. (§4's prose still says "release commit `eb35d4b`" — accurate for *where the quad ran*; this section is the authoritative reconciliation to the *tag* commit.)
+- **Process refinement (codified Doc 00 §11.30) so future releases have zero off-by-one:** order must be (1) author + commit the gate-verification doc, (2) run the cold-from-source quad at *that* commit, (3) annotate-tag *that* commit — making quad-commit ≡ tag-commit exactly. v1.1.0's one-pure-docs-commit gap is provably immaterial, but a future gate doc that (unlike this one) summarised code would not have that guarantee. The `v1.1.0` tag is immutable and is **not** being moved (tag immutability is sacrosanct; re-cutting a release tag is a destructive operation we do not perform) — this clarification + §11.30 is the correct, honest resolution.
