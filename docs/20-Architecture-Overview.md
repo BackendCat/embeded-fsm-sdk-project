@@ -286,48 +286,117 @@ produces a clean output type.
 
 ## 5.2 Module Layout
 
+> **DRIFT-4 — reality check.** The tree below was reconciled to the
+> *actual* `crates/fsm-analyzer/src/` at this HEAD (verified read-only,
+> `find crates/fsm-analyzer/src -name '*.rs'`). DRIFT-3 corrected the
+> §4.2 parser layout and the §12.3 analyzer API and flagged that this
+> §5.2/§5.3 analyzer listing was stale the same way; this is that fix.
+> The earlier listing named a **two-`phase{1,2}_*` directory structure
+> that does not exist** (`phase1_structure/{symbol_table,builder,resolver}`,
+> `phase2_semantic/{type_checker,determinism,reachability,history,submachine}`)
+> plus `diagnostics.rs`, `ir_builder.rs` and `tests.rs` — none of which
+> are present. The shipped analyzer is **flat**: a `SymbolTable` build
+> pass (`symbol_table.rs`), a `checks/` family of semantic passes, and a
+> `lower/` AST→IR lowering tree (AD-3, 2026-05-15, split out of the
+> former `lower.rs`/`LoweringCtx` god-object). There is **no
+> `DiagnosticAccumulator`** — diagnostics are a plain
+> `Vec<fsm_diagnostics::Diagnostic>` threaded through the pipeline (see
+> §5.3 DRIFT-4); IR-building is the `lower/` tree, not an `ir_builder.rs`.
+> The two-phase split described in §5.1/§5.4/§5.5 survives as the
+> *conceptual* model (symbol-build then checks then lower), not as an
+> on-disk `phase{1,2}_*` directory layout. Recorded per Doc 00 §11
+> (prose-vs-code reconciliation; cf. §11.19/§11.24/§11.39).
+
 ```
 fsm-analyzer/src/
-├── lib.rs              # Public API: analyze(ast) → AnalysisResult
-├── phase1_structure/
-│   ├── mod.rs          # Phase 1 entry point
-│   ├── symbol_table.rs # Scoped symbol registry
-│   ├── builder.rs      # Walk AST, build symbol table
-│   └── resolver.rs     # Resolve name references to IDs
-├── phase2_semantic/
-│   ├── mod.rs          # Phase 2 entry point
-│   ├── type_checker.rs # Bidirectional type inference for expressions
-│   ├── determinism.rs  # Conflict detection algorithm (FSM-E0300)
-│   ├── reachability.rs # Dead state and unreachable transition detection
-│   ├── history.rs      # History invariant checks (FSM-W0100)
-│   └── submachine.rs   # Submachine cycle detection (FSM-E0502)
-├── diagnostics.rs      # DiagnosticAccumulator
-├── ir_builder.rs       # Converts resolved AST + symbol table → IR
-└── tests.rs
+├── lib.rs              # Crate root + public re-exports: analyze / analyze_with_source / AnalysisResult / SymbolTable
+├── symbol_table.rs     # First pass: collect every named entity per machine (FSM-E0020..E0024 duplicate detection)
+├── scope.rs            # Lexical scope stack consulted during name resolution / checks
+├── lca.rs              # Lowest-Common-Ancestor utilities (Doc 00 §7.7 B-09) — incl. external-self-transition LCA corner case
+├── util.rs             # Small utilities shared across the analyzer pipeline
+├── checks/             # Semantic-check family — one module per check, run in dependency order
+│   ├── mod.rs          # Check orchestrator: name resolution first, then the rest
+│   ├── name_resolution.rs # Every reference resolves to an in-scope symbol (FSM-E0100..E0109)
+│   ├── type_check.rs   # Lightweight type checks: guards boolean, literals fit, assignments agree
+│   ├── determinism.rs  # Same-(source,event) transitions must be statically exclusive (FSM-E0300)
+│   ├── completion.rs   # Completion-transition semantics (Doc 00 §7.5 B-07): FSM-E0401 / FSM-W0101
+│   ├── history.rs      # shallow_history / deep_history must carry `default ->` (FSM-E0111)
+│   ├── timer.rs        # Timer durations: 0/negative → FSM-E0410, >24h → FSM-W0601
+│   ├── parallel.rs     # Parallel-region structure: FSM-E0600 / FSM-H0004 / FSM-W0600
+│   ├── submachine.rs   # Submachine reference checks over real SUBMACHINE_DECL / SUBMACHINE_REF nodes
+│   ├── defer.rs        # defer+explicit-on conflict (FSM-E0310); v1.0 unsupported-defer FSM-E0903
+│   └── import.rs       # Import sanity — parser already enforces G-02 traversal; light for v1.0
+└── lower/              # AST → IR lowering (AD-3: split out of the former LoweringCtx god-object)
+    ├── mod.rs          # Lowering entry point + `analyze` / `analyze_with_source` / `AnalysisResult`
+    ├── ids.rs          # Monotonic ID factory — the only mutable participant in lowering
+    ├── loc.rs          # Immutable source-location helpers (file / src → SourceLocation)
+    ├── machine.rs      # Machine-level lowering: context fields, events, externs, consts, queue, types
+    ├── state.rs        # State-tree lowering: states, regions, pseudo-states, transitions, timers, defers
+    ├── expr.rs         # Action / guard sub-language lowering → IR Statement / GuardExpr / IrExpr
+    └── hash.rs         # `sourceHash` label + a tiny dep-free in-tree SHA-256 (RFC 6234)
 ```
 
 ## 5.3 Key Types
 
+> **DRIFT-4 — reality check.** This block is an independent stale copy of
+> `AnalysisResult` (DRIFT-3 already corrected the *§12.3* copy; §5.3 is a
+> separate one this fix reconciles). The *shipped* `AnalysisResult`
+> (`crates/fsm-analyzer/src/lower/mod.rs:59`, re-exported
+> `crates/fsm-analyzer/src/lib.rs:37`) carries `ir: Option<Ir>` (an
+> `fsm_ir::Ir`, not an `IrDocument`; `None` only on catastrophic errors —
+> partial IR is preferred) and `diagnostics: Vec<Diagnostic>` (the
+> unified `fsm_diagnostics::Diagnostic`, not a bespoke
+> `AnalysisDiagnostic`). **There is no `IrDocument`, `AnalysisDiagnostic`,
+> `ScopeId`, `ScopeKind`, `SymbolId`, or `TypeEnv` type anywhere in
+> `crates/fsm-analyzer/src`** (verified read-only). The shipped
+> `SymbolTable` (`crates/fsm-analyzer/src/symbol_table.rs:155`) is **not**
+> a `HashMap<ScopeId, Scope>` — it is a flat `Vec<MachineSymbols>` (one
+> per declared machine) plus file-level decl vectors and name→index
+> lookups; duplicate-name detection uses those ordered tables, not a
+> scope map. `Scope` (`crates/fsm-analyzer/src/scope.rs:12`) is the
+> lexical-scope-stack cursor — `{ machine_idx: Option<usize>,
+> container_path: Vec<String> }` — not a `{ kind, symbols, parent }`
+> node; it identifies *which container declared a name* and is consulted
+> by `SymbolTable` during resolution, it does not itself store symbols.
+> Type information is checked structurally by `checks/type_check.rs`
+> (conservative v1.0 scope, no HM-style `TypeEnv`). The original block is
+> retained below only as the historical design sketch; the shipped shapes
+> are authoritative. Recorded per Doc 00 §11 (prose-vs-code
+> reconciliation; cf. §11.19/§11.24/§11.39).
+
 ```rust
+// Shipped (crates/fsm-analyzer/src/lower/mod.rs:59; re-export lib.rs:37):
 pub struct AnalysisResult {
-    pub ir: IrDocument,                    // from fsm-ir
-    pub diagnostics: Vec<AnalysisDiagnostic>,
-    pub symbol_table: SymbolTable,         // retained for LSP queries
+    pub ir: Option<Ir>,                 // fsm_ir::Ir; None only on
+                                        // catastrophic errors (partial IR preferred)
+    pub diagnostics: Vec<Diagnostic>,   // fsm_diagnostics::Diagnostic — analyzer +
+                                        // lowerer + parser, in source-emission order
+    pub symbol_table: SymbolTable,      // exposed for downstream re-use (LSP, docs)
 }
 
+// Shipped (crates/fsm-analyzer/src/symbol_table.rs:155):
 pub struct SymbolTable {
-    scopes: HashMap<ScopeId, Scope>,
+    pub machines: Vec<MachineSymbols>,  // one per declared `machine`
+    pub file_consts: Vec<Entry>,        // decls outside any machine block
+    pub file_enums: Vec<EnumEntry>,
+    pub file_externs: Vec<Entry>,
+    pub machine_index: HashMap<String, usize>,    // name → index in `machines`
+    pub submachines: Vec<SubmachineEntry>,        // `submachine NAME { … }` templates
+    pub submachine_index: HashMap<String, usize>,
+    // (plus file_extern_pure — see source for the full set)
 }
 
+// Shipped (crates/fsm-analyzer/src/scope.rs:12) — a scope-stack CURSOR,
+// not a symbol-holding node; consulted by SymbolTable during resolution:
 pub struct Scope {
-    pub kind: ScopeKind,      // Machine | State | Region
-    pub symbols: HashMap<String, SymbolId>,
-    pub parent: Option<ScopeId>,
+    pub machine_idx: Option<usize>,     // index into SymbolTable::machines
+    pub container_path: Vec<String>,    // state/region IDs machine-root → here;
+                                        // last element is the immediate parent
 }
 
-pub struct TypeEnv {
-    pub fields: HashMap<String, TypeRef>,  // context + payload fields
-}
+// There is no separate `TypeEnv`; v1.0 type checking is structural and
+// lives in `checks::type_check` (guards boolean, literals fit, assignments
+// agree) — not a Hindley-Milner environment.
 ```
 
 ## 5.4 Phase 1 — Structural Validation
