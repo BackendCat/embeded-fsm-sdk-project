@@ -22,7 +22,16 @@ thiserror = { workspace = true }
 # don't want the dependency at all can `--no-default-features`; in any case
 # the gate call itself is `#[cfg(debug_assertions)]` so an optimized build
 # pays zero runtime cost regardless of feature selection.
-jsonschema = { version = "0.17", default-features = false, optional = true }
+#
+# Floor pinned to 0.22 (RUSTSEC-2026-0009): jsonschema <=0.21 transitively
+# pulled `time`, and every `time >=0.3.47` (the advisory's fixed floor)
+# requires rustc >=1.88 / Cargo edition2024 — incompatible with this repo's
+# load-bearing 1.75 pin. jsonschema 0.22.0 dropped the `time` dependency
+# outright (its old `iso8601` date-time format path), removing the advisory
+# from the tree at the root. 0.22 is the lowest version with no `time` edge
+# whose MSRV (1.70) still satisfies the 1.75 pin; the structural-Draft7 API
+# this crate uses is unchanged across 0.17->0.22.
+jsonschema = { version = "0.22", default-features = false, optional = true }
 
 [features]
 # On by default so `cargo test`/dev builds wire the IR-schema gate without

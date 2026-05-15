@@ -25,12 +25,14 @@ fn schema_path() -> PathBuf {
     p
 }
 
-fn load_schema() -> jsonschema::JSONSchema {
+fn load_schema() -> jsonschema::Validator {
     let raw = std::fs::read_to_string(schema_path()).expect("schema file exists");
     let value: serde_json::Value = serde_json::from_str(&raw).expect("schema is valid JSON");
-    jsonschema::JSONSchema::options()
+    // Non-deprecated 0.22 API (see crates/fsm-ir/src/json.rs); `Validator` is
+    // the concrete type the old `JSONSchema` alias pointed at.
+    jsonschema::options()
         .with_draft(jsonschema::Draft::Draft7)
-        .compile(&value)
+        .build(&value)
         .expect("schema compiles")
 }
 

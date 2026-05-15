@@ -104,9 +104,14 @@ pub fn validate_ir_against_schema(ir: &Ir) -> Result<(), Vec<String>> {
     let schema_value: serde_json::Value = serde_json::from_str(IR_SCHEMA_JSON)
         .map_err(|e| vec![format!("embedded IR schema is not valid JSON: {e}")])?;
 
-    let compiled = jsonschema::JSONSchema::options()
+    // `jsonschema::options()` + `.build()` are the non-deprecated 0.22 API;
+    // the older `JSONSchema::options()`/`.compile()` spelling still works but
+    // is `#[deprecated]` and this crate builds under `clippy -D warnings`.
+    // Behaviour is identical (Draft7 structural validation; `compile` merely
+    // forwarded to the same builder).
+    let compiled = jsonschema::options()
         .with_draft(jsonschema::Draft::Draft7)
-        .compile(&schema_value)
+        .build(&schema_value)
         .map_err(|e| vec![format!("embedded IR schema failed to compile: {e}")])?;
 
     if let Err(errors) = compiled.validate(&instance) {
