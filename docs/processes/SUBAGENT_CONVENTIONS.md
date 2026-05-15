@@ -5,9 +5,11 @@
 **Status:** Normative. Every wave brief MUST conform.
 
 **Document ID:** FSM-PROC-SUBAGENT
-**Version:** 1.0.0
+**Version:** 1.1.0
 
 This document codifies how implementation work gets done by background agents on FSM Studio. It exists because: a project of this size, run autonomously, can only stay coherent if every wave follows the same shape, leaves the same evidence, and respects the same boundaries. Deviations from these rules cause regressions, lost work, and audit findings that should have been prevented.
+
+**v1.1.0 changelog:** Added the behavioural-acceptance mandate (§5.4 — the rule that would have caught the P0-1 non-functional-lowering catastrophe ~8 waves earlier). Hardened orchestrator duties (§11 — mandatory post-merge quad, liveness heartbeat, phase-boundary audits, checkpoint tags). Derived from the 2026-05-15 retrospective (plan PD-2/PD-4/PD-5/PD-6).
 
 ---
 
@@ -132,6 +134,22 @@ Test function names should answer "what scenario does this prove":
 - ✅ `defer_event_rejected_at_analysis_with_e0903`
 - ❌ `test_motor` / `it_works` / `basic_test`
 
+### 5.4 Behavioural-acceptance mandate (v1.1.0 — the P0-1 lesson)
+
+**Any wave that touches the pipeline's behaviour (lowering, codegen, simulator, or a new language feature) MUST ship an end-to-end test that compiles the generated C with `gcc -std=c99 -Wall -Wextra -Wpedantic -Werror`, RUNS the resulting binary, and ASSERTS observable behaviour** — state transitions taken, context fields mutated, externs called, traces matched.
+
+Why this rule exists: the P0-1 catastrophe. The AST→IR lowering shipped hard-coding `guard:None, actions:[]` for every transition. **413 tests were green** because they asserted symbol *presence* (`text.contains("Motor_init")`), not behaviour. The product was behaviourally empty — every guard ignored, every action dropped — and nothing caught it for ~8 waves until the first audit. That cost ~10 rework waves.
+
+Concretely, a behaviour-touching wave's acceptance test must do all four:
+1. `fsm generate` real `.fsm` source → C
+2. `gcc -std=c99 -Wall -Wextra -Wpedantic -Werror` compile + link with a host HAL stub
+3. **Execute** the binary driving an event sequence
+4. Assert the final state / context / extern-call-trace is what the DSL semantics *mean* (cross-checked against the spec, not just against the simulator — the simulator can share the same bug)
+
+A wave that only adds unit tests of internal structure for a behaviour change is **incomplete** and must not be merged. The orchestrator rejects it back for an acceptance test.
+
+Symbol-presence assertions are acceptable ONLY as a cheap secondary check alongside a real behavioural test, never as the sole guard for a behaviour. The 128 legacy symbol-presence assertions are tracked for paydown in v1.1-W0.
+
 ---
 
 ## 6. Scope boundary discipline
@@ -207,14 +225,28 @@ The orchestrator (the conversation-level Claude that dispatches waves) is respon
 - Maintaining the wave queue + dependency ordering
 - Sizing each wave so it fits one agent's context comfortably (split if necessary)
 - Tracking disk margin between dispatches
-- Merging branches sequentially with verification quad on main
 - Removing worktrees post-merge
 - Updating backlog + memory after each merge
-- Running audits on the cadence defined in the plan
 - Updating CHANGELOG.md
 - Surfacing learned lessons as new `feedback_*.md` memory entries
 
-The orchestrator does NOT implement. Implementation is delegated. The orchestrator's value is in coordination, sequencing, and protecting the codebase from incoherent change.
+### 11.1 Mandatory post-merge verification (v1.1.0 — PD-5)
+
+After EVERY merge to main, the orchestrator independently re-runs the full quad on main: `cargo build/test/clippy/fmt --workspace`. No exceptions, regardless of what the agent's completion report claimed. Trust-but-verify is not optional — a merge can introduce conflicts the agent never saw, and self-reported green is not proof. If the post-merge quad fails, the merge is reverted (or fixed-forward immediately) before any further dispatch.
+
+### 11.2 Liveness heartbeat (v1.1.0 — PD-4)
+
+When dispatching a background wave expected to run >10 min, the orchestrator sets a `ScheduleWakeup` (~25 min) as a deadman switch. If the wave's completion notification has not arrived by wakeup, the orchestrator probes liveness (`ps`, output-file mtime, worktree `git status`) per `feedback_verify_agent_liveness`. A wave can die silently from disk, MCP disconnect, session interruption, or plan-mode activation — 4 instances during v1.0. Never wait open-endedly on a "dispatched successfully" message.
+
+### 11.3 Phase-boundary audits (v1.1.0 — PD-2)
+
+Audits run not only pre-tag but at every phase boundary — specifically after the analyzer/codegen/simulator triad of any new feature lands, before downstream waves build on it. The P0-1 catastrophe (non-functional lowering) sat undetected for ~8 waves because the first audit ran only after all of Phase 1+2. Catch behavioural rot at the boundary, not at the end.
+
+### 11.4 Known-good checkpoints (v1.1.0 — PD-6)
+
+After each clean audit or phase boundary, the orchestrator creates a lightweight annotated `checkpoint/<YYYY-MM-DD>-<descriptor>` git tag. These are rollback anchors — without them, a subtle regression introduced N waves ago has no clean revert target. Release tags (`vX.Y.Z`) are the public milestones; `checkpoint/*` are the internal safety net.
+
+The orchestrator does NOT implement. Implementation is delegated. The orchestrator's value is in coordination, sequencing, independent verification, and protecting the codebase from incoherent change.
 
 ---
 
