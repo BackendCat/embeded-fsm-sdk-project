@@ -12,7 +12,7 @@ use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use crate::scope::Scope;
 use crate::symbol_table::SymbolTable;
-use crate::util::span_of;
+use crate::util::{parse_int_literal_i128, span_of};
 
 /// Run type-check pass.
 pub fn check(file: &ast::File, st: &SymbolTable, out: &mut Vec<Diagnostic>) {
@@ -122,10 +122,11 @@ fn check_assign(node: &SyntaxNode, scope: &Scope, st: &SymbolTable, out: &mut Ve
         if let Some(field_name) = idents.get(1) {
             // Field existence already checked in name resolution; we
             // additionally narrow type compatibility for literal RHS.
-            if let (Some(rhs), Some(field)) =
+            // `_field`-bound only to confirm the field exists; the body
+            // looks up its type via `field_type_text` below.
+            if let (Some(rhs), Some(_field)) =
                 (children.get(1), st.resolve_context_field(field_name, scope))
             {
-                let _ = field;
                 let Some(rhs_val) = resolve_simple_literal(rhs) else {
                     return;
                 };
@@ -252,24 +253,6 @@ fn resolve_simple_literal(expr: &SyntaxNode) -> Option<i128> {
         }
         _ => None,
     }
-}
-
-fn parse_int_literal_i128(text: &str) -> Option<i128> {
-    let cleaned: String = text.chars().filter(|c| *c != '_').collect();
-    let cleaned = cleaned.trim();
-    if let Some(rest) = cleaned
-        .strip_prefix("0x")
-        .or_else(|| cleaned.strip_prefix("0X"))
-    {
-        return i128::from_str_radix(rest, 16).ok();
-    }
-    if let Some(rest) = cleaned
-        .strip_prefix("0b")
-        .or_else(|| cleaned.strip_prefix("0B"))
-    {
-        return i128::from_str_radix(rest, 2).ok();
-    }
-    cleaned.parse::<i128>().ok()
 }
 
 fn is_unsigned(ty: &str) -> bool {

@@ -16,7 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fsm_ir::{
-    DeferDecl, HistoryObject, MachineObject, RegionObject, StateNode, TimerObject, TransitionObject,
+    walk_state, DeferDecl, HistoryObject, IrVisitor, MachineObject, RegionObject, StateNode,
+    TimerObject, TransitionObject,
 };
 
 /// One node in the flattened machine tree.
@@ -108,12 +109,81 @@ pub struct MachineIndex {
     pub events_by_name: HashMap<String, String>, // name → id
 }
 
+/// R2.1 (2026-05-15): visitor that flattens a machine's region/state tree
+/// into the simulator's lookup maps. Traversal lives in
+/// `IrVisitor::walk_state` (fsm-ir); per-variant data extraction stays here.
+///
+/// The two parent-context fields (`parent_state_stack`,
+/// `parent_region_stack`) are pushed/popped around region and state
+/// descents respectively so any newly-recorded node sees the right
+/// lexical ancestors. The previous shape passed them as plain arguments
+/// to mutually-recursive free functions — the stacks encode the same
+/// invariant on the visitor struct so we can ride the trait's recursion.
+struct IndexBuilder<'a> {
+    nodes: &'a mut HashMap<String, Arc<NodeRef>>,
+    regions: &'a mut HashMap<String, Arc<RegionRef>>,
+    /// Current containing-region id while walking states. Top entry is the
+    /// region that owns the next `visit_state` call.
+    parent_region_stack: Vec<String>,
+    /// Current containing-state id while walking nested regions. `None` at
+    /// the root region's level (root has no enclosing state); on entering
+    /// a composite/parallel's regions we push that state's id.
+    parent_state_stack: Vec<Option<String>>,
+}
+
+impl<'a> IrVisitor for IndexBuilder<'a> {
+    fn visit_region(&mut self, r: &RegionObject) {
+        let parent_state = self.parent_state_stack.last().cloned().unwrap_or(None);
+        let child_ids: Vec<String> = r.states.iter().map(state_id).collect();
+        let rref = RegionRef {
+            id: r.id.clone(),
+            name: r.name.clone(),
+            initial_pseudo: r.initial.clone(),
+            priority: r.priority,
+            parent_state: parent_state.clone(),
+            child_state_ids: child_ids,
+        };
+        self.regions.insert(r.id.clone(), Arc::new(rref));
+        self.parent_region_stack.push(r.id.clone());
+        for s in &r.states {
+            self.visit_state(s);
+        }
+        self.parent_region_stack.pop();
+    }
+
+    fn visit_state(&mut self, s: &StateNode) {
+        let parent_state = self.parent_state_stack.last().cloned().unwrap_or(None);
+        let parent_region = self.parent_region_stack.last().cloned().unwrap_or_default();
+        self.record_state(s, parent_state, &parent_region);
+        // Descend into composite/parallel regions: push self as the
+        // parent_state, recurse via the trait, pop. For non-region-bearing
+        // variants `walk_state` is a no-op so the push/pop is cheap.
+        if state_has_regions(s) {
+            self.parent_state_stack.push(Some(state_id(s)));
+            walk_state(self, s);
+            self.parent_state_stack.pop();
+        } else {
+            walk_state(self, s);
+        }
+    }
+}
+
+fn state_has_regions(s: &StateNode) -> bool {
+    matches!(s, StateNode::Composite(_) | StateNode::Parallel(_))
+}
+
 impl MachineIndex {
     pub fn build(m: Arc<MachineObject>) -> Self {
         let root_region_id = m.root.id.clone();
         let mut nodes: HashMap<String, Arc<NodeRef>> = HashMap::new();
         let mut regions: HashMap<String, Arc<RegionRef>> = HashMap::new();
-        Self::record_region(&m.root, None, &mut nodes, &mut regions);
+        let mut builder = IndexBuilder {
+            nodes: &mut nodes,
+            regions: &mut regions,
+            parent_region_stack: Vec::new(),
+            parent_state_stack: vec![None],
+        };
+        builder.visit_region(&m.root);
         let events_by_id: HashMap<_, _> = m
             .events
             .iter()
@@ -133,35 +203,10 @@ impl MachineIndex {
             events_by_name,
         }
     }
+}
 
-    fn record_region(
-        r: &RegionObject,
-        parent_state: Option<String>,
-        nodes: &mut HashMap<String, Arc<NodeRef>>,
-        regions: &mut HashMap<String, Arc<RegionRef>>,
-    ) {
-        let child_ids: Vec<String> = r.states.iter().map(state_id).collect();
-        let rref = RegionRef {
-            id: r.id.clone(),
-            name: r.name.clone(),
-            initial_pseudo: r.initial.clone(),
-            priority: r.priority,
-            parent_state: parent_state.clone(),
-            child_state_ids: child_ids,
-        };
-        regions.insert(r.id.clone(), Arc::new(rref));
-        for s in &r.states {
-            Self::record_state(s, parent_state.clone(), &r.id, nodes, regions);
-        }
-    }
-
-    fn record_state(
-        s: &StateNode,
-        parent_state: Option<String>,
-        parent_region: &str,
-        nodes: &mut HashMap<String, Arc<NodeRef>>,
-        regions: &mut HashMap<String, Arc<RegionRef>>,
-    ) {
+impl<'a> IndexBuilder<'a> {
+    fn record_state(&mut self, s: &StateNode, parent_state: Option<String>, parent_region: &str) {
         let (id, name, stable, kind, regs, hist, trans, timers, defers, entry, exit) = match s {
             StateNode::Simple(s) => (
                 s.id.clone(),
@@ -360,16 +405,14 @@ impl MachineIndex {
             entry,
             exit,
         };
-        nodes.insert(id.clone(), Arc::new(nref));
-
-        // Recurse into composite/parallel regions.
-        if let Some(child_regions) = state_regions(s) {
-            for r in child_regions {
-                Self::record_region(r, Some(id.clone()), nodes, regions);
-            }
-        }
+        self.nodes.insert(id, Arc::new(nref));
+        // Region descent is now driven by `walk_state` via the IrVisitor
+        // recursion — the visitor's `visit_region` is invoked for every
+        // child region with the right parent-state pushed on the stack.
     }
+}
 
+impl MachineIndex {
     pub fn node(&self, id: &str) -> Option<&NodeRef> {
         self.nodes.get(id).map(|a| a.as_ref())
     }
@@ -455,10 +498,122 @@ fn state_id(s: &StateNode) -> String {
     }
 }
 
-fn state_regions(s: &StateNode) -> Option<&Vec<RegionObject>> {
-    match s {
-        StateNode::Composite(s) => Some(&s.regions),
-        StateNode::Parallel(s) => Some(&s.regions),
-        _ => None,
+#[cfg(test)]
+mod tests {
+    //! R2.1 behaviour-equivalence guards (2026-05-15).
+    //!
+    //! The IrVisitor-driven `MachineIndex::build` replaced the prior
+    //! pair of mutually-recursive `record_region` / `record_state`
+    //! free-function calls. These tests pin down the externally
+    //! observable behaviour — parent-region wiring, parent-state
+    //! threading across composite descents, region child-state ids —
+    //! so any future regression in the visitor's stack discipline
+    //! surfaces at unit-test time rather than via interpreter traces.
+    use super::*;
+    use fsm_diagnostics::{SourceLocation, Span};
+    use fsm_ir::{CompositeState, ContextSchema, InitialPseudo, QueueConfig, SimpleState};
+
+    fn loc() -> SourceLocation {
+        SourceLocation::new("t.fsm", Span::new(0, 1), 1, 1)
+    }
+
+    /// One composite parent containing one inner region with one simple
+    /// child — the smallest topology that exercises:
+    /// - `parent_state_stack` push on composite descent (inner's
+    ///   `parent_state` must be `s-outer`),
+    /// - `parent_region_stack` push (inner's `parent_region` must be the
+    ///   inner-region id),
+    /// - region's `child_state_ids` order preserved (initial pseudo first,
+    ///   then the simple state).
+    #[test]
+    fn composite_parent_state_and_region_threaded_through_visitor() {
+        let machine = MachineObject {
+            id: "m".into(),
+            stable_id: "M".into(),
+            name: "M".into(),
+            context: ContextSchema::default(),
+            events: vec![],
+            externs: vec![],
+            root: RegionObject {
+                id: "r-root".into(),
+                stable_id: None,
+                name: "__root".into(),
+                initial: "ps-root-init".into(),
+                states: vec![
+                    StateNode::Initial(InitialPseudo {
+                        id: "ps-root-init".into(),
+                        target: "s-outer".into(),
+                        loc: loc(),
+                    }),
+                    StateNode::Composite(CompositeState {
+                        id: "s-outer".into(),
+                        stable_id: "M:state:Outer".into(),
+                        name: "Outer".into(),
+                        entry: vec![],
+                        exit: vec![],
+                        transitions: vec![],
+                        timers: vec![],
+                        defers: vec![],
+                        regions: vec![RegionObject {
+                            id: "r-outer".into(),
+                            stable_id: None,
+                            name: "__r_outer".into(),
+                            initial: "ps-outer-init".into(),
+                            states: vec![
+                                StateNode::Initial(InitialPseudo {
+                                    id: "ps-outer-init".into(),
+                                    target: "s-inner".into(),
+                                    loc: loc(),
+                                }),
+                                StateNode::Simple(SimpleState {
+                                    id: "s-inner".into(),
+                                    stable_id: "M:state:Inner".into(),
+                                    name: "Inner".into(),
+                                    entry: vec![],
+                                    exit: vec![],
+                                    transitions: vec![],
+                                    timers: vec![],
+                                    defers: vec![],
+                                    loc: loc(),
+                                }),
+                            ],
+                            priority: 0,
+                            loc: loc(),
+                        }],
+                        history: None,
+                        loc: loc(),
+                    }),
+                ],
+                priority: 0,
+                loc: loc(),
+            },
+            submachines: vec![],
+            consts: vec![],
+            imports: vec![],
+            features: vec![],
+            queue: QueueConfig::default(),
+            targets: vec![],
+            loc: loc(),
+        };
+        let idx = MachineIndex::build(Arc::new(machine));
+        // Root region recorded; parent_state must be None.
+        let r_root = idx.region("r-root").expect("root region registered");
+        assert!(r_root.parent_state.is_none());
+        // Inner region recorded with parent_state = Outer.
+        let r_outer = idx.region("r-outer").expect("inner region registered");
+        assert_eq!(r_outer.parent_state.as_deref(), Some("s-outer"));
+        // Outer state's parent_state is None (under root), parent_region is r-root.
+        let outer = idx.node("s-outer").expect("outer node registered");
+        assert!(outer.parent_state.is_none());
+        assert_eq!(outer.parent_region.as_deref(), Some("r-root"));
+        // Inner state's parent_state is Outer, parent_region is r-outer.
+        let inner = idx.node("s-inner").expect("inner node registered");
+        assert_eq!(inner.parent_state.as_deref(), Some("s-outer"));
+        assert_eq!(inner.parent_region.as_deref(), Some("r-outer"));
+        // Region's child-state ids preserve document order.
+        assert_eq!(
+            r_outer.child_state_ids,
+            vec!["ps-outer-init".to_string(), "s-inner".to_string()],
+        );
     }
 }

@@ -16,7 +16,7 @@ use fsm_parser::ast::{self, AstNode};
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use crate::symbol_table::SymbolTable;
-use crate::util::span_of;
+use crate::util::{parse_int_literal_i64, span_of};
 
 const TWENTY_FOUR_HOURS_MS: i64 = 86_400_000;
 
@@ -86,7 +86,7 @@ fn resolve_expr_value(expr: &SyntaxNode, consts: &[(String, i64)]) -> Option<i64
                 .children_with_tokens()
                 .filter_map(|el| el.into_token())
                 .find(|t| matches!(t.kind(), SyntaxKind::IntLiteral | SyntaxKind::FloatLiteral))?;
-            parse_int_literal(tok.text())
+            parse_int_literal_i64(tok.text())
         }
         SyntaxKind::EXPR_UNARY => {
             // Unary minus / plus around a literal.
@@ -133,22 +133,4 @@ fn file_consts(file: &ast::File) -> Vec<(String, i64)> {
         }
     }
     out
-}
-
-fn parse_int_literal(text: &str) -> Option<i64> {
-    let cleaned: String = text.chars().filter(|c| *c != '_').collect();
-    let cleaned = cleaned.trim();
-    if let Some(rest) = cleaned
-        .strip_prefix("0x")
-        .or_else(|| cleaned.strip_prefix("0X"))
-    {
-        return i64::from_str_radix(rest, 16).ok();
-    }
-    if let Some(rest) = cleaned
-        .strip_prefix("0b")
-        .or_else(|| cleaned.strip_prefix("0B"))
-    {
-        return i64::from_str_radix(rest, 2).ok();
-    }
-    cleaned.parse::<i64>().ok()
 }

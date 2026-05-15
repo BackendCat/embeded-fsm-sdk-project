@@ -114,7 +114,6 @@ pub fn timer_event_c(ctx: &MachineEmitCtx<'_>, timer_id: &str) -> Option<String>
 /// Emit the `Motor_advance_clock` body — the tick function.
 pub fn emit_advance_clock(ctx: &MachineEmitCtx<'_>) -> String {
     let prefix = ctx.type_prefix();
-    let macro_prefix = ctx.macro_prefix();
     let mut s = String::new();
     s.push_str(&format!(
         "void {prefix}_advance_clock({prefix}_t *m, uint32_t elapsed_ms) {{\n",
@@ -124,7 +123,6 @@ pub fn emit_advance_clock(ctx: &MachineEmitCtx<'_>) -> String {
     if timers.is_empty() {
         s.push_str("    (void)m; (void)elapsed_ms;\n");
         s.push_str("}\n");
-        let _ = macro_prefix;
         return s;
     }
     // Read clock once for trace correlation (Doc 00 §10.3).

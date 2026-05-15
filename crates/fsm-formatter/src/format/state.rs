@@ -222,10 +222,9 @@ fn next_node_position(node_positions: &[usize], from: usize) -> Option<usize> {
 fn emit_body_trivia(
     w: &mut FormatWriter,
     trivia: &[fsm_parser::SyntaxToken],
-    has_previous_decl: bool,
+    _has_previous_decl: bool,
     _has_next_decl: bool,
 ) {
-    let _ = has_previous_decl;
     // We separate the trivia run into newlines + comments. We emit each
     // comment at the current indent, and insert at most a single blank
     // line before / between comments if the user had >=2 newlines.
@@ -265,16 +264,15 @@ fn emit_body_trivia(
 fn arrow_run(
     events: &[trivia::BodyEvent],
     start_pos: usize,
-    same_group_only: bool,
+    _same_group_only: bool,
 ) -> (usize, Vec<SyntaxNode>) {
-    let _ = same_group_only;
     let mut nodes = Vec::new();
     let mut pos = start_pos;
     let mut prev_was_transition = false;
 
     while pos < events.len() {
         match &events[pos] {
-            trivia::BodyEvent::Trivia(t) => {
+            trivia::BodyEvent::Trivia(_t) => {
                 if prev_was_transition {
                     // Look ahead — if blank line or comment, end the run.
                     let mut nl = 0usize;
@@ -299,7 +297,6 @@ fn arrow_run(
                         }
                         probe += 1;
                     }
-                    let _ = t;
                     if nl >= 2 || saw_comment {
                         return (pos, nodes);
                     }
@@ -458,8 +455,7 @@ fn emit_history_decl(w: &mut FormatWriter, node: &SyntaxNode, kw: &str) {
     w.write("}");
 }
 
-fn emit_choice_decl(w: &mut FormatWriter, node: &SyntaxNode, kw: &str, opts: &FormatOptions) {
-    let _ = opts;
+fn emit_choice_decl(w: &mut FormatWriter, node: &SyntaxNode, kw: &str, _opts: &FormatOptions) {
     w.write(kw);
     w.space();
     let name = iter_tokens(node)
@@ -546,8 +542,7 @@ fn emit_choice_branch(w: &mut FormatWriter, branch: &SyntaxNode, max_guard_w: us
     }
 }
 
-fn emit_fork_decl(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOptions) {
-    let _ = opts;
+fn emit_fork_decl(w: &mut FormatWriter, node: &SyntaxNode, _opts: &FormatOptions) {
     w.write("fork ");
     let name = iter_tokens(node)
         .find(|t| t.kind() == SyntaxKind::Ident)
@@ -568,8 +563,7 @@ fn emit_fork_decl(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOptions)
     w.write(" }");
 }
 
-fn emit_join_decl(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOptions) {
-    let _ = opts;
+fn emit_join_decl(w: &mut FormatWriter, node: &SyntaxNode, _opts: &FormatOptions) {
     w.write("join ");
     // First Ident before JOIN_SOURCES is the name.
     let name = iter_tokens(node)

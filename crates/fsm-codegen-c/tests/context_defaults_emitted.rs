@@ -23,8 +23,8 @@ mod common;
 use fsm_codegen_c::{emit, CodegenConfig};
 use fsm_diagnostics::{SourceLocation, Span};
 use fsm_ir::{
-    BoolLit, ContextField, ContextSchema, InitialPseudo, IntLit, Ir, Literal, MachineObject,
-    OverflowPolicy, QueueConfig, RegionObject, SimpleState, StateNode, Type,
+    ContextField, ContextSchema, InitialPseudo, IntLit, Ir, Literal, MachineObject, OverflowPolicy,
+    QueueConfig, RegionObject, SimpleState, StateNode, Type,
 };
 
 fn loc() -> SourceLocation {
@@ -185,8 +185,3 @@ fn vending_like_ir(price_default: i64) -> Ir {
         diagnostics: vec![],
     }
 }
-
-// Suppress the unused-import warning for any types the common module pulls
-// in for other targets.
-#[allow(dead_code)]
-fn _unused_warning_silencer(_b: BoolLit) {}

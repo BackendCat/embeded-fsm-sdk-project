@@ -275,9 +275,8 @@ impl<'src> Lexer<'src> {
 
     fn lex_hex(&mut self, start: usize) -> Token {
         self.pos += 2; // consume `0x`
-        let digits_start = self.pos;
-        // Leading underscore directly after the prefix is INVALID per the
-        // resolution recorded in this module's top doc comment.
+                       // Leading underscore directly after the prefix is INVALID per the
+                       // resolution recorded in this module's top doc comment.
         if self.peek_byte_at(0) == Some(b'_') {
             // Drain anything that looks like literal characters so the error
             // span covers the offending region and the parser can recover.
@@ -306,8 +305,6 @@ impl<'src> Lexer<'src> {
         }
         if !saw_digit {
             // `0x` with nothing after it — invalid integer literal.
-            // digits_start is unused on this path but recorded for symmetry.
-            let _ = digits_start;
             return Token::new(
                 TokenKind::Error(DiagnosticCode::E0004),
                 self.span_from(start),

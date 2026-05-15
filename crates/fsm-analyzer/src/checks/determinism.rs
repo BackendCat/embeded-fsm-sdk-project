@@ -25,13 +25,13 @@ use fsm_parser::ast::{self, AstNode};
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use crate::symbol_table::SymbolTable;
-use crate::util::span_of;
+use crate::util::{parse_int_literal_i128, span_of, walk_all_states};
 
 /// Run determinism analysis. Operates on the AST directly so each emitted
 /// diagnostic points at the offending transition span.
 pub fn check(file: &ast::File, _st: &SymbolTable, out: &mut Vec<Diagnostic>) {
     for m in file.machines() {
-        for state in walk_states(&m) {
+        for state in walk_all_states(&m) {
             let groups = collect_transitions(&state);
             for transitions in groups.values() {
                 if transitions.len() < 2 {
@@ -261,14 +261,7 @@ fn literal_value(node: &SyntaxNode) -> Option<LitVal> {
                 .children_with_tokens()
                 .filter_map(|el| el.into_token())
                 .find(|t| matches!(t.kind(), SyntaxKind::IntLiteral | SyntaxKind::FloatLiteral))?;
-            let s: String = tok.text().chars().filter(|c| *c != '_').collect();
-            let v = if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-                i128::from_str_radix(rest, 16).ok()?
-            } else if let Some(rest) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
-                i128::from_str_radix(rest, 2).ok()?
-            } else {
-                s.parse().ok()?
-            };
+            let v = parse_int_literal_i128(tok.text())?;
             Some(LitVal::Int(v))
         }
         SyntaxKind::EXPR_NAME_REF => {
@@ -453,30 +446,5 @@ fn warn_constant_guard(t: &Trans, out: &mut Vec<Diagnostic>) {
     }
 }
 
-fn walk_states(m: &ast::MachineDecl) -> Vec<ast::StateDecl> {
-    let mut out = Vec::new();
-    for s in m.states() {
-        out.push(s.clone());
-        nest(&s, &mut out);
-    }
-    for r in m.regions() {
-        for s in r.states() {
-            out.push(s.clone());
-            nest(&s, &mut out);
-        }
-    }
-    out
-}
-
-fn nest(s: &ast::StateDecl, out: &mut Vec<ast::StateDecl>) {
-    for child in s.nested_states() {
-        out.push(child.clone());
-        nest(&child, out);
-    }
-    for r in s.regions() {
-        for nested in r.states() {
-            out.push(nested.clone());
-            nest(&nested, out);
-        }
-    }
-}
+// Walker logic moved to `crate::util::walk_all_states` (R2.1 dedup,
+// 2026-05-15).

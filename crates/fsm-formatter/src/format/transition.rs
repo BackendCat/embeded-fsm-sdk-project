@@ -42,9 +42,8 @@ pub fn emit_transition(
     w: &mut FormatWriter,
     node: &SyntaxNode,
     align_arrow_col: Option<usize>,
-    opts: &FormatOptions,
+    _opts: &FormatOptions,
 ) {
-    let _ = opts;
     match node.kind() {
         SyntaxKind::TRANSITION_DECL => emit_on_arrow(w, node, "->", align_arrow_col),
         SyntaxKind::LOCAL_DECL => emit_on_arrow(w, node, "~>", align_arrow_col),

@@ -34,7 +34,7 @@ use fsm_parser::ParseResult;
 
 use crate::checks;
 use crate::symbol_table::SymbolTable;
-use crate::util::{compute_line_col, span_of};
+use crate::util::{compute_line_col, parse_int_literal_i64, span_of};
 
 /// Result of running the full analyzer pipeline.
 #[derive(Clone, Debug)]
@@ -509,18 +509,7 @@ impl<'a> LoweringCtx<'a> {
                     let Some(t) = el.into_token() else { continue };
                     match t.kind() {
                         SyntaxKind::IntLiteral => {
-                            let v: String = t.text().chars().filter(|c| *c != '_').collect();
-                            let parsed = if let Some(rest) =
-                                v.strip_prefix("0x").or_else(|| v.strip_prefix("0X"))
-                            {
-                                i64::from_str_radix(rest, 16).ok()?
-                            } else if let Some(rest) =
-                                v.strip_prefix("0b").or_else(|| v.strip_prefix("0B"))
-                            {
-                                i64::from_str_radix(rest, 2).ok()?
-                            } else {
-                                v.parse().ok()?
-                            };
+                            let parsed = parse_int_literal_i64(t.text())?;
                             return Some(Literal::Int(IntLit {
                                 value: parsed,
                                 loc: None,
@@ -1940,14 +1929,7 @@ fn eval_i64(node: &SyntaxNode) -> Option<i64> {
                 .children_with_tokens()
                 .filter_map(|el| el.into_token())
                 .find(|t| t.kind() == SyntaxKind::IntLiteral)?;
-            let s: String = tok.text().chars().filter(|c| *c != '_').collect();
-            if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-                i64::from_str_radix(rest, 16).ok()
-            } else if let Some(rest) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
-                i64::from_str_radix(rest, 2).ok()
-            } else {
-                s.parse().ok()
-            }
+            parse_int_literal_i64(tok.text())
         }
         SyntaxKind::EXPR_UNARY => {
             let op = node

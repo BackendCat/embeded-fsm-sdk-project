@@ -135,7 +135,6 @@ fn emit_payload_structs(ctx: &MachineEmitCtx<'_>) -> String {
 
 fn emit_event_union(ctx: &MachineEmitCtx<'_>) -> String {
     let prefix = ctx.type_prefix();
-    let macro_prefix = ctx.macro_prefix();
     let mut s = String::from(
         "/* ── Event tagged union ────────────────────────────────────────────── */\n",
     );
@@ -166,8 +165,6 @@ fn emit_event_union(ctx: &MachineEmitCtx<'_>) -> String {
         "    }} __payload;\n}} {prefix}_Event_t;\n",
         prefix = prefix,
     ));
-    // Silence unused warnings on machines with no payloads.
-    let _ = macro_prefix;
     s
 }
 

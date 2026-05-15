@@ -14,16 +14,15 @@
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
-use fsm_parser::cst::SyntaxKind;
 
 use crate::symbol_table::SymbolTable;
-use crate::util::span_of;
+use crate::util::{span_of, walk_all_states};
 
 /// Run completion-transition checks. Per B-07 we explicitly DO NOT emit
 /// FSM-E0301 even if a completion carries a guard.
 pub fn check(file: &ast::File, _st: &SymbolTable, out: &mut Vec<Diagnostic>) {
     for m in file.machines() {
-        for state in walk_states(&m) {
+        for state in walk_all_states(&m) {
             check_state(&state, out);
         }
     }
@@ -67,35 +66,8 @@ fn check_state(state: &ast::StateDecl, out: &mut Vec<Diagnostic>) {
     }
 }
 
-fn walk_states(m: &ast::MachineDecl) -> Vec<ast::StateDecl> {
-    let mut out = Vec::new();
-    for s in m.states() {
-        out.push(s.clone());
-        collect_nested(&s, &mut out);
-    }
-    for r in m.regions() {
-        for s in r.states() {
-            out.push(s.clone());
-            collect_nested(&s, &mut out);
-        }
-    }
-    out
-}
-
-fn collect_nested(s: &ast::StateDecl, out: &mut Vec<ast::StateDecl>) {
-    for child in s.nested_states() {
-        out.push(child.clone());
-        collect_nested(&child, out);
-    }
-    for r in s.regions() {
-        for nested in r.states() {
-            out.push(nested.clone());
-            collect_nested(&nested, out);
-        }
-    }
-    // Pseudo-state forms in state.children_with_tokens() are not StateDecls
-    // — they live as separate SyntaxKind nodes (FINAL_DECL, etc.) and are
-    // exempt from completion checks because they cannot host transitions
-    // directly.
-    let _ = SyntaxKind::FINAL_DECL;
-}
+// Pseudo-state forms in state.children_with_tokens() are not StateDecls —
+// they live as separate SyntaxKind nodes (FINAL_DECL, etc.) and are exempt
+// from completion checks because they cannot host transitions directly.
+// Walker logic itself now lives in `crate::util::walk_all_states` (R2.1
+// dedup, 2026-05-15).

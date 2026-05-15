@@ -14,7 +14,7 @@
 //! ordering index so we can dispatch into a per-row inline body via a
 //! switch on `row_idx`. No fragile `(source, trigger, priority)` matcher.
 
-use fsm_ir::{StateNode, TransitionKind, TransitionObject};
+use fsm_ir::{walk_state, IrVisitor, StateNode, TransitionKind, TransitionObject};
 
 use super::MachineEmitCtx;
 
@@ -92,28 +92,40 @@ struct TransitionRef {
     transition: TransitionObject,
 }
 
-fn collect_transitions(ctx: &MachineEmitCtx<'_>) -> Vec<EmittedTransRow> {
-    let mut out = Vec::new();
-    fn walk_state(state: &StateNode, ctx: &MachineEmitCtx<'_>, out: &mut Vec<EmittedTransRow>) {
-        let (transitions, recurse) = match state {
-            StateNode::Simple(s) => (&s.transitions[..], None),
-            StateNode::Composite(c) => (&c.transitions[..], Some(c.regions.as_slice())),
-            StateNode::Parallel(p) => (&p.transitions[..], Some(p.regions.as_slice())),
-            _ => return,
+/// Visitor that flattens every (Simple | Composite | Parallel) state's
+/// transitions into emitted-row form. R2.1 (2026-05-15): traversal moves
+/// to `IrVisitor::walk_state` so the recursion shape lives in `fsm-ir` only.
+struct TransRowCollector<'a, 'm> {
+    ctx: &'a MachineEmitCtx<'m>,
+    out: &'a mut Vec<EmittedTransRow>,
+}
+
+impl<'a, 'm> IrVisitor for TransRowCollector<'a, 'm> {
+    fn visit_state(&mut self, s: &StateNode) {
+        let transitions = match s {
+            StateNode::Simple(ss) => &ss.transitions[..],
+            StateNode::Composite(c) => &c.transitions[..],
+            StateNode::Parallel(p) => &p.transitions[..],
+            _ => {
+                // Pseudo-states host no transitions; still descend so any
+                // nested regions (none today, but future-proof) are walked.
+                walk_state(self, s);
+                return;
+            }
         };
         for t in transitions {
-            let source = ctx.index.must_lookup(&t.source);
-            let target = ctx.index.must_lookup(&t.target);
+            let source = self.ctx.index.must_lookup(&t.source);
+            let target = self.ctx.index.must_lookup(&t.target);
             // P0-4: per-timer event variant resolution so the trans table
             // row matches the timer's own event id, not generic completion.
             let trigger_c = match &t.trigger {
-                Some(fsm_ir::Trigger::Event { event_id, .. }) => ctx.event_c_enum(event_id),
+                Some(fsm_ir::Trigger::Event { event_id, .. }) => self.ctx.event_c_enum(event_id),
                 Some(fsm_ir::Trigger::After { timer_id, .. })
                 | Some(fsm_ir::Trigger::Every { timer_id, .. }) => {
-                    super::timer::timer_event_c(ctx, timer_id)
-                        .unwrap_or_else(|| format!("{}_EVENT__COMPLETION", ctx.macro_prefix()))
+                    super::timer::timer_event_c(self.ctx, timer_id)
+                        .unwrap_or_else(|| format!("{}_EVENT__COMPLETION", self.ctx.macro_prefix()))
                 }
-                _ => format!("{}_EVENT__COMPLETION", ctx.macro_prefix()),
+                _ => format!("{}_EVENT__COMPLETION", self.ctx.macro_prefix()),
             };
             let kind_tag = match t.kind {
                 TransitionKind::External => 0,
@@ -121,7 +133,7 @@ fn collect_transitions(ctx: &MachineEmitCtx<'_>) -> Vec<EmittedTransRow> {
                 TransitionKind::Internal => 2,
                 TransitionKind::Completion => 3,
             };
-            out.push(EmittedTransRow {
+            self.out.push(EmittedTransRow {
                 row_idx: 0, // assigned after sorting below
                 source,
                 target,
@@ -133,17 +145,16 @@ fn collect_transitions(ctx: &MachineEmitCtx<'_>) -> Vec<EmittedTransRow> {
                 },
             });
         }
-        if let Some(regions) = recurse {
-            for r in regions {
-                for s in &r.states {
-                    walk_state(s, ctx, out);
-                }
-            }
-        }
+        walk_state(self, s);
     }
-    for s in &ctx.machine.root.states {
-        walk_state(s, ctx, &mut out);
-    }
+}
+
+fn collect_transitions(ctx: &MachineEmitCtx<'_>) -> Vec<EmittedTransRow> {
+    let mut out = Vec::new();
+    let mut collector = TransRowCollector { ctx, out: &mut out };
+    // Walk the root region only — submachines (Doc 09 §4.11) emit their
+    // own trans tables in their own emit pass.
+    collector.visit_region(&ctx.machine.root);
     // Sort by (source, priority, document order). After sort, assign
     // stable row indices.
     out.sort_by(|a, b| a.source.cmp(&b.source).then(a.priority.cmp(&b.priority)));

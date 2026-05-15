@@ -6,8 +6,6 @@
 //! makes `default_target` mandatory, so the analyzer guarantees a valid
 //! fallback.
 
-use crate::state_index::StateRecordKind;
-
 use super::MachineEmitCtx;
 
 /// Emit `Motor_history_record_X(m)` helpers for every history-bearing
@@ -111,6 +109,5 @@ fn find_history_default(ctx: &MachineEmitCtx<'_>, composite_ir_id: &str) -> Opti
     let history = walk_states(&ctx.machine.root.states, composite_ir_id)?;
     let default_idx = ctx.index.lookup(&history.default_target)?;
     let rec = ctx.index.get(default_idx);
-    let _ = StateRecordKind::Final;
     Some(rec.c_name.clone())
 }
