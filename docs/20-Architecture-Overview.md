@@ -151,42 +151,80 @@ over CST nodes, providing a typed API with no allocation.
 
 ## 4.2 Module Layout
 
+> **DRIFT-3 — reality check.** The tree below was reconciled to the
+> *actual* `crates/fsm-parser/src/` at this HEAD (verified read-only).
+> The earlier listing named files that do not exist (`grammar/action.rs`,
+> `cst/green.rs`, `ast/nodes.rs`, `ast/token_ext.rs`, `ast/generated.rs`,
+> `error.rs`, `tests.rs`) and omitted modules that do. Notable corrections:
+> the action sublanguage lives in `grammar/stmt.rs` (not `action.rs`);
+> there is **no `cst/green.rs`** — the green tree comes from the upstream
+> `rowan` crate, `cst/mod.rs` is the lossless-CST integration layer; the
+> typed AST is a multi-file `ast/` view, not `nodes.rs`/`generated.rs`;
+> and there is **no `error.rs` / `ParseError`** — parser diagnostics are
+> `fsm_diagnostics::Diagnostic` (see §4.3 DRIFT-3). Recorded per Doc 00
+> §11 (prose-vs-code reconciliation; cf. §11.19/§11.24/§11.39).
+
 ```
 fsm-parser/src/
-├── lib.rs              # Public API
-├── parse.rs            # Entry point: parse(src) → ParseResult
-├── parser.rs           # Recursive-descent parser implementation
+├── lib.rs                  # Crate root + public re-exports
+├── parse.rs                # Entry points: parse / parse_with_limits / parse_with_tokens → ParseResult
+├── parser.rs               # Recursive-descent driver (DepthGuard, ExprContext)
+├── expr.rs                 # Pratt operator-precedence parser for FSM-Lang expressions
+├── token_set.rs            # 128-bit TokenKind bitmask used by the parser
+├── limits.rs               # Parser DoS limits (ParseLimits)
+├── import_resolver.rs      # Compile-time validation of `import "path"`
+├── opaque_type_validator.rs# Compile-time validation of `opaque "C_type"` payloads
 ├── grammar/
-│   ├── top_level.rs    # machine_decl, event_decl, extern_decl
-│   ├── state.rs        # state_decl, composite, parallel, pseudo-states
-│   ├── transition.rs   # transition, guard_expr, action_list
-│   ├── action.rs       # statement, expr (action sublanguage)
-│   └── guard.rs        # guard_expr (restricted sublanguage)
+│   ├── mod.rs              # Grammar module root (one file per top-level area)
+│   ├── file.rs             # Top-level grammar entry — parse_file
+│   ├── top_level.rs        # imports, features, consts, enums, externs
+│   ├── machine.rs          # Machine body — inside of `machine NAME { … }`
+│   ├── state.rs            # State declarations and pseudo-state forms
+│   ├── transition.rs       # Transition declarations (Doc 04 §8)
+│   ├── guard.rs            # Guard clauses: `[ guard_expr ]`
+│   └── stmt.rs             # Action sublanguage: assign, if, while, for, raise, …
 ├── cst/
-│   ├── kinds.rs        # SyntaxKind enum (one variant per grammar rule + token)
-│   └── green.rs        # GreenNode, GreenToken
-├── ast/
-│   ├── nodes.rs        # Typed AST node structs
-│   ├── token_ext.rs    # Helper methods on tokens
-│   └── generated.rs    # Auto-generated node accessor methods
-├── error.rs            # ParseError type
-└── tests.rs
+│   ├── mod.rs              # Lossless CST built on the upstream `rowan` green-tree library
+│   └── kinds.rs            # SyntaxKind — union of every token + every grammar node
+└── ast/
+    ├── mod.rs              # Typed AST view layered on the rowan CST
+    ├── top_level.rs        # Typed accessors for top-level declarations
+    ├── state.rs            # Typed accessors for state declarations / pseudo-states
+    ├── transition.rs       # Typed accessors for transition / guard / priority / action-block
+    ├── stmt.rs             # Typed accessors for action-sublanguage statements
+    └── expr.rs             # Typed accessors for expressions + the guard-else marker
 ```
 
 ## 4.3 Key Types
 
+> **DRIFT-3 — reality check.** The *shipped* `ParseResult`
+> (`crates/fsm-parser/src/parse.rs:25`) holds a `rowan` `GreenNode`, not a
+> materialised `SyntaxNode`, and a `Vec<fsm_diagnostics::Diagnostic>`, not
+> a bespoke `ParseError`. The CST is projected lazily on demand via
+> `ParseResult::syntax()` (`parse.rs:35`), `ast()` (`:41`) and
+> `reconstructed_text()` (`:48`). **There is no `ParseError` type
+> anywhere in `fsm-parser/src`** (verified read-only); parser, lexer and
+> recovery diagnostics are all the unified `fsm_diagnostics::Diagnostic`
+> (re-exported `crates/fsm-parser/src/lib.rs:45`/`:52`). The §12.2 sketch
+> carries the same DRIFT-1 reality-check note. Recorded per Doc 00 §11
+> (prose-vs-code reconciliation; cf. §11.19/§11.24/§11.39).
+
 ```rust
+// Shipped (crates/fsm-parser/src/parse.rs:25):
 pub struct ParseResult {
-    pub tree: SyntaxNode,          // CST root
-    pub errors: Vec<ParseError>,
+    pub green: GreenNode,            // rowan green tree — round-trips source
+    pub errors: Vec<Diagnostic>,     // fsm_diagnostics::Diagnostic; may be
+                                     // non-empty even on a recovered parse
 }
 
-pub struct ParseError {
-    pub span: Span,
-    pub expected: Vec<TokenKind>,
-    pub found: TokenKind,
-    pub code: &'static str,        // "FSM-E0010" etc.
+impl ParseResult {
+    pub fn syntax(&self) -> SyntaxNode;        // parse.rs:35 — rowan CST view
+    pub fn ast(&self) -> ast::File;            // parse.rs:41 — typed AST root
+    pub fn reconstructed_text(&self) -> String;// parse.rs:48 — byte-exact source
 }
+
+// Diagnostics are the unified `fsm_diagnostics::Diagnostic` (span + code +
+// severity + message); there is no parser-local `ParseError` type.
 
 // AST node example:
 pub struct MachineDecl(SyntaxNode);
@@ -816,14 +854,21 @@ impl<'src> Lexer<'src> {
 > not as a present contract.
 
 ```rust
+// Shipped (crates/fsm-parser/src/parse.rs:59/:67/:94):
 pub fn parse(src: &str) -> ParseResult;
+pub fn parse_with_limits(src: &str, limits: &ParseLimits) -> ParseResult;
+pub fn parse_with_tokens(src: &str, tokens: Vec<Token>) -> ParseResult;
+
 // v1.3+ aspiration — NOT implemented (see §4.5 / Doc 00 §11.39):
 pub fn parse_incremental(old_tree: &SyntaxNode, edit: &TextEdit) -> ParseResult;
 
+// Shipped shape (crates/fsm-parser/src/parse.rs:25) — DRIFT-3, see §4.3:
 pub struct ParseResult {
-    pub tree: SyntaxNode,
-    pub errors: Vec<ParseError>,
+    pub green: GreenNode,            // rowan green tree
+    pub errors: Vec<Diagnostic>,     // fsm_diagnostics::Diagnostic; no ParseError type
 }
+// Projections: ParseResult::syntax() / ast() / reconstructed_text()
+// (parse.rs:35/:41/:48).
 
 // AST node types (thin wrappers over CST nodes)
 pub struct MachineDecl(SyntaxNode);
@@ -840,15 +885,48 @@ pub struct RegionDecl(SyntaxNode);
 
 ## 12.3 `fsm-analyzer` Public API
 
+> **DRIFT-3 — reality check.** The *shipped* `fsm-analyzer` public API is
+> `analyze` / `analyze_with_source`, both taking a `&ParseResult` (not a
+> `&[MachineDecl]`) and returning an `AnalysisResult { ir: Option<Ir>,
+> diagnostics: Vec<Diagnostic>, symbol_table: SymbolTable }`
+> (`crates/fsm-analyzer/src/lower/mod.rs:59`/`:72`/`:79`, re-exported
+> `crates/fsm-analyzer/src/lib.rs:37`). `analyze_incremental` below **does
+> not exist in v1.x** — it is the analyzer-side analogue of the deferred
+> `parse_incremental` (§4.5 / §12.2 / DRIFT-1) and is itself a deferred
+> v1.3+ aspiration. The shipped analyzer does a **full re-analysis** on
+> every call: `analyze_with_source` rebuilds the symbol table
+> (`SymbolTable::build`, `lower/mod.rs:82`), re-runs every check
+> (`checks::run_all`, `:86`) and re-lowers the whole AST (`lower_file`,
+> `:89`) from a fresh `ParseResult` — there is no `prev`/`changed` reuse,
+> no incremental diff. The v1.2 LSP epic **deliberately built on full
+> re-analyze-on-debounce** (Doc 26 §4.3–§4.5; cross-ref §4.5 / Doc 00
+> §11.39): a full re-parse + re-analyze of a realistic embedded `.fsm` is
+> sub-millisecond to low-single-digit-ms, comfortably inside the change
+> debounce, so no LSP wave depends on `analyze_incremental`. True
+> incremental re-analysis is a tracked **v1.3+ optimisation** for
+> pathologically large files — a separate, self-contained `fsm-analyzer`
+> epic with its own behavioural acceptance — **not a current capability**.
+> Recorded per Doc 00 §11 (the prose-vs-code / P0-1 "aspirational-prose"
+> reconciliation discipline; cf. §11.19/§11.24/§11.39); the design intent
+> below is preserved as the v1.3+ target, not as shipped behaviour.
+
 ```rust
-pub fn analyze(ast: &[MachineDecl]) -> AnalysisResult;
+// Shipped (crates/fsm-analyzer/src/lower/mod.rs:72/:79):
+pub fn analyze(parse_result: &ParseResult) -> AnalysisResult;
+pub fn analyze_with_source(
+    parse_result: &ParseResult, file: &str, src: &str
+) -> AnalysisResult;
+
+// v1.3+ aspiration — NOT implemented (see §4.5 / Doc 00 §11.39):
+// full re-analysis only today; no incremental diff.
 pub fn analyze_incremental(
     prev: &AnalysisResult, changed: &MachineDecl
 ) -> AnalysisResult;
 
+// Shipped shape (crates/fsm-analyzer/src/lower/mod.rs:59):
 pub struct AnalysisResult {
-    pub ir: IrDocument,
-    pub diagnostics: Vec<AnalysisDiagnostic>,
+    pub ir: Option<Ir>,                 // None only on catastrophic errors
+    pub diagnostics: Vec<Diagnostic>,   // fsm_diagnostics::Diagnostic
     pub symbol_table: SymbolTable,
 }
 ```
