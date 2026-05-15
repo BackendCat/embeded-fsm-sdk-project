@@ -239,7 +239,9 @@ After EVERY merge to main, the orchestrator independently re-runs the full quad 
 
 ### 11.2 Liveness heartbeat (v1.1.0 — PD-4)
 
-When dispatching a background wave expected to run >10 min, the orchestrator sets a `ScheduleWakeup` (~25 min) as a deadman switch. If the wave's completion notification has not arrived by wakeup, the orchestrator probes liveness (`ps`, output-file mtime, worktree `git status`) per `feedback_verify_agent_liveness`. A wave can die silently from disk, MCP disconnect, session interruption, or plan-mode activation — 4 instances during v1.0. Never wait open-endedly on a "dispatched successfully" message.
+When dispatching a background wave expected to run >10 min, the orchestrator sets a `ScheduleWakeup` (~25 min) as a deadman switch. If the wave's completion notification has not arrived by wakeup, the orchestrator probes liveness (`ps`, output-file mtime, worktree `git status`). A wave can die silently from disk, MCP disconnect, session interruption, or plan-mode activation — 4 instances during v1.0.
+
+**Presumed-dead ≠ confirmed-dead (2026-05-15 incident).** A stale output mtime + no `cargo` process *during a disk/resource crisis* is NOT proof of death — the agent may be kernel-stalled, not terminated. The only authoritative death signals are the harness completion-notification or the *agent's own pid* provably gone across multiple checks. Acting on a false "dead" inference caused a two-writers-one-worktree race (W0). **Mandatory:** if salvaging a presumed-dead agent's WIP, salvage onto a **NEW branch** and dispatch any continuation into a **NEW worktree** — NEVER re-dispatch into the worktree the presumed-dead agent may still hold. If it revives you then have two clean branches to reconcile, not a corrupt shared checkout. Prefer waiting for the notification unless the wave is genuinely blocking and a fresh-worktree continuation is safe. Full detail: `feedback_verify_agent_liveness` memory.
 
 ### 11.3 Phase-boundary audits (v1.1.0 — PD-2)
 
