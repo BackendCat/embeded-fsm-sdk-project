@@ -48,18 +48,51 @@ W0 is a test+invariant wave; per `SUBAGENT_CONVENTIONS.md` §6 + the depth-first
 rule, codegen bugs the new behavioural tests revealed are reported here for a
 dedicated follow-up wave, not fixed in-band:
 
-1. **`TD-BUG-1` — zero-transition machine emits non-`-Werror` C.**
-   A valid machine with no transitions makes codegen emit
+1. **`TD-BUG-1` — zero-transition machine emits non-`-Werror` C.
+   ✅ RESOLVED** (phase2.3/td1-zero-transition-codegen).
+   A valid machine with no transitions made codegen emit
    `M_try_transitions_in_state(M_t *m, M_StateId_t s, const M_Event_t *ev)`
-   with an empty body that uses none of `m`/`ev`, so the generated C fails
+   with an empty body that used none of `m`/`ev`, so the generated C failed
    `gcc -std=c99 -Wall -Wextra -Wpedantic -Werror`
    (`-Werror=unused-parameter`). Masked for the life of
    `context_defaults_emitted.rs` because its only coverage was
-   symbol-presence that never invoked gcc. Worked around in the W0
-   behavioural test by giving the fixture one self-transition (documented
-   inline). **Owner: a codegen-c follow-up wave.** Fix sketch: emit `(void)m;
-   (void)s; (void)ev;` (or `return false;`) when the per-state switch is
-   empty.
+   symbol-presence that never invoked gcc.
+
+   **Fix (switch strategy, `emit/dispatch_switch.rs`):** added
+   `machine_has_transitions(ctx)` (mirrors `machine_has_defer`); when false,
+   `emit_per_state_helpers` emits `(void)m; (void)ev;` at the top of
+   `M_try_transitions_in_state`. `s` is *not* cast — it is the live
+   `switch (s)` discriminant; blanket-casting a used param is misleading and
+   itself warns under some toolchains.
+
+   **Sibling degenerate-input bugs found + fixed (same class, same root —
+   zero rows — surfaced by sweeping the table strategy):** the table
+   strategy (`emit/dispatch_table.rs`) failed *three* ways for the same
+   zero-transition input — `static const T M_trans_table[] = {}` is an ISO-C
+   empty-initializer + zero-size array (`-Werror=pedantic`), the
+   `sizeof/sizeof`-derived `TABLE_SIZE` made `select_for_region`'s
+   `uint16_t i < TABLE_SIZE(==0)` an always-false bound
+   (`-Werror=type-limits`), and `M_execute_transition`'s `m` was unused
+   (only `default: break;`). Fixed by emitting one unmatchable all-zero
+   sentinel row (`source == M_STATE__COUNT`, which no active leaf can ever
+   equal, so `row->source != s` always continues — dispatch behaviour
+   identical to "no table") and a conditional `(void)m;` in
+   `M_execute_transition`. No other emitter needed a change: `completion.rs`
+   / `timer.rs` / `defer.rs` already defensively `(void)`-cast or gate on
+   feature presence — confirmed by an absolute-minimal machine (no events /
+   context / actions / transitions, single state) compiling `-Werror`-clean
+   on both strategies.
+
+   **Regression tests (§5.4 behavioural — gcc-Werror compile + RUN):**
+   `crates/fsm-codegen-c/tests/zero_transition_werror.rs` (TD-BUG-1 proper,
+   both strategies) and `crates/fsm-codegen-c/tests/degenerate_machines_werror.rs`
+   (sibling sweep: absolute-minimal / events-but-no-transitions /
+   nested-composite-no-transitions, both strategies). All FAIL on `main`
+   (the precise pre-fix gcc errors) and PASS after the fix. The W0
+   `context_defaults_emitted::vending_with_bool_default_ir` self-transition
+   workaround is now obsolete but left in place (out of this wave's scope —
+   it is a different file's fixture and still exercises the context-default
+   behaviour it is for).
 
 2. **`TD-FIX-1` (fixed in W0, in-scope) — duplicate-event test fixture.**
    `crates/fsm-codegen-c/tests/common/mod.rs::hierarchical_motor_ir()`
@@ -122,9 +155,18 @@ descriptions saying "gcc -Werror clean".
 ## Closing criteria
 
 - **Part 1** is closed by W0 (this wave).
-- `TD-BUG-1` closes when a codegen-c wave makes zero-transition (and,
-  defensively, duplicate-id) machines emit `-Werror`-clean C, with a
-  gcc-RUN regression test.
+- `TD-BUG-1` ✅ **CLOSED** by phase2.3/td1-zero-transition-codegen:
+  zero-transition (and the broader degenerate-input class — single-state,
+  zero-event, nested-composite-no-transitions) machines now emit
+  `-Werror`-clean C on both dispatch strategies, with gcc-compile-RUN
+  regression tests (`zero_transition_werror.rs`,
+  `degenerate_machines_werror.rs`) that fail on `main`. The *optional*
+  duplicate-event-id codegen hardening floated in the `TD-FIX-1` note
+  (defensive de-dup / pre-flight assert) was deliberately **not** taken in
+  this targeted bug-fix wave (the analyzer already guarantees unique ids
+  via FSM-E0022; only analyzer-bypassing hand-built IR can violate it, and
+  no valid DSL input triggers it — out of this wave's scope, re-file as a
+  separate hardening item if ever wanted).
 - `TD-DEF-1` closes when the conformance codegen-c path gcc-compiles its
   fixtures (or they migrate to crate gcc-RUN tests).
 - `TD-DEF-2` closes when each Part-2b area has been reviewed and every

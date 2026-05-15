@@ -60,6 +60,31 @@ fn emit_parent_table(ctx: &MachineEmitCtx<'_>) -> String {
     s
 }
 
+/// Whether any state in the machine declares at least one outgoing
+/// transition. When false, the per-state switch / table dispatch bodies
+/// reference none of their pointer parameters (a zero-transition machine —
+/// states with only entry/exit actions, or a placeholder skeleton — is
+/// valid DSL, Doc 04 §3), so the emitters must `(void)`-cast the genuinely-
+/// unused params or the generated C fails `gcc -std=c99 -Wall -Wextra
+/// -Wpedantic -Werror` with `-Werror=unused-parameter` (TD-BUG-1). Pseudo-
+/// states (initial/final/history) host no transitions, matching the
+/// dispatch visitors' own traversal.
+pub fn machine_has_transitions(ctx: &MachineEmitCtx<'_>) -> bool {
+    fn walk(states: &[StateNode]) -> bool {
+        states.iter().any(|s| match s {
+            StateNode::Simple(ss) => !ss.transitions.is_empty(),
+            StateNode::Composite(c) => {
+                !c.transitions.is_empty() || c.regions.iter().any(|r| walk(&r.states))
+            }
+            StateNode::Parallel(p) => {
+                !p.transitions.is_empty() || p.regions.iter().any(|r| walk(&r.states))
+            }
+            _ => false,
+        })
+    }
+    walk(&ctx.machine.root.states)
+}
+
 fn emit_per_state_helpers(ctx: &MachineEmitCtx<'_>) -> String {
     let prefix = ctx.type_prefix();
     let mut s = String::new();
@@ -70,6 +95,15 @@ fn emit_per_state_helpers(ctx: &MachineEmitCtx<'_>) -> String {
         "static bool {prefix}_try_transitions_in_state({prefix}_t *m, {prefix}_StateId_t s, const {prefix}_Event_t *ev) {{\n",
         prefix = prefix,
     ));
+    // TD-BUG-1: a valid zero-transition machine emits no per-state case, so
+    // the `switch (s)` below references `s` but neither `m` nor `ev`. Cast
+    // the genuinely-unused params so the body stays `-Werror=unused-
+    // parameter`-clean. `s` is always used (it is the switch discriminant),
+    // so it is NOT cast — blanket-casting a used param would itself warn
+    // under some toolchains and is misleading.
+    if !machine_has_transitions(ctx) {
+        s.push_str("    (void)m; (void)ev;\n");
+    }
     s.push_str("    switch (s) {\n");
 
     // R2.1 (2026-05-15): traversal delegated to `IrVisitor::walk_state` so
