@@ -33,6 +33,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UTF-8 and UTF-16 on a multibyte fixture. See
   `docs/26-LSP-Architecture.md` §8 L2 and
   `docs/00-Decisions-And-Reconciliation.md` §11.33.
+- **`fsm-lsp` — `hover` + `definition`** (v1.2-LSP-L3, single-file): Doc
+  14 §5 GitHub-Markdown hover (symbol kind + IR-sourced detail — event
+  payload field types, `pure` extern signatures, context-field
+  type/default, state kind + transitions-out) and Doc 14 §6
+  goto-definition, both advertised in `initialize` and built on a shared
+  token-at-cursor seam whose resolution mirrors the analyzer's own
+  name-resolution dispatch and goes through the **same**
+  `SymbolTable::resolve_*` `fsm check` uses (a goto/hover can never
+  disagree with a squiggle). Cross-file/unresolved symbols return
+  `null`/`None` — the spec-correct single-file graceful degradation
+  (cross-file is v1.3), never a fabricated location. Hover's structured
+  detail comes from the lowered `Ir`, threaded **additively** through the
+  single analysis (the exact behaviour-neutral pattern L2 used for
+  `symbol_table` — one analysis feeds all, no second lowering, no second
+  position converter; L1 diagnostics + L2 symbols/folds byte-identical).
+  Proven by in-process `tower-lsp` client tests asserting definition
+  ranges byte-equal to the analysis oracle, hover Markdown structured
+  content, the cross-file-`null` case, and correct position mapping under
+  **both** UTF-8 and UTF-16 on a multibyte fixture. See
+  `docs/26-LSP-Architecture.md` §8 L3 and
+  `docs/00-Decisions-And-Reconciliation.md` §11.34.
 
 ### Changed
 

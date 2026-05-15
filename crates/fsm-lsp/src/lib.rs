@@ -23,10 +23,23 @@
 //! `foldingRange` is a structural parse-tree walk. No second analysis
 //! pass, no second position converter.
 //!
-//! L3+ capabilities (hover, definition, completion, references, rename,
-//! semanticTokens, codeAction, inlayHint) are out of L2 scope and are NOT
-//! stubbed (a silent no-op handler is worse than an unadvertised
-//! capability).
+//! ## L3 scope (Doc 26 §8 L3 — hover + single-file goto, no new analysis)
+//!
+//! `textDocument/hover` (Doc 14 §5 Markdown) + `textDocument/definition`
+//! (Doc 14 §6, **single-file** — cross-file is v1.3, Doc 26 §4.6),
+//! advertised in `initialize`. Both project the shared
+//! [`capabilities::resolve`] token-at-cursor seam, whose resolution
+//! mirrors the analyzer's own name-resolution dispatch and goes through
+//! the SAME `SymbolTable::resolve_*` `fsm check` uses (so a goto/hover can
+//! never disagree with a squiggle). Hover's structured detail (payload
+//! types, extern signatures, transition counts) comes from the **`ir`**
+//! field threaded **additively** through [`analysis::Analysis`] — the
+//! exact behaviour-neutral pattern L2 used for `symbol_table`; still one
+//! analysis, no second lowering, no second position converter.
+//!
+//! L4+ capabilities (completion, references, rename, semanticTokens,
+//! codeAction, inlayHint) are out of L3 scope and are NOT stubbed (a
+//! silent no-op handler is worse than an unadvertised capability).
 //!
 //! ## The reuse seam
 //!

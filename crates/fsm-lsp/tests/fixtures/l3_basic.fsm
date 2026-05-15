@@ -1,0 +1,24 @@
+language fsm 2.0
+
+pure extern can_go(u8 n) : bool
+
+machine Lift {
+    context {
+        floor: u8 = 0
+    }
+
+    events {
+        CALL(dest: u16)
+        STOP
+    }
+
+    initial Idle
+
+    state Idle {
+        on CALL [can_go(1)] -> Moving
+    }
+
+    state Moving {
+        on STOP -> Idle : ctx.floor = ctx.floor + 1
+    }
+}

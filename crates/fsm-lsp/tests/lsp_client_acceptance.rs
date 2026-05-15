@@ -834,3 +834,660 @@ async fn folding_range_composite_parallel_region_exact() {
         "no single-line (start==end) fold may be emitted"
     );
 }
+
+// ===========================================================================
+// L3 — `hover` + `definition` (Doc 26 §8 L3 §5.4-LSP acceptance)
+//
+// Same discipline as L1/L2: an in-process `tower-lsp` client issues the
+// real `textDocument/definition` / `textDocument/hover` JSON-RPC requests
+// and asserts the **decoded response payloads** — the definition
+// `Location` Range byte-matches the declaration computed from the analysis
+// oracle (the SAME `fsm_lsp` code path the server runs), and the hover
+// Markdown's structured content matches expectation (the meaningful
+// payload-field / signature / type lines, not a substring coincidence).
+// Cross-file / unresolved → `null`. Non-ASCII fixture under BOTH
+// `positionEncoding`s pins the position mapping at the L3 layer.
+//
+// Expected ranges are recomputed from the EXACT reused pipeline
+// (`fsm_lsp::analysis::analyze` → `resolve`/`goto_definition`/`hover`
+// through `LineIndex`) — the same code the server runs — AND cross-checked
+// against independent hard-coded computed-from-source columns so a bug
+// that corrupts both oracle and server identically still fails (the
+// oracle alone is not self-validating; the hard-coded cross-check is,
+// exactly as L1's non-ASCII test pins position math).
+// ===========================================================================
+
+use tower_lsp::lsp_types::{GotoDefinitionResponse, Hover, HoverContents, Location};
+
+use fsm_lsp::capabilities::definition::goto_definition;
+use fsm_lsp::capabilities::hover::hover as build_hover;
+
+fn pos_params(uri: &Url, line: u32, character: u32) -> Value {
+    json!({
+        "textDocument": { "uri": uri },
+        "position": { "line": line, "character": character }
+    })
+}
+
+/// Byte offset of `needle` in `text`, +`plus` (cursor placement helper).
+fn byte_of(text: &str, needle: &str, plus: usize) -> usize {
+    text.find(needle).expect("needle in fixture") + plus
+}
+
+fn decode_definition(result: &Value) -> Option<Location> {
+    if result.is_null() {
+        return None;
+    }
+    match serde_json::from_value::<GotoDefinitionResponse>(result.clone())
+        .expect("decode definition response")
+    {
+        GotoDefinitionResponse::Scalar(loc) => Some(loc),
+        other => panic!("expected a single Location, got {other:?}"),
+    }
+}
+
+fn hover_markdown(result: &Value) -> Option<String> {
+    if result.is_null() {
+        return None;
+    }
+    let h: Hover = serde_json::from_value(result.clone()).expect("decode hover");
+    match h.contents {
+        HoverContents::Markup(m) => Some(m.value),
+        other => panic!("expected markup hover, got {other:?}"),
+    }
+}
+
+/// (L3-a) `definition` on a transition-target state ref → the returned
+/// `Location` Range **byte-matches** the `state NAME {` declaration the
+/// analysis oracle computes (the SAME `goto_definition` code path), AND an
+/// independent hard-coded computed-from-source line/col cross-check. Plus
+/// an event-ref goto (different resolution category) for breadth.
+#[tokio::test(flavor = "current_thread")]
+async fn definition_resolves_use_site_to_declaration_range() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text, uri) = fixture("l3_basic.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    // --- Oracle: the SAME pipeline + goto code the server runs. ---------
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(&text, &path);
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "fixture invariant: l3_basic.fsm must be clean, got {:?}",
+        analysis.diagnostics
+    );
+    let cst = fsm_parser::parse(&text).syntax();
+    let idx = LineIndex::new(&text);
+
+    // Cursor on the `Moving` in `on CALL [can_go(1)] -> Moving`.
+    let cur = byte_of(&text, "-> Moving", 3);
+    let cur_pos = idx.position(&text, cur as u32, OffsetEncoding::Utf8);
+    let want = goto_definition(
+        &analysis.symbol_table,
+        &cst,
+        &uri,
+        cur as u32,
+        &idx,
+        &text,
+        OffsetEncoding::Utf8,
+    )
+    .expect("oracle: `Moving` resolves to its decl");
+
+    let result = call_request(
+        &mut service,
+        "textDocument/definition",
+        pos_params(&uri, cur_pos.line, cur_pos.character),
+        40,
+    )
+    .await;
+    let got = decode_definition(&result).expect("server: `Moving` resolves");
+
+    // Load-bearing: byte-exact Location equality with the oracle.
+    assert_eq!(
+        got, want,
+        "served definition Location must byte-match the analysis oracle"
+    );
+    assert_eq!(
+        got.uri, uri,
+        "single-file: decl is in the requested document"
+    );
+
+    // Independent computed-from-source cross-check: `state Moving {` decl
+    // starts at 0-based L20 C4 (verified from the fixture layout), and the
+    // decl span is the whole `state Moving { … }` so the Range starts
+    // exactly there. A position-math regression fails THIS even if it
+    // corrupted the oracle identically.
+    assert_eq!(
+        (got.range.start.line, got.range.start.character),
+        (20, 4),
+        "definition Range must start at the `state Moving {{` declaration"
+    );
+    // The decl span must actually cover the declaration text (independent
+    // of the range math: reconstruct the byte from the range and read it).
+    let decl_byte = idx.offset(&text, got.range.start, OffsetEncoding::Utf8) as usize;
+    assert_eq!(
+        &text[decl_byte..decl_byte + "state Moving".len()],
+        "state Moving",
+        "the Range must point at the literal `state Moving` declaration"
+    );
+
+    // Breadth: an EVENT ref resolves to the event decl (different
+    // resolution category — proves it is not a state-only goto).
+    let ev_cur = byte_of(&text, "on CALL", 3); // the `CALL` after `on`
+    let ev_pos = idx.position(&text, ev_cur as u32, OffsetEncoding::Utf8);
+    let ev_want = goto_definition(
+        &analysis.symbol_table,
+        &cst,
+        &uri,
+        ev_cur as u32,
+        &idx,
+        &text,
+        OffsetEncoding::Utf8,
+    )
+    .expect("oracle: event `CALL` resolves");
+    let ev_result = call_request(
+        &mut service,
+        "textDocument/definition",
+        pos_params(&uri, ev_pos.line, ev_pos.character),
+        41,
+    )
+    .await;
+    let ev_got = decode_definition(&ev_result).expect("server: event `CALL` resolves");
+    assert_eq!(
+        ev_got, ev_want,
+        "event-ref definition must match the oracle"
+    );
+    // The event decl is on L10 (the `CALL(dest: u16)` line in `events {}`).
+    assert_eq!(
+        ev_got.range.start.line, 10,
+        "event `CALL` decl is on 0-based line 10"
+    );
+}
+
+/// (L3-b) `definition` for a symbol that does not resolve in this file
+/// returns **null** — the spec-correct single-file graceful degradation
+/// (Doc 14 §8 / Doc 26 §4.6), NEVER a fabricated or cross-file Location.
+/// Two cases: an unknown name (no such decl) and a deliberately
+/// import/cross-file-style reference. Both must be null, not a guess.
+#[tokio::test(flavor = "current_thread")]
+async fn definition_unresolved_returns_null_not_a_fabricated_location() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    // A buffer whose transition targets a state that does NOT exist (the
+    // analyzer emits E0100; the resolver must NOT invent a location). This
+    // is the single-file degradation contract: an unresolved/cross-file
+    // symbol yields null, exactly as a cross-file import would (there is
+    // no project index in v1.2 — Doc 26 §4.6/§9; the same null path).
+    let text = "language fsm 2.0\n\nmachine M {\n  events { GO }\n  initial A\n  state A {\n    on GO -> Elsewhere\n  }\n}\n"
+        .to_owned();
+    let path = std::env::temp_dir().join("l3_unresolved.fsm");
+    let uri = Url::from_file_path(&path).unwrap();
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    // Oracle agrees it is unresolvable (None) — server must echo null.
+    let analysis = analyze(&text, &path);
+    let cst = fsm_parser::parse(&text).syntax();
+    let idx = LineIndex::new(&text);
+    let cur = byte_of(&text, "-> Elsewhere", 3);
+    let cur_pos = idx.position(&text, cur as u32, OffsetEncoding::Utf8);
+    assert!(
+        goto_definition(
+            &analysis.symbol_table,
+            &cst,
+            &uri,
+            cur as u32,
+            &idx,
+            &text,
+            OffsetEncoding::Utf8
+        )
+        .is_none(),
+        "oracle: an unresolved cross-file-style ref must be None"
+    );
+
+    let result = call_request(
+        &mut service,
+        "textDocument/definition",
+        pos_params(&uri, cur_pos.line, cur_pos.character),
+        42,
+    )
+    .await;
+    assert!(
+        result.is_null(),
+        "definition for an unresolved/cross-file symbol MUST be null \
+         (graceful single-file degradation) — got {result:?}, a \
+         fabricated location is the silent-data-loss cardinal sin"
+    );
+    assert!(
+        decode_definition(&result).is_none(),
+        "decoded definition must be None"
+    );
+
+    // Negative-position breadth: cursor in whitespace → null, no panic.
+    let ws = byte_of(&text, "machine M", 7);
+    let ws_pos = idx.position(&text, ws as u32, OffsetEncoding::Utf8);
+    let ws_res = call_request(
+        &mut service,
+        "textDocument/definition",
+        pos_params(&uri, ws_pos.line, ws_pos.character),
+        43,
+    )
+    .await;
+    assert!(ws_res.is_null(), "definition on whitespace is null");
+}
+
+/// (L3-c) `hover` content assertions — the MEANINGFUL structured Markdown
+/// (Doc 14 §5), not a substring coincidence. Event payload field list
+/// (IR-sourced), `pure` extern signature, context-field type+default, and
+/// a state's kind + transitions-out. Plus the negative: hover on
+/// whitespace → null (no panic, no empty tooltip).
+#[tokio::test(flavor = "current_thread")]
+async fn hover_markdown_content_is_structured_and_ir_sourced() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    let init = do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+    // Capability advertisement is part of L3 (Doc 26 §8 L3): assert it so
+    // an un-advertised provider fails acceptance.
+    assert_eq!(
+        init["capabilities"]["hoverProvider"],
+        json!(true),
+        "hoverProvider must be advertised"
+    );
+    assert_eq!(
+        init["capabilities"]["definitionProvider"],
+        json!(true),
+        "definitionProvider must be advertised"
+    );
+
+    let (text, uri) = fixture("l3_basic.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    // Oracle parity per request (server == the same hover code path).
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(&text, &path);
+    let cst = fsm_parser::parse(&text).syntax();
+    let idx = LineIndex::new(&text);
+    let oracle = |byte: usize| -> Option<String> {
+        build_hover(
+            &analysis.symbol_table,
+            analysis.ir.as_ref(),
+            &cst,
+            byte as u32,
+            &idx,
+            &text,
+            OffsetEncoding::Utf8,
+        )
+        .map(|h| match h.contents {
+            HoverContents::Markup(m) => m.value,
+            _ => unreachable!(),
+        })
+    };
+
+    // 1. EVENT hover — the payload field list is IR-sourced (the
+    //    symbol_table has no payload schema). `CALL(dest: u16)`.
+    let ev = byte_of(&text, "on CALL", 3);
+    let ev_pos = idx.position(&text, ev as u32, OffsetEncoding::Utf8);
+    let ev_md = hover_markdown(
+        &call_request(
+            &mut service,
+            "textDocument/hover",
+            pos_params(&uri, ev_pos.line, ev_pos.character),
+            50,
+        )
+        .await,
+    )
+    .expect("event hover present");
+    assert_eq!(
+        Some(ev_md.clone()),
+        oracle(ev),
+        "served event hover must match the same-pipeline oracle"
+    );
+    assert!(
+        ev_md.contains("## event `CALL`"),
+        "event hover header wrong: {ev_md}"
+    );
+    assert!(
+        ev_md.contains("**Payload fields:**") && ev_md.contains("- `dest: u16`"),
+        "event hover MUST list the IR payload field `dest: u16` \
+         (structured content, not a substring fluke): {ev_md}"
+    );
+
+    // 2. `pure` extern hover — signature from the IR.
+    let ex = byte_of(&text, "can_go(1)", 0);
+    let ex_pos = idx.position(&text, ex as u32, OffsetEncoding::Utf8);
+    let ex_md = hover_markdown(
+        &call_request(
+            &mut service,
+            "textDocument/hover",
+            pos_params(&uri, ex_pos.line, ex_pos.character),
+            51,
+        )
+        .await,
+    )
+    .expect("extern hover present");
+    assert_eq!(
+        Some(ex_md.clone()),
+        oracle(ex),
+        "extern hover oracle parity"
+    );
+    assert!(
+        ex_md.contains("## `pure` extern `can_go`"),
+        "extern hover header (purity) wrong: {ex_md}"
+    );
+    assert!(
+        ex_md.contains("**Signature:** `(n: u8) -> bool`"),
+        "extern hover MUST show the IR-derived signature: {ex_md}"
+    );
+
+    // 3. context-field hover — type + default from the IR ContextField.
+    let cf = byte_of(&text, "ctx.floor", 4);
+    let cf_pos = idx.position(&text, cf as u32, OffsetEncoding::Utf8);
+    let cf_md = hover_markdown(
+        &call_request(
+            &mut service,
+            "textDocument/hover",
+            pos_params(&uri, cf_pos.line, cf_pos.character),
+            52,
+        )
+        .await,
+    )
+    .expect("ctx hover present");
+    assert_eq!(Some(cf_md.clone()), oracle(cf), "ctx hover oracle parity");
+    assert!(
+        cf_md.contains("## context field `floor`")
+            && cf_md.contains("**Type:** `u8`")
+            && cf_md.contains("**Default value:** `0`"),
+        "ctx-field hover MUST show IR type + default: {cf_md}"
+    );
+
+    // 4. STATE hover — kind + transitions-out (Idle has 1 outgoing).
+    let st = byte_of(&text, "initial Idle", 8); // the `Idle` use-site
+    let st_pos = idx.position(&text, st as u32, OffsetEncoding::Utf8);
+    let st_md = hover_markdown(
+        &call_request(
+            &mut service,
+            "textDocument/hover",
+            pos_params(&uri, st_pos.line, st_pos.character),
+            53,
+        )
+        .await,
+    )
+    .expect("state hover present");
+    assert_eq!(Some(st_md.clone()), oracle(st), "state hover oracle parity");
+    assert!(
+        st_md.contains("## state `Idle` *(simple)*") && st_md.contains("**Transitions out:** 1"),
+        "state hover MUST show kind + IR transition count: {st_md}"
+    );
+
+    // Negative: hover on whitespace → null, no panic, no empty tooltip.
+    let ws = byte_of(&text, "machine Lift", 7);
+    let ws_pos = idx.position(&text, ws as u32, OffsetEncoding::Utf8);
+    let ws_res = call_request(
+        &mut service,
+        "textDocument/hover",
+        pos_params(&uri, ws_pos.line, ws_pos.character),
+        54,
+    )
+    .await;
+    assert!(
+        ws_res.is_null(),
+        "hover on whitespace MUST be null (no empty tooltip): {ws_res:?}"
+    );
+}
+
+/// (L3-d) THE risk-1 proof at the L3 layer (Doc 26 §4.1 / §7.1 — the same
+/// rigor L1/L2 applied). `l3_non_ascii.fsm`'s `on GO -> Target` sits on a
+/// line **after** `/* 🚀 ы переход */` (🚀 = 4 bytes / 2 UTF-16; ы = 2/1;
+/// 7 Cyrillic in "переход" = 2/1 each). The cursor `character` to place on
+/// the `Target` use-site therefore DIVERGES by exactly 10 units between
+/// encodings — a byte/scalar shim sends the wrong position and resolves
+/// the wrong (or no) token. The test drives definition AND hover under
+/// BOTH negotiated encodings, sending the per-encoding-correct cursor, and
+/// asserts the resolved decl Range / hover content is correct each time,
+/// byte-matching the per-encoding oracle, with hard-coded divergent cursor
+/// columns. It FAILS if the L3 position mapping regresses.
+#[tokio::test(flavor = "current_thread")]
+async fn non_ascii_definition_and_hover_correct_under_utf8_and_utf16() {
+    // Captures the served decl-Range start per encoding; the decl line is
+    // pure ASCII so the Range itself is encoding-invariant — but the
+    // *cursor we must send* is not, which is the actual position-mapping
+    // test (a wrong inverse maps the divergent cursor to the wrong token).
+    let mut cursor_cols: Vec<u32> = Vec::new();
+    for (enc_kind, enc) in [
+        (PositionEncodingKind::UTF8, OffsetEncoding::Utf8),
+        (PositionEncodingKind::UTF16, OffsetEncoding::Utf16),
+    ] {
+        let (mut service, _socket) = LspService::new(Backend::new);
+        let init = do_initialize(&mut service, std::slice::from_ref(&enc_kind)).await;
+        assert_eq!(
+            init["capabilities"]["positionEncoding"],
+            json!(enc_kind.as_str())
+        );
+
+        let (text, uri) = fixture("l3_non_ascii.fsm");
+        let did_open = Request::build("textDocument/didOpen")
+            .params(did_open_params(&uri, &text))
+            .finish();
+        service.ready().await.unwrap().call(did_open).await.unwrap();
+
+        let path = uri.to_file_path().unwrap();
+        let analysis = analyze(&text, &path);
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "[{enc:?}] fixture invariant: l3_non_ascii.fsm clean"
+        );
+        let cst = fsm_parser::parse(&text).syntax();
+        let idx = LineIndex::new(&text);
+
+        // The cursor on the `Target` USE-site. Its byte is encoding-
+        // independent; the LSP `character` to send is NOT — compute it via
+        // the authoritative LineIndex (the same the server inverts).
+        let cur_byte = byte_of(&text, "-> Target", 3);
+        let cur_pos = idx.position(&text, cur_byte as u32, enc);
+        // It is on 0-based line 8 (the `… on GO -> Target` line). Hard-
+        // coded divergent columns (computed-from-source) so a bug that
+        // corrupts oracle+server identically still fails here:
+        //   line 8 prefix = 8 spaces + "/* " + 🚀 + " " + ы + " переход */ on GO -> "
+        //   UTF-8  : 🚀=4 ы=2 переход=14  -> `Target` use col 46
+        //   UTF-16 : 🚀=2 ы=1 переход=7   -> col 36   (10 fewer)
+        assert_eq!(cur_pos.line, 8, "[{enc:?}] use-site is on line 8");
+        let expected_cur_col = match enc {
+            OffsetEncoding::Utf8 => 46,
+            OffsetEncoding::Utf16 => 36,
+        };
+        assert_eq!(
+            cur_pos.character, expected_cur_col,
+            "[{enc:?}] the cursor column on `Target` must diverge by the \
+             multibyte delta — a byte/scalar shim computes the wrong one"
+        );
+        cursor_cols.push(cur_pos.character);
+
+        // --- definition: send the per-encoding cursor, assert the decl
+        //     Range byte-matches the oracle AND the literal decl. -------
+        let want = goto_definition(
+            &analysis.symbol_table,
+            &cst,
+            &uri,
+            cur_byte as u32,
+            &idx,
+            &text,
+            enc,
+        )
+        .expect("[oracle] `Target` resolves");
+        let dres = call_request(
+            &mut service,
+            "textDocument/definition",
+            pos_params(&uri, cur_pos.line, cur_pos.character),
+            60,
+        )
+        .await;
+        let dgot = decode_definition(&dres).expect("[server] `Target` resolves");
+        assert_eq!(
+            dgot, want,
+            "[{enc:?}] served definition must byte-match the oracle \
+             (proves the divergent cursor mapped to the right token)"
+        );
+        // The decl is the whole `STATE_DECL` node for `state Target {}`.
+        // Verified-from-source: that node's byte range is [152,168) =
+        // "state Target {}\n" (rowan attaches the trailing newline to the
+        // node — the SAME `span_of` decl span L2's `documentSymbol`
+        // `range` uses). It starts on the pure-ASCII line 11 col 4 and
+        // ends at line 12 col 0 (just past the closing `}` + newline).
+        // Encoding-invariant (the whole decl is ASCII).
+        assert_eq!(
+            (
+                dgot.range.start.line,
+                dgot.range.start.character,
+                dgot.range.end.line,
+                dgot.range.end.character
+            ),
+            (11, 4, 12, 0),
+            "[{enc:?}] decl Range = the `state Target {{}}` STATE_DECL node \
+             [L11C4, L12C0) (full node span incl. trailing newline — the \
+             same span_of decl span L2 documentSymbol uses)"
+        );
+        // Independent: the Range start must point at the literal decl text
+        // (reconstruct the byte from the Range, encoding-agnostic check).
+        let db = idx.offset(&text, dgot.range.start, enc) as usize;
+        assert!(
+            text[db..].starts_with("state Target {}"),
+            "[{enc:?}] decl Range start must be the `state Target {{}}` text"
+        );
+
+        // --- hover at the same divergent cursor: content correct + oracle
+        //     parity (proves hover's position inverse is the same correct
+        //     one, not a second/naive converter). -----------------------
+        let hres = call_request(
+            &mut service,
+            "textDocument/hover",
+            pos_params(&uri, cur_pos.line, cur_pos.character),
+            61,
+        )
+        .await;
+        let hmd = hover_markdown(&hres).expect("[server] hover on `Target`");
+        let hwant = build_hover(
+            &analysis.symbol_table,
+            analysis.ir.as_ref(),
+            &cst,
+            cur_byte as u32,
+            &idx,
+            &text,
+            enc,
+        )
+        .map(|h| match h.contents {
+            HoverContents::Markup(m) => m.value,
+            _ => unreachable!(),
+        });
+        assert_eq!(
+            Some(hmd.clone()),
+            hwant,
+            "[{enc:?}] served hover must match the same-pipeline oracle"
+        );
+        assert!(
+            hmd.contains("## state `Target` *(simple)*"),
+            "[{enc:?}] hover on the `Target` use-site resolves to the \
+             state and renders its kind: {hmd}"
+        );
+    }
+
+    // Cross-encoding sanity on REAL data: the UTF-8 cursor column MUST
+    // exceed the UTF-16 one by exactly 10 (🚀 4→2, ы 2→1, переход 7×2→7×1
+    // = 7 less; +1+2 = 10). Proves the encodings genuinely diverge on this
+    // line, so a single-encoding bug could not have passed both branches.
+    assert_eq!(cursor_cols.len(), 2, "both encodings exercised");
+    assert_eq!(
+        cursor_cols[0],
+        cursor_cols[1] + 10,
+        "UTF-8 cursor col {} must exceed UTF-16 col {} by the multibyte \
+         delta (10) — the §4.1 divergence at the L3 layer",
+        cursor_cols[0],
+        cursor_cols[1]
+    );
+}
+
+/// (L3-e) The exact Doc 26 §8 L3 acceptance sentence: place the cursor on
+/// a **state reference in a transition** → `definition` returns the exact
+/// Range of the `state NAME {` declaration; **hover on an event** → the
+/// Markdown contains the payload field list from the IR; **hover in
+/// whitespace** → `None`, no panic. (a/c cover these via the oracle; this
+/// is the verbatim-spec restatement with the exact byte assertions, so the
+/// acceptance maps 1:1 to the doc clause and cannot silently drift.)
+#[tokio::test(flavor = "current_thread")]
+async fn doc26_l3_acceptance_sentence_verbatim() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+    let (text, uri) = fixture("l3_basic.fsm");
+    service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(did_open_params(&uri, &text))
+                .finish(),
+        )
+        .await
+        .unwrap();
+    let idx = LineIndex::new(&text);
+
+    // "cursor on a state reference in a transition → definition returns
+    //  the exact Range of the `state NAME {` declaration"
+    let s = byte_of(&text, "-> Moving", 3);
+    let sp = idx.position(&text, s as u32, OffsetEncoding::Utf8);
+    let d = decode_definition(
+        &call_request(
+            &mut service,
+            "textDocument/definition",
+            pos_params(&uri, sp.line, sp.character),
+            70,
+        )
+        .await,
+    )
+    .expect("state ref resolves");
+    let b = idx.offset(&text, d.range.start, OffsetEncoding::Utf8) as usize;
+    assert!(
+        text[b..].starts_with("state Moving {"),
+        "definition Range must be exactly the `state Moving {{` decl line"
+    );
+
+    // "hover on an event → response Markdown contains the payload field
+    //  list from the IR"
+    let e = byte_of(&text, "on CALL", 3);
+    let ep = idx.position(&text, e as u32, OffsetEncoding::Utf8);
+    let md = hover_markdown(
+        &call_request(
+            &mut service,
+            "textDocument/hover",
+            pos_params(&uri, ep.line, ep.character),
+            71,
+        )
+        .await,
+    )
+    .expect("event hover present");
+    assert!(
+        md.contains("**Payload fields:**") && md.contains("- `dest: u16`"),
+        "event hover Markdown must contain the IR payload field list: {md}"
+    );
+
+    // "Negative: hover in whitespace → None, no panic."
+    let w = byte_of(&text, "    state Idle", 2); // a space in the indent
+    let wp = idx.position(&text, w as u32, OffsetEncoding::Utf8);
+    let wr = call_request(
+        &mut service,
+        "textDocument/hover",
+        pos_params(&uri, wp.line, wp.character),
+        72,
+    )
+    .await;
+    assert!(wr.is_null(), "hover in whitespace must be null: {wr:?}");
+}

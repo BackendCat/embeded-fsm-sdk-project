@@ -488,8 +488,10 @@ version = "0.1.0"
 dependencies = [
  "fsm-analyzer",
  "fsm-diagnostics",
+ "fsm-ir",
  "fsm-parser",
  "futures",
+ "rowan",
  "serde_json",
  "tokio",
  "tower",

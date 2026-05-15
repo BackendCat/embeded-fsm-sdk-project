@@ -1,20 +1,22 @@
-//! The `tower-lsp` backend — Doc 26 §2.3 / §5 (L1 capabilities only).
+//! The `tower-lsp` backend — Doc 26 §2.3 / §5 (L1+L2+L3 capabilities).
 //!
 //! Implements the LSP lifecycle (`initialize`/`initialized`/`shutdown`),
 //! full-document sync (`didOpen`/`didChange`/`didClose`), a ~200ms debounce
-//! (Doc 14 §14 / Doc 26 §4.3), `publishDiagnostics`, and the L2 read
+//! (Doc 14 §14 / Doc 26 §4.3), `publishDiagnostics`, the L2 read
 //! capabilities `documentSymbol` (Doc 14 §13) + `foldingRange` (Doc 14
-//! §12). Every diagnostic AND every symbol comes from the exact `fsm
-//! check` pipeline ([`crate::analysis::analyze`]) — this module never
-//! re-analyses (Doc 20 §9.4 / Doc 26 §3): `documentSymbol` consumes the
-//! `symbol_table` from the **same** `analyze()` the diagnostics path runs
-//! (Doc 26 §8 L2: "one analysis feeds both"); `foldingRange` is a pure
-//! parse-tree walk (no analysis at all).
+//! §12), and the L3 capabilities `hover` (Doc 14 §5) + `definition` (Doc
+//! 14 §6, single-file). Every diagnostic, symbol, hover and goto comes
+//! from the exact `fsm check` pipeline ([`crate::analysis::analyze`]) —
+//! this module never re-analyses (Doc 20 §9.4 / Doc 26 §3):
+//! `documentSymbol`/`hover`/`definition` consume the `symbol_table` (and,
+//! for hover, the additively threaded `ir`) from the **same** `analyze()`
+//! the diagnostics path runs (Doc 26 §8 L2/L3: "one analysis feeds all");
+//! `foldingRange` is a pure parse-tree walk (no analysis at all).
 //!
-//! L2 scope boundary (Doc 26 §8): NO hover/definition/completion/rename/
-//! references/semanticTokens/codeAction/inlayHint. Those are L3+ and are
-//! deliberately neither implemented nor stubbed (a silent no-op handler is
-//! worse than an unadvertised capability).
+//! L3 scope boundary (Doc 26 §8): NO completion/rename/references/
+//! semanticTokens/codeAction/inlayHint. Those are L4+ and are deliberately
+//! neither implemented nor stubbed (a silent no-op handler is worse than
+//! an unadvertised capability).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -26,16 +28,19 @@ use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
-    FoldingRangeProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    FoldingRangeProviderCapability, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
     MessageType, OneOf, PositionEncodingKind, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{Client, LanguageServer};
 
 use crate::analysis::analyze;
+use crate::capabilities::definition::goto_definition;
 use crate::capabilities::diagnostics::to_lsp_diagnostics;
 use crate::capabilities::document_symbol::document_symbols;
 use crate::capabilities::folding::folding_ranges;
+use crate::capabilities::hover::hover as build_hover;
 use crate::document_store::DocumentStore;
 use crate::position::OffsetEncoding;
 
@@ -178,6 +183,12 @@ impl LanguageServer for Backend {
                 // CST walk — NOT advertised-but-stubbed (the cardinal sin).
                 document_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                // L3 (Doc 26 §8 L3): hover + single-file goto-definition.
+                // Both are honest, fully-implemented providers over the
+                // shared `resolve` seam (same single analysis) — advertised
+                // because they genuinely work, NOT stubbed.
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -296,5 +307,92 @@ impl LanguageServer for Backend {
         let enc = *self.encoding.lock().await;
         let cst = fsm_parser::parse(&text).syntax();
         Ok(Some(folding_ranges(&cst, &line_index, &text, enc)))
+    }
+
+    /// `textDocument/hover` — Doc 14 §5 / Doc 26 §8 L3.
+    ///
+    /// Resolves the identifier under the cursor via the shared `resolve`
+    /// seam (the SAME `SymbolTable` resolution `documentSymbol`/`definition`
+    /// and `fsm check` use) and renders Markdown enriched from the
+    /// **additively threaded** `Analysis.ir` (one analysis, no second
+    /// lowering — the L2 one-analysis invariant, widened to include the
+    /// IR). Cursor not on a resolvable in-file symbol (whitespace, keyword,
+    /// declaration site, unknown/cross-file name) → `None`: the
+    /// spec-correct "no hover", never a panic and never an empty tooltip.
+    /// The snapshot is released before the await-free analysis, exactly as
+    /// the L2 paths do.
+    async fn hover(&self, params: HoverParams) -> RpcResult<Option<Hover>> {
+        let pos = params.text_document_position_params;
+        let uri = pos.text_document.uri;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        // Cursor Position -> byte via the ONE authoritative LineIndex
+        // inverse (no second converter — Doc 26 §4.1 / §11.32 boundary).
+        let byte = line_index.offset(&text, pos.position, enc);
+        let path = Backend::uri_to_path(&uri);
+        // THE reuse seam — the identical `fsm check` pipeline; hover reads
+        // the threaded `symbol_table` + `ir` from this single run.
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        Ok(build_hover(
+            &analysis.symbol_table,
+            analysis.ir.as_ref(),
+            &cst,
+            byte,
+            &line_index,
+            &text,
+            enc,
+        ))
+    }
+
+    /// `textDocument/definition` — Doc 14 §6 / Doc 26 §8 L3 (single-file).
+    ///
+    /// Resolves the identifier under the cursor to its declaration via the
+    /// shared `resolve` seam and returns the declaration's `Location` in
+    /// **this** document (the decl span is a byte range of the same parsed
+    /// buffer — never a fabricated or cross-file location). Cross-file is
+    /// explicitly v1.3 (Doc 26 §4.6/§9); a symbol the single-file index
+    /// cannot resolve → `None` (Doc 14 §8 graceful degradation), never a
+    /// wrong jump (the silent-data-loss cardinal sin).
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> RpcResult<Option<GotoDefinitionResponse>> {
+        let pos = params.text_document_position_params;
+        let uri = pos.text_document.uri;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        let byte = line_index.offset(&text, pos.position, enc);
+        let path = Backend::uri_to_path(&uri);
+        // THE reuse seam — identical `fsm check` pipeline; resolution goes
+        // through the SAME `SymbolTable::resolve_*` the diagnostics use.
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        Ok(goto_definition(
+            &analysis.symbol_table,
+            &cst,
+            &uri,
+            byte,
+            &line_index,
+            &text,
+            enc,
+        )
+        .map(GotoDefinitionResponse::Scalar))
     }
 }

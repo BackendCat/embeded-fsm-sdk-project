@@ -37,24 +37,29 @@ use std::path::{Path, PathBuf};
 
 use fsm_analyzer::{analyze_with_source, SymbolTable};
 use fsm_diagnostics::{Diagnostic, Span};
+use fsm_ir::Ir;
 use fsm_parser::ast::{AstNode, File as AstFile};
 use fsm_parser::import_resolver::{resolve_import, ImportError};
 use fsm_parser::{parse, ParseResult, SyntaxKind};
 
 /// The result of **one** `fsm check` pipeline run over a buffer.
 ///
-/// Doc 26 §3 / §8 L2: there is exactly **one** analysis per buffer and it
-/// feeds *both* consumers — diagnostics (L1) **and** the symbol table (L2
-/// `documentSymbol`). L1 discarded `result.symbol_table`; L2 threads it
-/// through here so `documentSymbol` reuses the SAME analysis the debounced
-/// `publishDiagnostics` already ran — no second analysis pass (Doc 26 §8
-/// L2: "One analysis feeds both"), no parallel symbol extraction.
+/// Doc 26 §3 / §8 L2/L3: there is exactly **one** analysis per buffer and it
+/// feeds *every* consumer — diagnostics (L1), the symbol table (L2
+/// `documentSymbol`/`foldingRange`), AND the IR (L3 `hover` enrichment). L1
+/// discarded `result.symbol_table`; L2 threaded it through. L3 *additionally*
+/// threads `result.ir` through (L1+L2 discarded it as an explicit L3+ seam,
+/// `analysis.rs:94`) so `hover` reuses the SAME analysis the debounced
+/// `publishDiagnostics` / `documentSymbol` already ran — no second analysis
+/// pass (Doc 26 §8 L2 "One analysis feeds both"; L3 keeps that invariant),
+/// no parallel IR lowering.
 ///
-/// This is an **additive, behaviour-neutral** change: `analyze()` makes the
-/// identical `analyze_with_source` call in the identical order and merges
-/// import diagnostics identically — it merely *keeps* the `symbol_table`
-/// field L1 dropped on the floor. The `.diagnostics` projection is
-/// byte-identical to L1 (the §11.32 reuse-seam invariant is intact).
+/// This is an **additive, behaviour-neutral** change, exactly the pattern L2
+/// used for `symbol_table`: `analyze()` makes the identical
+/// `analyze_with_source` call in the identical order and merges import
+/// diagnostics identically — it merely *keeps* the `ir` field L1/L2 dropped
+/// on the floor. The `.diagnostics` and `.symbol_table` projections are
+/// byte-identical to L2 (the §11.32 reuse-seam invariant is intact).
 #[derive(Clone, Debug)]
 pub struct Analysis {
     /// Diagnostics in `fsm check` order: parse + symbol + checks (from
@@ -63,11 +68,22 @@ pub struct Analysis {
     /// The analyzer's per-machine ordered symbol tables (events / externs /
     /// consts / enums / context fields / states / regions, each with
     /// `Span`s; `StateEntry` additionally carries `container_path` + a
-    /// coarse `shape`). Doc 26 §5's `documentSymbol` seam — the analyzer's
-    /// own doc-comment (`lower/mod.rs:66`) declares the LSP a sanctioned
-    /// consumer. Carried straight off the single `analyze_with_source`
-    /// result; the LSP re-runs no symbol extraction (Doc 26 §8 L2).
+    /// coarse `shape`). Doc 26 §5's `documentSymbol`/`definition` seam — the
+    /// analyzer's own doc-comment (`lower/mod.rs:66`) declares the LSP a
+    /// sanctioned consumer. Carried straight off the single
+    /// `analyze_with_source` result; the LSP re-runs no symbol extraction
+    /// (Doc 26 §8 L2/L3).
     pub symbol_table: SymbolTable,
+    /// The lowered IR for this buffer (`None` only on a catastrophic lowering
+    /// failure — partial IR is preferred, `lower/mod.rs:60`). Doc 26 §5's
+    /// `hover` seam: payload field types, extern signatures, transition
+    /// counts/priority come from here (the `symbol_table` deliberately does
+    /// NOT carry per-field types or transition structure — verified against
+    /// `symbol_table.rs`; the IR is the only in-tree source). Carried off
+    /// the SAME single `analyze_with_source` result `documentSymbol` uses —
+    /// the LSP runs no second analysis and no parallel lowering (Doc 26 §8
+    /// L3: the one-analysis invariant L2 established is preserved).
+    pub ir: Option<Ir>,
 }
 
 /// Run the **exact** `fsm check` pipeline over an in-memory buffer.
@@ -87,24 +103,28 @@ pub fn analyze(src: &str, uri_path: &Path) -> Analysis {
     //    the merge order matches the CLI exactly).
     let mut import_diags = security_check_imports(&pr, uri_path, &workspace_root);
 
-    // 4. semantic analysis — `check.rs:61`. L2: we KEEP `result.symbol_table`
-    //    (L1 discarded it). `documentSymbol` consumes it from THIS single
-    //    run — there is no second analysis pass and no parallel symbol
-    //    extraction (Doc 26 §8 L2: "One analysis feeds both"). `result.ir`
-    //    is still discarded — it is an L3+ (hover/inlay) seam, not L2.
+    // 4. semantic analysis — `check.rs:61`. L2 KEEPS `result.symbol_table`
+    //    (L1 discarded it); L3 ADDITIONALLY keeps `result.ir` (L1+L2
+    //    discarded it as an explicit L3+ hover seam). `documentSymbol`,
+    //    `definition` and `hover` all consume from THIS single run — there
+    //    is no second analysis pass, no parallel symbol extraction, and no
+    //    parallel IR lowering (Doc 26 §8 L2/L3: "One analysis feeds both" —
+    //    L3 preserves that invariant, just widening "both" to "all").
     let result = analyze_with_source(&pr, &uri_path.to_string_lossy(), src);
     let mut diagnostics = result.diagnostics;
     let symbol_table = result.symbol_table;
+    let ir = result.ir;
 
     // 5. merge — `check.rs:65`: import diagnostics appended after the
     //    parse/analyze diagnostics, sharing the same downstream renderer
     //    (here: the LSP Span->Range projection). This merge is byte-identical
-    //    to L1 — keeping `symbol_table` above does not perturb it.
+    //    to L1/L2 — keeping `symbol_table` + `ir` above does not perturb it.
     diagnostics.append(&mut import_diags);
 
     Analysis {
         diagnostics,
         symbol_table,
+        ir,
     }
 }
 

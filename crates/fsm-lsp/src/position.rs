@@ -144,6 +144,54 @@ impl LineIndex {
         }
     }
 
+    /// Convert an LSP [`Position`] back to a **byte offset** into `text`.
+    ///
+    /// The exact inverse of [`Self::position`] — it walks the *same*
+    /// `LineIndex` and decodes the intra-line `character` in the *same*
+    /// negotiated unit, so a position the server emitted round-trips to the
+    /// byte it came from. This is **not** a second/divergent converter (the
+    /// §11.32 DRIFT-2 boundary): it is the reverse direction of the one
+    /// authoritative `LineIndex`, required by L3's token-at-cursor lookup
+    /// (`textDocument/hover`/`definition` receive a `Position` and must find
+    /// the byte to locate the CST token there). Out-of-range input is
+    /// clamped, never panics (a client may send a stale position against a
+    /// newer buffer): a line past EOF clamps to the buffer end; a
+    /// `character` past the line's content clamps to the line end (the
+    /// line's terminating `\n`, or EOF on the last line). Returned offset is
+    /// always a valid `char` boundary of `text`.
+    pub fn offset(&self, text: &str, pos: Position, encoding: OffsetEncoding) -> u32 {
+        let line = pos.line as usize;
+        if line >= self.line_starts.len() {
+            return self.len;
+        }
+        let line_start = self.line_starts[line];
+        // Exclusive end of this line's *content* (the byte index of the
+        // terminating '\n', or `len` for the final line) — the cursor can
+        // legitimately sit at end-of-line and must not bleed into the next.
+        let line_end = self
+            .line_starts
+            .get(line + 1)
+            .map(|&next| next - 1) // strip the '\n' that started `next`
+            .unwrap_or(self.len);
+        let want = pos.character;
+        let mut units = 0u32;
+        let mut byte = line_start;
+        // Walk the line's chars, accumulating code units in the negotiated
+        // encoding, until we have consumed `want` units (or hit line end).
+        for ch in text[line_start as usize..line_end as usize].chars() {
+            if units >= want {
+                break;
+            }
+            let u = match encoding {
+                OffsetEncoding::Utf8 => ch.len_utf8() as u32,
+                OffsetEncoding::Utf16 => ch.len_utf16() as u32,
+            };
+            units += u;
+            byte += ch.len_utf8() as u32;
+        }
+        byte.min(line_end)
+    }
+
     /// Project a byte-offset [`Span`] onto an LSP [`Range`]. Total and
     /// mechanical (Doc 26 §4.2): no analysis, pure projection. An inverted
     /// span (`end < start`, which `Span` permits) is normalised so the LSP
@@ -351,6 +399,84 @@ mod tests {
                 character: 7
             }
         );
+    }
+
+    #[test]
+    fn offset_is_the_exact_inverse_of_position_ascii() {
+        let src = "language fsm 2.0\nmachine M {\n  state S {}\n}\n";
+        let idx = LineIndex::new(src);
+        // Every byte that is a char boundary must round-trip
+        // position->offset under BOTH encodings (ASCII: identical).
+        for b in 0..=src.len() as u32 {
+            if !src.is_char_boundary(b as usize) {
+                continue;
+            }
+            for enc in [OffsetEncoding::Utf8, OffsetEncoding::Utf16] {
+                let p = idx.position(src, b, enc);
+                assert_eq!(
+                    idx.offset(src, p, enc),
+                    b,
+                    "byte {b} must round-trip via position->offset under {enc:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn offset_inverse_on_non_ascii_line_both_encodings() {
+        // Cyrillic 'ы' (2 bytes / 1 UTF-16 unit) and 🚀 (4 bytes / 2 UTF-16
+        // units) in a comment, then an ASCII token. The cursor on `machine`
+        // and on `M` must map back to the right byte under EACH encoding —
+        // a naive byte-as-character (or scalar) inverse fails one of these.
+        let src = "// ы 🚀\nmachine M {}";
+        let idx = LineIndex::new(src);
+        let m_byte = src.find("machine").unwrap() as u32; // line-1 start
+        let big_m = src.find(" M ").unwrap() as u32 + 1; // the `M` ident
+        for enc in [OffsetEncoding::Utf8, OffsetEncoding::Utf16] {
+            // Round-trip the two ASCII tokens on the line AFTER the
+            // multibyte comment — the line-start lookup is encoding-stable
+            // but a wrong intra-line inverse would still corrupt these.
+            let pm = idx.position(src, m_byte, enc);
+            assert_eq!(idx.offset(src, pm, enc), m_byte, "[{enc:?}] `machine`");
+            let pbm = idx.position(src, big_m, enc);
+            assert_eq!(idx.offset(src, pbm, enc), big_m, "[{enc:?}] ident `M`");
+            // A position WITHIN the multibyte line round-trips to the
+            // boundary byte too. Byte layout of line 0: '/'(0) '/'(1)
+            // ' '(2) 'ы'(3..5, 2 bytes) ' '(5) '🚀'(6..10, 4 bytes).
+            // Byte 6 (the '🚀' start, just past `// ы `) is a char
+            // boundary AFTER the 2-byte Cyrillic — a naive scalar/byte
+            // inverse would map the corresponding position elsewhere.
+            assert!(src.is_char_boundary(6));
+            let p6 = idx.position(src, 6, enc);
+            assert_eq!(idx.offset(src, p6, enc), 6, "[{enc:?}] mid-comment");
+        }
+    }
+
+    #[test]
+    fn offset_clamps_out_of_range_position_no_panic() {
+        let src = "machine M {}\n";
+        let idx = LineIndex::new(src);
+        // Line past EOF -> buffer end.
+        let far = idx.offset(
+            src,
+            Position {
+                line: 999,
+                character: 0,
+            },
+            OffsetEncoding::Utf8,
+        );
+        assert_eq!(far, src.len() as u32);
+        // Character past the line content -> clamped to line end (the '\n'
+        // at byte 12), NOT bleeding into the next line.
+        let past_col = idx.offset(
+            src,
+            Position {
+                line: 0,
+                character: 9999,
+            },
+            OffsetEncoding::Utf8,
+        );
+        assert_eq!(past_col, 12, "clamp to end of line-0 content (before \\n)");
     }
 
     #[test]

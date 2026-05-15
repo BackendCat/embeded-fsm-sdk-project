@@ -25,6 +25,21 @@ path = "src/main.rs"
 fsm-diagnostics = { workspace = true, features = ["serde"] }
 fsm-parser = { path = "../fsm-parser" }
 fsm-analyzer = { path = "../fsm-analyzer" }
+# L3 hover enrichment (Doc 26 §2.1 dependency table / §5 `hover` seam): the
+# `symbol_table` carries names + decl `Span`s but NOT payload field types,
+# extern signatures, or transition structure — those come only from the
+# lowered `Ir`. `fsm-lsp` consumes the IR read model produced by the SAME
+# single `analyze_with_source` call (no second lowering); default features
+# (no `schema-validate` — that is a dev-time analyzer gate, not an LSP need).
+fsm-ir = { path = "../fsm-ir" }
+# The CST traversal substrate. Doc 26 §6 lists `cst::{SyntaxNode,
+# SyntaxToken, ...}` as the LSP's intended-public traversal API; L3's
+# token-at-cursor lookup needs rowan's `TextSize` (byte→offset) and
+# `TokenAtOffset` (the at-most-two tokens at a boundary) directly. Pinned
+# via the workspace `rowan = "0.15"` so the `SyntaxNode<FsmLanguage>` type
+# is byte-identical to the one `fsm-parser` produces (a divergent rowan
+# would make the trees incompatible).
+rowan = { workspace = true }
 
 # LSP framework + async runtime. Sanctioned by Doc 26 §2.1 — `fsm-lsp` is
 # a developer-host tool, never compiled into firmware, so the embedded G2
