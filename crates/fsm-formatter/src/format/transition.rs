@@ -38,7 +38,7 @@ use crate::options::FormatOptions;
 /// Format one transition-like node, given an arrow target column for
 /// alignment (or `None` to skip alignment). The opening writer position
 /// is the start of the transition's line (caller emits indentation).
-pub fn emit_transition(
+pub(crate) fn emit_transition(
     w: &mut FormatWriter,
     node: &SyntaxNode,
     align_arrow_col: Option<usize>,
@@ -61,7 +61,7 @@ pub fn emit_transition(
 
 /// Compute the *pre-arrow* width (chars from start-of-line to where the
 /// `->` should go) for one transition. Used by the group-alignment pass.
-pub fn pre_arrow_width(node: &SyntaxNode) -> Option<usize> {
+pub(crate) fn pre_arrow_width(node: &SyntaxNode) -> Option<usize> {
     let s = render_pre_arrow_into_string(node)?;
     Some(s.len())
 }
@@ -257,7 +257,7 @@ fn pad_then_arrow(
 
 // ─── Guard / priority ───────────────────────────────────────────────────
 
-pub fn emit_guard_clause(w: &mut FormatWriter, node: &SyntaxNode) {
+pub(crate) fn emit_guard_clause(w: &mut FormatWriter, node: &SyntaxNode) {
     w.write("[");
     // The guard body is a single expression (possibly `else`).
     if let Some(inner) = node.children().next() {
@@ -281,7 +281,7 @@ fn emit_priority_clause(w: &mut FormatWriter, node: &SyntaxNode) {
 // ─── Group-alignment helper ─────────────────────────────────────────────
 
 /// Decide whether `kind` belongs to the alignment family (has an arrow).
-pub fn is_arrow_transition(kind: SyntaxKind) -> bool {
+pub(crate) fn is_arrow_transition(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         SyntaxKind::TRANSITION_DECL
@@ -294,7 +294,7 @@ pub fn is_arrow_transition(kind: SyntaxKind) -> bool {
 
 /// Decide whether `kind` is a transition family member at all (with or
 /// without arrow).
-pub fn is_transition_kind(kind: SyntaxKind) -> bool {
+pub(crate) fn is_transition_kind(kind: SyntaxKind) -> bool {
     is_arrow_transition(kind)
         || matches!(
             kind,

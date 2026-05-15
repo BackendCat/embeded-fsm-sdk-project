@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 use crate::cli::ParseArgs;
 use crate::diagnostics;
 
-pub fn run(args: ParseArgs) -> ExitCode {
+pub(crate) fn run(args: ParseArgs) -> ExitCode {
     let mut had_errors = false;
     for path in &args.files {
         let src = match std::fs::read_to_string(path) {

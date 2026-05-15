@@ -24,7 +24,7 @@ use crate::config;
 use crate::diagnostics;
 use crate::import_header::{parse_header_file, ImportedHeader};
 
-pub fn run(args: GenerateArgs) -> ExitCode {
+pub(crate) fn run(args: GenerateArgs) -> ExitCode {
     // v1.0 only ships C99 (cpp17 is on the roadmap but not in fsm-cli yet).
     if args.target != "c99" {
         eprintln!(

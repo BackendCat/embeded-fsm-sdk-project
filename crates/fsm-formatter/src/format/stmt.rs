@@ -21,7 +21,11 @@ use super::writer::FormatWriter;
 /// Emit an `ACTION_BLOCK`. `surrounding_indent` controls inline vs.
 /// multi-line: if the writer is already on a line with content and the
 /// block has at most one simple statement, inline; otherwise multi-line.
-pub fn emit_action_block(w: &mut FormatWriter, node: &SyntaxNode, inline_threshold_chars: usize) {
+pub(crate) fn emit_action_block(
+    w: &mut FormatWriter,
+    node: &SyntaxNode,
+    inline_threshold_chars: usize,
+) {
     debug_assert_eq!(node.kind(), SyntaxKind::ACTION_BLOCK);
 
     let stmts: Vec<SyntaxNode> = node
@@ -97,7 +101,7 @@ fn estimate_stmt_width(stmts: &[SyntaxNode]) -> usize {
 /// transitions, internal transitions, entry/exit, completion, timers,
 /// choice/junction branches. The braced-block variant (`{ … }`) is used
 /// **only** as the body of compound statements (`if`/`while`/`for`).
-pub fn emit_inline_action_list(w: &mut FormatWriter, action: &SyntaxNode) {
+pub(crate) fn emit_inline_action_list(w: &mut FormatWriter, action: &SyntaxNode) {
     let stmts: Vec<SyntaxNode> = action
         .children()
         .filter(|n| is_statement_kind(n.kind()))
@@ -111,7 +115,7 @@ pub fn emit_inline_action_list(w: &mut FormatWriter, action: &SyntaxNode) {
 }
 
 /// Dispatch one statement.
-pub fn emit_statement(w: &mut FormatWriter, node: &SyntaxNode) {
+pub(crate) fn emit_statement(w: &mut FormatWriter, node: &SyntaxNode) {
     match node.kind() {
         SyntaxKind::STMT_ASSIGN => emit_assign(w, node),
         SyntaxKind::STMT_CALL => emit_call_stmt(w, node),

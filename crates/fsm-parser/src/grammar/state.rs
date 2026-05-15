@@ -25,7 +25,7 @@ use super::transition::parse_transition_from_on;
 
 /// What may legally start a `state_item`. Used as the sync set when a body
 /// rule explodes.
-pub const STATE_ITEM_STARTS: TokenSet = TokenSet::new(&[
+pub(crate) const STATE_ITEM_STARTS: TokenSet = TokenSet::new(&[
     TokenKind::KwOn,
     TokenKind::KwState,
     TokenKind::KwExport,
@@ -54,7 +54,7 @@ pub const STATE_ITEM_STARTS: TokenSet = TokenSet::new(&[
 /// Depth-bounded — nested composite states drive recursion through
 /// `parse_state_item -> parse_state_decl`. See [`Parser::with_recursion`]
 /// (Doc 00 §7.12 G-02 / audit P1-5).
-pub fn parse_state_decl(p: &mut Parser) {
+pub(crate) fn parse_state_decl(p: &mut Parser) {
     p.with_recursion((), |p| parse_state_decl_inner(p));
 }
 
@@ -119,7 +119,7 @@ const SUBMACHINE_REF_RECOVER: TokenSet = TokenSet::new(&[
 ]);
 
 /// Dispatch one `state_item`.
-pub fn parse_state_item(p: &mut Parser) {
+pub(crate) fn parse_state_item(p: &mut Parser) {
     // Optional stable-ID prefix.
     let _ = try_parse_stable_id(p);
 
@@ -251,7 +251,7 @@ fn parse_exit_decl(p: &mut Parser) {
 
 // ─── final / entry_point / exit_point ───────────────────────────────────
 
-pub fn parse_final_decl(p: &mut Parser) {
+pub(crate) fn parse_final_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::FINAL_DECL);
     p.bump(); // final
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
@@ -259,7 +259,7 @@ pub fn parse_final_decl(p: &mut Parser) {
 }
 
 /// `entry_point_decl = "entry_point" , identifier , "->" , identifier ;`
-pub fn parse_entry_point_decl(p: &mut Parser) {
+pub(crate) fn parse_entry_point_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::ENTRY_POINT_DECL);
     p.bump(); // `entry_point` (contextual)
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
@@ -269,7 +269,7 @@ pub fn parse_entry_point_decl(p: &mut Parser) {
 }
 
 /// `exit_point_decl = "exit_point" , identifier ;`
-pub fn parse_exit_point_decl(p: &mut Parser) {
+pub(crate) fn parse_exit_point_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::EXIT_POINT_DECL);
     p.bump(); // `exit_point` (contextual)
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
@@ -282,7 +282,7 @@ pub fn parse_exit_point_decl(p: &mut Parser) {
 ///
 /// Depth-bounded — regions live inside composite states and may contain
 /// further nested states; the recursion mirrors `parse_state_decl`.
-pub fn parse_region_decl(p: &mut Parser) {
+pub(crate) fn parse_region_decl(p: &mut Parser) {
     p.with_recursion((), |p| parse_region_decl_inner(p));
 }
 
@@ -307,7 +307,7 @@ fn parse_region_decl_inner(p: &mut Parser) {
 // ─── history ─────────────────────────────────────────────────────────────
 
 /// `shallow_history_decl = "shallow_history" , identifier , "{" , initial_decl , "}" ;`
-pub fn parse_shallow_history_decl(p: &mut Parser) {
+pub(crate) fn parse_shallow_history_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::SHALLOW_HISTORY_DECL);
     p.bump(); // shallow_history
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
@@ -322,7 +322,7 @@ pub fn parse_shallow_history_decl(p: &mut Parser) {
     p.finish_node();
 }
 
-pub fn parse_deep_history_decl(p: &mut Parser) {
+pub(crate) fn parse_deep_history_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::DEEP_HISTORY_DECL);
     p.bump(); // deep_history
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
@@ -341,7 +341,7 @@ pub fn parse_deep_history_decl(p: &mut Parser) {
 ///
 /// `choice_branch = "[" , guard_expr , "]" , "->" , identifier ,
 ///                  [ ":" , action_list ] ;`
-pub fn parse_choice_decl(p: &mut Parser) {
+pub(crate) fn parse_choice_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::CHOICE_DECL);
     p.bump(); // choice
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
@@ -382,7 +382,7 @@ fn parse_choice_branch(p: &mut Parser) {
     p.finish_node();
 }
 
-pub fn parse_junction_decl(p: &mut Parser) {
+pub(crate) fn parse_junction_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::JUNCTION_DECL);
     p.bump(); // junction
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
@@ -415,7 +415,7 @@ fn parse_choice_branch_inner(p: &mut Parser) {
 // ─── fork / join ─────────────────────────────────────────────────────────
 
 /// `fork_decl = "fork" , identifier , "->" , "{" , identifier { "," identifier } , "}" ;`
-pub fn parse_fork_decl(p: &mut Parser) {
+pub(crate) fn parse_fork_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::FORK_DECL);
     p.bump(); // fork
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
@@ -439,7 +439,7 @@ pub fn parse_fork_decl(p: &mut Parser) {
 
 /// `join_decl = "join" , identifier , "{" , identifier {"," identifier} , "}" ,
 ///              "->" , identifier ;`
-pub fn parse_join_decl(p: &mut Parser) {
+pub(crate) fn parse_join_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::JOIN_DECL);
     p.bump(); // join
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);

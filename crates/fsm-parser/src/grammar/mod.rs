@@ -6,14 +6,14 @@
 //! are defined as const fields near the rules that use them so panic-mode
 //! recovery is a one-liner.
 
-pub mod file;
-pub mod guard;
-pub mod machine;
-pub mod state;
-pub mod stmt;
-pub mod top_level;
-pub mod transition;
+pub(crate) mod file;
+pub(crate) mod guard;
+pub(crate) mod machine;
+pub(crate) mod state;
+pub(crate) mod stmt;
+pub(crate) mod top_level;
+pub(crate) mod transition;
 
 /// Convenience re-export so call sites can use `grammar::parse_file(p)` from
 /// the public entry point in `parse.rs`.
-pub use file::parse_file;
+pub(crate) use file::parse_file;

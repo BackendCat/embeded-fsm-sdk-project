@@ -23,7 +23,7 @@ use super::writer::FormatWriter;
 /// Block comments containing embedded newlines are emitted with each
 /// continuation line at the same indent (raw text re-emit; we don't
 /// reflow block-comment internals per Doc 19 §14.1).
-pub fn emit_comment(w: &mut FormatWriter, tok: &SyntaxToken) {
+pub(crate) fn emit_comment(w: &mut FormatWriter, tok: &SyntaxToken) {
     match tok.kind() {
         SyntaxKind::LineComment | SyntaxKind::DocComment => {
             w.write(tok.text().trim_end());
@@ -63,7 +63,7 @@ pub fn emit_comment(w: &mut FormatWriter, tok: &SyntaxToken) {
 /// leaves in order so the body formatter can decide how to integrate
 /// them.
 #[derive(Debug, Clone)]
-pub enum BodyEvent {
+pub(crate) enum BodyEvent {
     /// A trivia token. The walker has already classified it: `kind` is
     /// one of `Newline`, `Whitespace`, `LineComment`, `BlockComment`,
     /// `DocComment`.
@@ -95,7 +95,7 @@ pub enum BodyEvent {
 /// - Trivia INSIDE a declaration's *meaningful* span (e.g. blank lines
 ///   inside a state body) is NOT returned — it stays the inner body
 ///   emitter's concern.
-pub fn body_events_with_trailing(parent: &SyntaxNode) -> Vec<BodyEvent> {
+pub(crate) fn body_events_with_trailing(parent: &SyntaxNode) -> Vec<BodyEvent> {
     let nodes: Vec<SyntaxNode> = parent.children().collect();
     let parent_start: usize = parent.text_range().start().into();
     // The body's "interesting" end is the position of the parent's closing

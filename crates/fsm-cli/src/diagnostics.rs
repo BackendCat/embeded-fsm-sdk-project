@@ -22,7 +22,7 @@ use miette::NamedSource;
 /// Output goes to stderr. `path` is the file label printed under each
 /// `-->` pointer; `src` is the source text used to draw the snippet and
 /// caret. Panic-safe — writer failures are silently discarded.
-pub fn render_human(diags: &[Diagnostic], src: &str, path: &str) {
+pub(crate) fn render_human(diags: &[Diagnostic], src: &str, path: &str) {
     // unicode_nocolor keeps escapes out of test golden outputs. A real
     // user-facing color path can route through `--no-color` in Doc 18 §2;
     // staying nocolor here avoids accidental escape leaks until we wire
@@ -42,12 +42,12 @@ pub fn render_human(diags: &[Diagnostic], src: &str, path: &str) {
 
 /// Returns `true` if any diagnostic in the slice carries error severity.
 /// Used by every subcommand to choose between exit-0 and exit-1.
-pub fn any_errors(diags: &[Diagnostic]) -> bool {
+pub(crate) fn any_errors(diags: &[Diagnostic]) -> bool {
     diags.iter().any(|d| d.severity == Severity::Error)
 }
 
 /// Promote every warning to error in-place. Used by `--warn-as-error`.
-pub fn promote_warnings(diags: &mut [Diagnostic]) {
+pub(crate) fn promote_warnings(diags: &mut [Diagnostic]) {
     for d in diags.iter_mut() {
         if d.severity == Severity::Warning {
             d.severity = Severity::Error;

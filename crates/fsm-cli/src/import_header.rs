@@ -64,19 +64,19 @@ use fsm_ir::{ExternObject, Param, Type};
 /// One skipped construct, surfaced to the user as an `fsm-W`-level note so
 /// they know *why* a function they expected did not become an extern.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SkipNote {
+pub(crate) struct SkipNote {
     /// The (trimmed, comment-stripped) source fragment we declined to model.
-    pub fragment: String,
+    pub(crate) fragment: String,
     /// Human-readable reason.
-    pub reason: String,
+    pub(crate) reason: String,
 }
 
 /// Result of importing one header: the externs we could model + the notes
 /// for everything we deliberately skipped.
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct ImportedHeader {
-    pub externs: Vec<ExternObject>,
-    pub skipped: Vec<SkipNote>,
+pub(crate) struct ImportedHeader {
+    pub(crate) externs: Vec<ExternObject>,
+    pub(crate) skipped: Vec<SkipNote>,
 }
 
 /// Parse a C header file's text into importable externs.
@@ -84,7 +84,7 @@ pub struct ImportedHeader {
 /// `header_label` is used only for the synthesized [`SourceLocation::file`]
 /// so diagnostics/`emit` can attribute an imported extern to its origin
 /// header rather than the `.fsm`.
-pub fn parse_header(src: &str, header_label: &str) -> ImportedHeader {
+pub(crate) fn parse_header(src: &str, header_label: &str) -> ImportedHeader {
     let mut out = ImportedHeader::default();
     let stripped = strip_comments_and_preproc(src, &mut out.skipped);
 
@@ -143,7 +143,7 @@ pub fn parse_header(src: &str, header_label: &str) -> ImportedHeader {
 /// non-zero exit by the caller), never an OOM/panic. Path *containment* is
 /// enforced separately at the call site (`cmd::generate`) per the trust
 /// model — this function only owns the DoS cap.
-pub fn parse_header_file(path: &Path) -> std::io::Result<ImportedHeader> {
+pub(crate) fn parse_header_file(path: &Path) -> std::io::Result<ImportedHeader> {
     let src = crate::safe_io::read_to_string_capped(path, crate::safe_io::MAX_INPUT_BYTES)?;
     let label = path.to_string_lossy().into_owned();
     Ok(parse_header(&src, &label))
@@ -175,7 +175,7 @@ impl ImportedHeader {
     /// would trip the analyzer's own duplicate-extern check `FSM-E0024`).
     /// Returns the rendered block plus the names that were suppressed for
     /// being DSL-shadowed (so `cmd::generate` can note the conflict once).
-    pub fn to_dsl_externs(&self, skip_names: &[String]) -> (String, Vec<String>) {
+    pub(crate) fn to_dsl_externs(&self, skip_names: &[String]) -> (String, Vec<String>) {
         let mut block = String::new();
         let mut shadowed = Vec::new();
         for ext in &self.externs {

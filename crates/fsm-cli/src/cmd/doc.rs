@@ -14,7 +14,7 @@ use fsm_parser::parse;
 use crate::cli::DocArgs;
 use crate::diagnostics;
 
-pub fn run(args: DocArgs) -> ExitCode {
+pub(crate) fn run(args: DocArgs) -> ExitCode {
     let src = match std::fs::read_to_string(&args.file) {
         Ok(s) => s,
         Err(e) => {

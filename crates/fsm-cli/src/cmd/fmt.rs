@@ -15,7 +15,7 @@ use fsm_formatter::{format_string, FormatOptions};
 
 use crate::cli::FmtArgs;
 
-pub fn run(args: FmtArgs) -> ExitCode {
+pub(crate) fn run(args: FmtArgs) -> ExitCode {
     if args.stdin {
         return run_stdin();
     }

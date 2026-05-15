@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — v1.1.x changes accrue here._
+### Changed
+
+- Internal API hygiene: 170 accidentally-`pub` items across `fsm-parser`,
+  `fsm-formatter`, and `fsm-cli` `src/` (in private modules / the binary
+  crate) narrowed to `pub(crate)`; no public API or behaviour change
+  (673/0 tests, 5/5 examples, 25/25 conformance, IR fingerprints all
+  unchanged). The `unreachable_pub` lint wiring is deferred — residual
+  warnings are confined to shared integration-test helpers, not `src/`
+  (see `docs/00-Decisions-And-Reconciliation.md` §11.31).
 
 ## [1.1.0] — 2026-05-15
 

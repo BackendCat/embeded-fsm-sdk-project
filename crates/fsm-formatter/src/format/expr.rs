@@ -30,7 +30,7 @@ use rowan::NodeOrToken;
 use super::writer::FormatWriter;
 
 /// Public entry — format any expression subtree.
-pub fn emit_expr(w: &mut FormatWriter, node: &SyntaxNode) {
+pub(crate) fn emit_expr(w: &mut FormatWriter, node: &SyntaxNode) {
     emit_with_parent_bp(
         w, node, /* parent_lbp = */ 0, /* on_rhs = */ false,
     );
@@ -195,7 +195,7 @@ fn emit_cast(w: &mut FormatWriter, node: &SyntaxNode) {
     }
 }
 
-pub fn emit_type_ref(w: &mut FormatWriter, node: &SyntaxNode) {
+pub(crate) fn emit_type_ref(w: &mut FormatWriter, node: &SyntaxNode) {
     match node.kind() {
         SyntaxKind::OPAQUE_TYPE_REF => {
             // `opaque "C_type"`.
@@ -268,7 +268,7 @@ fn emit_binary(w: &mut FormatWriter, node: &SyntaxNode, parent_lbp: u8, on_rhs: 
 
 /// Lookup the left-binding-power of a binary operator, in the units of
 /// Doc 04 §8.7.1 (higher binds tighter).
-pub fn binary_lbp_for_op(op: &str) -> u8 {
+pub(crate) fn binary_lbp_for_op(op: &str) -> u8 {
     match op {
         "||" => 0,
         "&&" => 1,
@@ -378,7 +378,7 @@ fn re_emit_raw(w: &mut FormatWriter, node: &SyntaxNode) {
 }
 
 /// Iterate non-trivia tokens of `node` (top-level, not recursive).
-pub fn iter_tokens(node: &SyntaxNode) -> impl Iterator<Item = fsm_parser::SyntaxToken> + '_ {
+pub(crate) fn iter_tokens(node: &SyntaxNode) -> impl Iterator<Item = fsm_parser::SyntaxToken> + '_ {
     node.children_with_tokens().filter_map(|c| match c {
         NodeOrToken::Token(t) if !t.kind().is_trivia() => Some(t),
         _ => None,
@@ -387,7 +387,7 @@ pub fn iter_tokens(node: &SyntaxNode) -> impl Iterator<Item = fsm_parser::Syntax
 
 /// Find the first non-trivia keyword/ident token. Used by callers that
 /// only need the surface text (e.g. enum names).
-pub fn first_ident(node: &SyntaxNode) -> Option<String> {
+pub(crate) fn first_ident(node: &SyntaxNode) -> Option<String> {
     iter_tokens(node)
         .find(|t| {
             matches!(
@@ -400,7 +400,7 @@ pub fn first_ident(node: &SyntaxNode) -> Option<String> {
 
 /// Helper exported for the state module — the after/every timer's value
 /// expression. Always a single `CONST_EXPR` child.
-pub fn emit_const_expr(w: &mut FormatWriter, node: &SyntaxNode) {
+pub(crate) fn emit_const_expr(w: &mut FormatWriter, node: &SyntaxNode) {
     for child in node.children_with_tokens() {
         if let NodeOrToken::Node(n) = child {
             emit_with_parent_bp(w, &n, 0, false);
@@ -409,7 +409,7 @@ pub fn emit_const_expr(w: &mut FormatWriter, node: &SyntaxNode) {
 }
 
 /// Type ref also exists outside expressions; re-exported entry.
-pub fn emit_type_ref_public(w: &mut FormatWriter, node: &SyntaxNode) {
+pub(crate) fn emit_type_ref_public(w: &mut FormatWriter, node: &SyntaxNode) {
     emit_type_ref(w, node);
 }
 

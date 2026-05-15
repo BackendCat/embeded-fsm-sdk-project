@@ -32,7 +32,7 @@ use fsm_parser::{parse, ParseResult};
 use crate::cli::CheckArgs;
 use crate::diagnostics;
 
-pub fn run(args: CheckArgs) -> ExitCode {
+pub(crate) fn run(args: CheckArgs) -> ExitCode {
     let mut any_error = false;
     let mut all_diags = Vec::new();
     for path in &args.files {

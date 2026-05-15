@@ -15,7 +15,7 @@
 use crate::options::FormatOptions;
 
 #[derive(Debug)]
-pub struct FormatWriter<'opts> {
+pub(crate) struct FormatWriter<'opts> {
     buf: String,
     opts: &'opts FormatOptions,
     indent_level: usize,
@@ -25,7 +25,7 @@ pub struct FormatWriter<'opts> {
 }
 
 impl<'opts> FormatWriter<'opts> {
-    pub fn new(opts: &'opts FormatOptions) -> Self {
+    pub(crate) fn new(opts: &'opts FormatOptions) -> Self {
         Self {
             buf: String::new(),
             opts,
@@ -34,11 +34,11 @@ impl<'opts> FormatWriter<'opts> {
         }
     }
 
-    pub fn indent(&mut self) {
+    pub(crate) fn indent(&mut self) {
         self.indent_level += 1;
     }
 
-    pub fn dedent(&mut self) {
+    pub(crate) fn dedent(&mut self) {
         debug_assert!(self.indent_level > 0, "dedent below 0");
         self.indent_level = self.indent_level.saturating_sub(1);
     }
@@ -46,7 +46,7 @@ impl<'opts> FormatWriter<'opts> {
     /// Write raw text. If the line has not yet started, the indentation
     /// prefix is emitted first. Does NOT introduce its own newlines —
     /// callers control line breaks via `newline()`.
-    pub fn write(&mut self, s: &str) {
+    pub(crate) fn write(&mut self, s: &str) {
         if s.is_empty() {
             return;
         }
@@ -55,7 +55,7 @@ impl<'opts> FormatWriter<'opts> {
     }
 
     /// Single space.
-    pub fn space(&mut self) {
+    pub(crate) fn space(&mut self) {
         // Don't push a leading space at the start of a line — that would
         // bake a trailing-space risk into multi-line layouts. Indentation
         // is the column-management tool, not embedded spaces.
@@ -71,7 +71,7 @@ impl<'opts> FormatWriter<'opts> {
     /// Pad with `n` spaces (used for column alignment of `->`). At the
     /// start of a fresh line the indent is emitted first; the padding
     /// applies after it.
-    pub fn pad_spaces(&mut self, n: usize) {
+    pub(crate) fn pad_spaces(&mut self, n: usize) {
         if n == 0 {
             return;
         }
@@ -83,7 +83,7 @@ impl<'opts> FormatWriter<'opts> {
 
     /// End the current line. Strips trailing ASCII whitespace before
     /// pushing the `\n`; if the buffer is empty, no newline is written.
-    pub fn newline(&mut self) {
+    pub(crate) fn newline(&mut self) {
         if self.buf.is_empty() {
             return;
         }
@@ -93,7 +93,7 @@ impl<'opts> FormatWriter<'opts> {
     }
 
     /// Ensure the buffer ends with a blank line (i.e. `\n\n`). Idempotent.
-    pub fn blank_line(&mut self) {
+    pub(crate) fn blank_line(&mut self) {
         if self.buf.is_empty() {
             return;
         }
@@ -111,7 +111,7 @@ impl<'opts> FormatWriter<'opts> {
     /// Current byte offset (used for arrow-alignment math). The
     /// pending-indent state means the *visible* column is the indent
     /// width — return that.
-    pub fn column(&self) -> usize {
+    pub(crate) fn column(&self) -> usize {
         if self.pending_indent {
             return self.indent_level * self.opts.indent_width as usize;
         }
@@ -140,7 +140,7 @@ impl<'opts> FormatWriter<'opts> {
 
     /// Consume the writer, returning the formatted text. Guarantees a
     /// single trailing `\n` per Doc 19 §3.3.
-    pub fn finish(mut self) -> String {
+    pub(crate) fn finish(mut self) -> String {
         // Strip trailing whitespace + multiple `\n`, then re-add exactly
         // one terminator.
         while self
@@ -160,7 +160,7 @@ impl<'opts> FormatWriter<'opts> {
     /// Hand back a read-only view of the in-progress buffer. Used by the
     /// trivia pre-pass that looks at recent output to decide whether to
     /// re-emit a comment.
-    pub fn buf(&self) -> &str {
+    pub(crate) fn buf(&self) -> &str {
         &self.buf
     }
 }

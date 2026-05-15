@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use crate::cli::DecompileArgs;
 
-pub fn run(_args: DecompileArgs) -> ExitCode {
+pub(crate) fn run(_args: DecompileArgs) -> ExitCode {
     eprintln!("error: `fsm decompile` is not implemented in v1.0");
     eprintln!("       (IR→.fsm round-trip is on the v1.1 roadmap)");
     ExitCode::from(2)

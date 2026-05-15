@@ -23,7 +23,7 @@ use super::machine::parse_machine_body;
 /// from Doc 04 §10.
 ///
 /// Returns whether an annotation was consumed.
-pub fn try_parse_stable_id(p: &mut Parser) -> bool {
+pub(crate) fn try_parse_stable_id(p: &mut Parser) -> bool {
     if p.at(TokenKind::StableId) {
         // `@ident` was lexed as one token. The long form `@id("payload")`
         // continues with `(StringLit)` right after — pick it up so we
@@ -55,7 +55,7 @@ pub fn try_parse_stable_id(p: &mut Parser) -> bool {
 /// Dispatch a declaration that begins with a doc-comment or stable-id
 /// prefix. The doc-comments are trivia and automatically attached to the
 /// next bump; the stable-id is consumed inside the dispatch.
-pub fn parse_decl_with_doc_or_id(p: &mut Parser) {
+pub(crate) fn parse_decl_with_doc_or_id(p: &mut Parser) {
     // Consume zero or more stable-IDs (multiple shouldn't happen, but be
     // defensive about user input).
     while p.at(TokenKind::StableId) || p.at(TokenKind::At) {
@@ -89,7 +89,7 @@ pub fn parse_decl_with_doc_or_id(p: &mut Parser) {
 
 /// `import_decl = "import" , string , [ "as" , identifier ] ,
 ///                [ "{" , identifier , { "," , identifier } , "}" ] ;`
-pub fn parse_import_decl(p: &mut Parser) {
+pub(crate) fn parse_import_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::IMPORT_DECL);
     p.bump(); // import
 
@@ -152,7 +152,7 @@ fn parse_import_item(p: &mut Parser) {
 /// to `Kw*` tokens, so a strict `Ident`-only match would reject the
 /// canonical examples in the spec. Accept any keyword OR identifier as a
 /// feature name; the analyzer maps the surface text to a known flag.
-pub fn parse_feature_decl(p: &mut Parser) {
+pub(crate) fn parse_feature_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::FEATURE_DECL);
     p.bump(); // feature
     if p.at(TokenKind::Ident) || p.current().is_keyword() {
@@ -170,7 +170,7 @@ pub fn parse_feature_decl(p: &mut Parser) {
 ///
 /// `const_expr` is left to the Pratt parser. The analyzer evaluates it
 /// later — the parser only ensures it has *some* parseable shape.
-pub fn parse_const_decl(p: &mut Parser) {
+pub(crate) fn parse_const_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::CONST_DECL);
     p.bump(); // const
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
@@ -183,7 +183,7 @@ pub fn parse_const_decl(p: &mut Parser) {
 
 /// `enum_decl = "enum" , identifier ,
 ///              "{" , enum_variant , { "," , enum_variant } , [ "," ] , "}" ;`
-pub fn parse_enum_decl(p: &mut Parser) {
+pub(crate) fn parse_enum_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::ENUM_DECL);
     p.bump(); // enum
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
@@ -216,7 +216,7 @@ fn parse_enum_variant(p: &mut Parser) {
 
 /// `extern_decl = [ "pure" ] , "extern" , identifier ,
 ///                "(" , [ param_list ] , ")" , [ ":" , type ] ;`
-pub fn parse_extern_decl(p: &mut Parser) {
+pub(crate) fn parse_extern_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::EXTERN_DECL);
     let _ = p.eat(TokenKind::KwPure);
     p.expect(TokenKind::KwExtern, DiagnosticCode::E0010);
@@ -281,7 +281,7 @@ fn can_start_type(kind: TokenKind) -> bool {
 }
 
 /// `machine_decl = [ "export" ] , "machine" , identifier , "{" , … , "}" ;`
-pub fn parse_machine_decl(p: &mut Parser) {
+pub(crate) fn parse_machine_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::MACHINE_DECL);
     let _ = p.eat(TokenKind::KwExport);
     p.expect(TokenKind::KwMachine, DiagnosticCode::E0010);
@@ -306,7 +306,7 @@ pub fn parse_machine_decl(p: &mut Parser) {
 /// `export` modifier (a submachine is a template referenced by `is`, never
 /// a top-level export target). The body reuses `parse_machine_body`, so the
 /// AST view reuses the machine-item accessors.
-pub fn parse_submachine_decl(p: &mut Parser) {
+pub(crate) fn parse_submachine_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::SUBMACHINE_DECL);
     p.expect(TokenKind::KwSubmachine, DiagnosticCode::E0010);
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);

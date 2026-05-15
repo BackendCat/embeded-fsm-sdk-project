@@ -20,10 +20,10 @@ use thiserror::Error;
 /// Top-level fsm.toml schema. Mirrors the example in Doc 18 §6.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
-pub struct FsmToml {
-    pub compiler: CompilerSection,
-    pub generate: GenerateSection,
-    pub format: FormatSection,
+pub(crate) struct FsmToml {
+    pub(crate) compiler: CompilerSection,
+    pub(crate) generate: GenerateSection,
+    pub(crate) format: FormatSection,
     /// Per-machine overrides keyed by machine name, e.g.
     /// `[machine.MotorControl] strategy = "switch"`. `toml`/`serde` maps a
     /// table-of-tables (`[machine.<Name>]`) onto a `BTreeMap`. `BTreeMap`
@@ -32,7 +32,7 @@ pub struct FsmToml {
     /// — the override map stays empty and codegen output is byte-identical
     /// to pre-W7 (zero behavioural change when the feature is unused).
     #[serde(default)]
-    pub machine: BTreeMap<String, MachineSection>,
+    pub(crate) machine: BTreeMap<String, MachineSection>,
 }
 
 /// One `[machine.<Name>]` table. Only `strategy` is modelled in v1.1-W7
@@ -41,36 +41,41 @@ pub struct FsmToml {
 /// does not break older configs, mirroring the other sections.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
-pub struct MachineSection {
+pub(crate) struct MachineSection {
     /// `"switch" | "table" | "auto"`. Validated (clean-reject) at the
     /// generate call site, NOT here — the loader stays a pure parser; an
     /// unknown value surfaces as a Doc 18 §3 exit-4 config error with a
     /// message naming the offending machine.
-    pub strategy: Option<String>,
+    pub(crate) strategy: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
-pub struct CompilerSection {
-    pub max_errors: Option<u32>,
-    pub warn_as_error: Option<bool>,
+pub(crate) struct CompilerSection {
+    pub(crate) max_errors: Option<u32>,
+    pub(crate) warn_as_error: Option<bool>,
+    // Accepted in `fsm.toml` for forward compatibility but not yet consumed
+    // by any code path; the over-broad `pub` previously masked this. Mirrors
+    // the deserialized-not-read serde-field pattern in `cmd::test`.
+    #[allow(dead_code)]
     #[serde(default)]
-    pub allow: Vec<String>,
+    pub(crate) allow: Vec<String>,
+    #[allow(dead_code)]
     #[serde(default)]
-    pub deny: Vec<String>,
+    pub(crate) deny: Vec<String>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
-pub struct GenerateSection {
-    pub target: Option<String>,
-    pub strategy: Option<String>,
-    pub out: Option<PathBuf>,
-    pub queue_size: Option<u8>,
-    pub queue_overflow: Option<String>,
-    pub isr_safe: Option<bool>,
-    pub license: Option<String>,
-    pub report_memory: Option<bool>,
+pub(crate) struct GenerateSection {
+    pub(crate) target: Option<String>,
+    pub(crate) strategy: Option<String>,
+    pub(crate) out: Option<PathBuf>,
+    pub(crate) queue_size: Option<u8>,
+    pub(crate) queue_overflow: Option<String>,
+    pub(crate) isr_safe: Option<bool>,
+    pub(crate) license: Option<String>,
+    pub(crate) report_memory: Option<bool>,
     /// C headers whose function declarations are imported as `extern`s for
     /// every generate invocation in this project (Doc 18 §5/§6). CLI
     /// `--import-header` flags are *appended* to this list (both sources
@@ -85,7 +90,7 @@ pub struct GenerateSection {
     /// `import "..."` (shape-reject `..`/NUL/absolute, `canonicalize`,
     /// workspace-root prefix) — see `cmd::generate::resolve_header_path`.
     #[serde(default)]
-    pub import_headers: Vec<PathBuf>,
+    pub(crate) import_headers: Vec<PathBuf>,
     /// Opt-in escape hatch (SEC-P0-1, deliberate decision): when `true`,
     /// `import_headers` entries are treated at the **trusted-invoker** trust
     /// level instead of being workspace-contained — i.e. an *absolute*
@@ -101,21 +106,21 @@ pub struct GenerateSection {
     /// `allow_unscoped_import_headers = true` to widen the surface, and the
     /// DoS cap is non-negotiable regardless.
     #[serde(default)]
-    pub allow_unscoped_import_headers: bool,
+    pub(crate) allow_unscoped_import_headers: bool,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
-pub struct FormatSection {
-    pub indent_size: Option<u8>,
-    pub bracket_style: Option<String>,
+pub(crate) struct FormatSection {
+    pub(crate) indent_size: Option<u8>,
+    pub(crate) bracket_style: Option<String>,
 }
 
 /// Errors surfaced from [`load`]. Distinct from a missing file (which is
 /// silently mapped to `Ok(None)`); a *malformed* file is an error worth
 /// failing the run because the user almost certainly wanted it loaded.
 #[derive(Debug, Error)]
-pub enum ConfigError {
+pub(crate) enum ConfigError {
     #[error("I/O error reading {path}: {source}")]
     Io {
         path: PathBuf,
@@ -135,7 +140,7 @@ pub enum ConfigError {
 /// Returns `Ok(None)` if no `fsm.toml` is found anywhere on the way up.
 /// Returns `Err(...)` if a file is found but cannot be read or parsed —
 /// that is a user-actionable problem and should surface to exit-code 4.
-pub fn load(start_dir: &Path) -> Result<Option<(PathBuf, FsmToml)>, ConfigError> {
+pub(crate) fn load(start_dir: &Path) -> Result<Option<(PathBuf, FsmToml)>, ConfigError> {
     let mut cur = Some(start_dir);
     while let Some(dir) = cur {
         let candidate = dir.join("fsm.toml");

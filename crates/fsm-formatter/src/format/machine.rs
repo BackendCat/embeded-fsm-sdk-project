@@ -23,7 +23,7 @@ use super::state::emit_state_item;
 use super::writer::FormatWriter;
 use crate::options::FormatOptions;
 
-pub fn emit_machine_decl(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOptions) {
+pub(crate) fn emit_machine_decl(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOptions) {
     // Optional `export` keyword.
     let has_export = iter_tokens(node).any(|t| t.kind() == SyntaxKind::KwExport);
     if has_export {

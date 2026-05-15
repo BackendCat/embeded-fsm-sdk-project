@@ -14,7 +14,7 @@ use crate::expr::parse_expr;
 use crate::parser::{ExprContext, Parser};
 
 /// `guard_clause = "[" , guard_expr , "]" ;`
-pub fn parse_guard_clause(p: &mut Parser) {
+pub(crate) fn parse_guard_clause(p: &mut Parser) {
     p.start_node(SyntaxKind::GUARD_CLAUSE);
     p.bump(); // [
     if p.at(TokenKind::RBracket) {

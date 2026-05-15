@@ -31,7 +31,7 @@ use crate::options::FormatOptions;
 
 /// Format a `STATE_DECL` (top-level call site: at the writer's current
 /// indent, no leading newline).
-pub fn emit_state_decl(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOptions) {
+pub(crate) fn emit_state_decl(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOptions) {
     // Optional [export] prefix.
     let has_export = iter_tokens(node).any(|t| t.kind() == SyntaxKind::KwExport);
     if has_export {
@@ -54,7 +54,7 @@ pub fn emit_state_decl(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOpt
 }
 
 /// Pseudo-state-ish nodes that the machine body also accepts as items.
-pub fn emit_state_item(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOptions) {
+pub(crate) fn emit_state_item(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOptions) {
     match node.kind() {
         SyntaxKind::STATE_DECL => emit_state_decl(w, node, opts),
         SyntaxKind::REGION_DECL => emit_region_decl(w, node, opts),
@@ -106,7 +106,7 @@ fn has_children_body(node: &SyntaxNode) -> bool {
 /// Source order is preserved exactly — Doc 19 §8 "section order" is
 /// described prescriptively but Doc 19 §1.5 ("minimal diff") wins in
 /// conflict: we never reorder declarations.
-pub fn emit_state_body(w: &mut FormatWriter, parent: &SyntaxNode, opts: &FormatOptions) {
+pub(crate) fn emit_state_body(w: &mut FormatWriter, parent: &SyntaxNode, opts: &FormatOptions) {
     let events: Vec<trivia::BodyEvent> = trivia::body_events_with_trailing(parent);
 
     // Two-pass: collect indices of node events alongside their kinds so we

@@ -48,7 +48,7 @@ use crate::config;
 /// parser enforces on `.fsm` source (`ParseLimits::DEFAULT.max_input_bytes`)
 /// — reusing the constant keeps the header / `fsm.toml` cap from drifting
 /// away from the `.fsm` cap (zero-legacy: one source of truth).
-pub const MAX_INPUT_BYTES: usize = ParseLimits::DEFAULT.max_input_bytes;
+pub(crate) const MAX_INPUT_BYTES: usize = ParseLimits::DEFAULT.max_input_bytes;
 
 /// Read a file to a `String`, refusing to allocate more than
 /// [`MAX_INPUT_BYTES`].
@@ -63,7 +63,7 @@ pub const MAX_INPUT_BYTES: usize = ParseLimits::DEFAULT.max_input_bytes;
 /// SEC-P0-1 DoS-rejection contract.
 ///
 /// On success the returned `String` is guaranteed `<= MAX_INPUT_BYTES`.
-pub fn read_to_string_capped(path: &Path, max_bytes: usize) -> io::Result<String> {
+pub(crate) fn read_to_string_capped(path: &Path, max_bytes: usize) -> io::Result<String> {
     let mut file = std::fs::File::open(path)?;
 
     // Fast reject: a regular file whose advertised length already exceeds
@@ -118,7 +118,7 @@ pub fn read_to_string_capped(path: &Path, max_bytes: usize) -> io::Result<String
 /// `fsm generate` MUST agree on what "the workspace root" is, so the
 /// containment boundary is identical for a DSL `import "..."` and an
 /// `fsm.toml import_headers` entry. One definition, no drift.
-pub fn workspace_root_for(path: &Path) -> PathBuf {
+pub(crate) fn workspace_root_for(path: &Path) -> PathBuf {
     let start = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())

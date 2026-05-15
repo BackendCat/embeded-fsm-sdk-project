@@ -28,7 +28,7 @@ use super::top_level;
 
 /// Sync set for top-level recovery: anything that may begin a file-scope
 /// declaration. EOF is included so unrecoverable input doesn't spin.
-pub const TOP_LEVEL_STARTS: TokenSet = TokenSet::new(&[
+pub(crate) const TOP_LEVEL_STARTS: TokenSet = TokenSet::new(&[
     TokenKind::KwLanguage,
     TokenKind::KwImport,
     TokenKind::KwFeature,
@@ -47,7 +47,7 @@ pub const TOP_LEVEL_STARTS: TokenSet = TokenSet::new(&[
 
 /// Entry point: parse a whole file. Wraps everything in a `FILE` node so the
 /// root of the green tree is uniquely typed.
-pub fn parse_file(p: &mut Parser) {
+pub(crate) fn parse_file(p: &mut Parser) {
     p.start_node(SyntaxKind::FILE);
 
     // 0. File-leading trivia. The parser ctor advanced past it without

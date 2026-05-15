@@ -1,11 +1,11 @@
 //! One module per subcommand. Each exposes a single `run(args) -> ExitCode`
 //! function. The router in `main.rs` calls them by name.
 
-pub mod check;
-pub mod decompile;
-pub mod doc;
-pub mod fmt;
-pub mod generate;
-pub mod init;
-pub mod parse;
-pub mod test;
+pub(crate) mod check;
+pub(crate) mod decompile;
+pub(crate) mod doc;
+pub(crate) mod fmt;
+pub(crate) mod generate;
+pub(crate) mod init;
+pub(crate) mod parse;
+pub(crate) mod test;

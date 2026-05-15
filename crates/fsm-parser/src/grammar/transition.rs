@@ -30,11 +30,11 @@ use super::stmt::parse_action_block;
 /// resulting transition node encloses the hint as its first child; when
 /// `None` the checkpoint is taken here (the ordinary, hint-free path —
 /// byte-identical CST to pre-W4).
-pub fn parse_transition_from_on(p: &mut Parser) {
+pub(crate) fn parse_transition_from_on(p: &mut Parser) {
     parse_transition_from_on_at(p, None);
 }
 
-pub fn parse_transition_from_on_at(p: &mut Parser, outer_cp: Option<rowan::Checkpoint>) {
+pub(crate) fn parse_transition_from_on_at(p: &mut Parser, outer_cp: Option<rowan::Checkpoint>) {
     let cp = outer_cp.unwrap_or_else(|| p.checkpoint());
     p.bump(); // on
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);

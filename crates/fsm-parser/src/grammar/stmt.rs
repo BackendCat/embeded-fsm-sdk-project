@@ -52,7 +52,7 @@ const ACTION_BLOCK_TERMINATORS: TokenSet = TokenSet::new(&[
 ///
 /// Depth-bounded — `if`/`while`/`for` bodies nest action blocks
 /// recursively (Doc 00 §7.12 G-02 / audit P1-5).
-pub fn parse_action_block(p: &mut Parser) {
+pub(crate) fn parse_action_block(p: &mut Parser) {
     p.with_recursion((), |p| parse_action_block_inner(p));
 }
 

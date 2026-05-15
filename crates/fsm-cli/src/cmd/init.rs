@@ -19,7 +19,7 @@ const EXAMPLE_FSM: &str = include_str!("../../templates/motor.fsm");
 const EXAMPLE_TOML: &str = include_str!("../../templates/fsm.toml");
 const EXAMPLE_GITIGNORE: &str = "generated/\ntarget/\n";
 
-pub fn run(args: InitArgs) -> ExitCode {
+pub(crate) fn run(args: InitArgs) -> ExitCode {
     let root = PathBuf::from(&args.name);
     if root.exists() {
         eprintln!("error: {} already exists", root.display());

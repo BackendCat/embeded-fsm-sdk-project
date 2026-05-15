@@ -24,7 +24,7 @@ use super::machine::emit_machine_decl;
 use super::writer::FormatWriter;
 use crate::options::FormatOptions;
 
-pub fn emit_file(w: &mut FormatWriter, file: &SyntaxNode, opts: &FormatOptions) {
+pub(crate) fn emit_file(w: &mut FormatWriter, file: &SyntaxNode, opts: &FormatOptions) {
     debug_assert_eq!(file.kind(), SyntaxKind::FILE);
     let events: Vec<super::trivia::BodyEvent> = super::trivia::body_events_with_trailing(file);
     let mut last_kind: Option<SyntaxKind> = None;

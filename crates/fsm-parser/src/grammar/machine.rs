@@ -37,7 +37,7 @@ use super::top_level::{parse_extern_decl, try_parse_stable_id};
 
 /// Sync set used inside the machine body when a `machine_item` parse blows
 /// up. Anchors recovery at the next item-starter or the closing brace.
-pub const MACHINE_ITEM_STARTS: TokenSet = TokenSet::new(&[
+pub(crate) const MACHINE_ITEM_STARTS: TokenSet = TokenSet::new(&[
     TokenKind::KwContext,
     TokenKind::KwState,
     TokenKind::KwTarget,
@@ -61,7 +61,7 @@ pub const MACHINE_ITEM_STARTS: TokenSet = TokenSet::new(&[
 
 /// Parse the inside of a `machine { … }` block. The opening `{` has been
 /// consumed; this routine consumes items up to the closing `}`.
-pub fn parse_machine_body(p: &mut Parser) {
+pub(crate) fn parse_machine_body(p: &mut Parser) {
     while !p.at(TokenKind::RBrace) && !p.at(TokenKind::Eof) {
         let progressed_at = p.current_span().start;
 
@@ -261,7 +261,7 @@ fn parse_config_entry(p: &mut Parser) {
 }
 
 /// `initial_decl = "initial" , identifier ;`
-pub fn parse_initial_decl(p: &mut Parser) {
+pub(crate) fn parse_initial_decl(p: &mut Parser) {
     p.start_node(SyntaxKind::INITIAL_DECL);
     p.bump(); // initial
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);

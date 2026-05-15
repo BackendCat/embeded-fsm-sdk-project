@@ -39,7 +39,7 @@ use serde::Deserialize;
 
 use crate::cli::TestArgs;
 
-pub fn run(args: TestArgs) -> ExitCode {
+pub(crate) fn run(args: TestArgs) -> ExitCode {
     if !args.dir.is_dir() {
         eprintln!("error: not a directory: {}", args.dir.display());
         return ExitCode::from(3);
