@@ -37,6 +37,7 @@ pub const TOP_LEVEL_STARTS: TokenSet = TokenSet::new(&[
     TokenKind::KwExtern,
     TokenKind::KwPure,
     TokenKind::KwMachine,
+    TokenKind::KwSubmachine,
     TokenKind::KwExport,
     TokenKind::DocComment,
     TokenKind::At,
@@ -88,6 +89,7 @@ pub fn parse_file(p: &mut Parser) {
             TokenKind::KwEnum => top_level::parse_enum_decl(p),
             TokenKind::KwExtern | TokenKind::KwPure => top_level::parse_extern_decl(p),
             TokenKind::KwMachine | TokenKind::KwExport => top_level::parse_machine_decl(p),
+            TokenKind::KwSubmachine => top_level::parse_submachine_decl(p),
             TokenKind::KwImport => {
                 // Allowed only in the import block above; re-encountering it
                 // here is a recoverable error.

@@ -167,6 +167,19 @@ pub enum SyntaxKind {
     PARAM_LIST,
     PARAM,
     MACHINE_DECL,
+    /// `submachine ID { <machine-body> }`. A submachine is structurally a
+    /// named, referenceable machine template (Doc 04 §15). Its body reuses
+    /// the `machine_item` production, so the AST reuses the machine
+    /// accessors. A distinct kind (vs. reusing MACHINE_DECL) is required so
+    /// `File::submachines()` and `File::machines()` are disjoint and the
+    /// analyzer can tell a template apart from an instantiable machine.
+    SUBMACHINE_DECL,
+    /// `is SubName` reference inside a `STATE_DECL`. Modelled as an optional
+    /// child node of STATE_DECL (mirroring how GUARD_CLAUSE / FORK_TARGETS
+    /// are optional children) rather than forking a second state kind, so
+    /// every existing `StateDecl` accessor keeps working unchanged. Wraps
+    /// the `is` keyword + the referenced submachine name ident.
+    SUBMACHINE_REF,
     CONTEXT_BLOCK,
     FIELD_DECL,
     EVENTS_BLOCK,
@@ -442,6 +455,8 @@ const fn all_kinds() -> [SyntaxKind; SyntaxKind::__LAST as usize] {
         PARAM_LIST,
         PARAM,
         MACHINE_DECL,
+        SUBMACHINE_DECL,
+        SUBMACHINE_REF,
         CONTEXT_BLOCK,
         FIELD_DECL,
         EVENTS_BLOCK,

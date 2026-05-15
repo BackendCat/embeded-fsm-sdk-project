@@ -67,6 +67,7 @@ pub fn parse_decl_with_doc_or_id(p: &mut Parser) {
         TokenKind::KwEnum => parse_enum_decl(p),
         TokenKind::KwExtern | TokenKind::KwPure => parse_extern_decl(p),
         TokenKind::KwMachine | TokenKind::KwExport => parse_machine_decl(p),
+        TokenKind::KwSubmachine => parse_submachine_decl(p),
         TokenKind::KwConst => parse_const_decl(p),
         TokenKind::KwFeature => parse_feature_decl(p),
         TokenKind::KwImport => parse_import_decl(p),
@@ -300,10 +301,34 @@ pub fn parse_machine_decl(p: &mut Parser) {
     p.finish_node();
 }
 
+/// `submachine_decl = "submachine" , identifier , "{" , machine_body , "}" ;`
+/// per Doc 04 §15. Structurally identical to `machine_decl` minus the
+/// `export` modifier (a submachine is a template referenced by `is`, never
+/// a top-level export target). The body reuses `parse_machine_body`, so the
+/// AST view reuses the machine-item accessors.
+pub fn parse_submachine_decl(p: &mut Parser) {
+    p.start_node(SyntaxKind::SUBMACHINE_DECL);
+    p.expect(TokenKind::KwSubmachine, DiagnosticCode::E0010);
+    p.expect(TokenKind::Ident, DiagnosticCode::E0010);
+    if p.expect(TokenKind::LBrace, DiagnosticCode::E0010) {
+        parse_machine_body(p);
+        p.expect(TokenKind::RBrace, DiagnosticCode::E0010);
+    } else {
+        // Recover up to the closing brace or the next top-level start.
+        p.error_until(
+            MACHINE_RECOVERY,
+            DiagnosticCode::E0010,
+            "expected '{' after submachine name",
+        );
+    }
+    p.finish_node();
+}
+
 /// Recovery sync set used when machine-body parsing has gone off the rails.
 const MACHINE_RECOVERY: TokenSet = TokenSet::new(&[
     TokenKind::RBrace,
     TokenKind::KwMachine,
+    TokenKind::KwSubmachine,
     TokenKind::KwExport,
     TokenKind::KwExtern,
     TokenKind::KwPure,

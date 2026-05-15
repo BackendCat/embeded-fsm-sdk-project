@@ -63,6 +63,14 @@ fn parse_state_decl_inner(p: &mut Parser) {
     let _ = p.eat(TokenKind::KwExport);
     p.expect(TokenKind::KwState, DiagnosticCode::E0010);
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
+    // Optional submachine reference: `state ID is SubName { ... }`
+    // (Doc 04 §15). The `is SubName` binds the state's behaviour to a
+    // named submachine instance; the body may still carry `done ->`
+    // (fires on sub-instance completion) plus entry/exit. Modelled as an
+    // optional SUBMACHINE_REF child of STATE_DECL — see kinds.rs.
+    if p.at(TokenKind::KwIs) {
+        parse_submachine_ref(p);
+    }
     if p.expect(TokenKind::LBrace, DiagnosticCode::E0010) {
         while !p.at(TokenKind::RBrace) && !p.at(TokenKind::Eof) {
             let progressed_at = p.current_span().start;
@@ -75,6 +83,40 @@ fn parse_state_decl_inner(p: &mut Parser) {
     }
     p.finish_node();
 }
+
+/// `submachine_ref = "is" , identifier ;` — the optional binding inside
+/// `state ID is SubName { ... }` (Doc 04 §15). Wrapped in a SUBMACHINE_REF
+/// node so the analyzer (W2b) can pick it up as a typed child of STATE_DECL
+/// instead of token-scanning. A missing name (`state X is { }`) emits a
+/// clear FSM-E0010 and the parser still finds the body; trailing junk
+/// (`state X is Y Z {}`) is consumed up to the next `{` / state-item /
+/// brace so recovery does not spin.
+fn parse_submachine_ref(p: &mut Parser) {
+    p.start_node(SyntaxKind::SUBMACHINE_REF);
+    p.bump(); // is
+    p.expect(TokenKind::Ident, DiagnosticCode::E0010);
+    // Anything other than `{` (or a body terminator) after `is SubName`
+    // is junk — resync to the brace so the state body still parses.
+    if !p.at(TokenKind::LBrace) && !p.at_any_of(SUBMACHINE_REF_RECOVER) {
+        p.error_until(
+            SUBMACHINE_REF_RECOVER,
+            DiagnosticCode::E0010,
+            "unexpected token after submachine reference name",
+        );
+    }
+    p.finish_node();
+}
+
+/// Resync anchors after a malformed `is SubName …` — the state body brace,
+/// any state-item starter, or a closing brace / EOF.
+const SUBMACHINE_REF_RECOVER: TokenSet = TokenSet::new(&[
+    TokenKind::LBrace,
+    TokenKind::RBrace,
+    TokenKind::KwState,
+    TokenKind::KwOn,
+    TokenKind::KwDone,
+    TokenKind::Eof,
+]);
 
 /// Dispatch one `state_item`.
 pub fn parse_state_item(p: &mut Parser) {

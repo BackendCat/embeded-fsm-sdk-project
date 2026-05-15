@@ -20,6 +20,7 @@ ast_node!(ExternDecl, EXTERN_DECL);
 ast_node!(ParamList, PARAM_LIST);
 ast_node!(Param, PARAM);
 ast_node!(MachineDecl, MACHINE_DECL);
+ast_node!(SubmachineDecl, SUBMACHINE_DECL);
 ast_node!(ContextBlock, CONTEXT_BLOCK);
 ast_node!(FieldDecl, FIELD_DECL);
 ast_node!(EventsBlock, EVENTS_BLOCK);
@@ -54,6 +55,12 @@ impl File {
         children(&self.0)
     }
     pub fn machines(&self) -> AstChildren<MachineDecl> {
+        children(&self.0)
+    }
+    /// Top-level `submachine Name { … }` templates (Doc 04 §15). Disjoint
+    /// from [`File::machines`] — a distinct SUBMACHINE_DECL kind keeps
+    /// templates and instantiable machines separable.
+    pub fn submachines(&self) -> AstChildren<SubmachineDecl> {
         children(&self.0)
     }
 }
@@ -181,6 +188,39 @@ impl MachineDecl {
         // The machine's stable-id is one of *its* CST children — the
         // grammar wraps `@id(...)` before the `machine` keyword inside the
         // MACHINE_DECL node, so a simple `child::<StableIdAnnot>` works.
+        super::child(&self.0)
+    }
+    pub fn context(&self) -> Option<ContextBlock> {
+        super::child(&self.0)
+    }
+    pub fn events(&self) -> Option<EventsBlock> {
+        super::child(&self.0)
+    }
+    pub fn queue(&self) -> Option<QueueBlock> {
+        super::child(&self.0)
+    }
+    pub fn target(&self) -> Option<TargetBlock> {
+        super::child(&self.0)
+    }
+    pub fn initial(&self) -> Option<InitialDecl> {
+        super::child(&self.0)
+    }
+    pub fn states(&self) -> AstChildren<crate::ast::StateDecl> {
+        children(&self.0)
+    }
+    pub fn externs(&self) -> AstChildren<ExternDecl> {
+        children(&self.0)
+    }
+    pub fn regions(&self) -> AstChildren<crate::ast::RegionDecl> {
+        children(&self.0)
+    }
+}
+
+impl SubmachineDecl {
+    pub fn name(&self) -> Option<String> {
+        first_ident(&self.0)
+    }
+    pub fn stable_id(&self) -> Option<StableIdAnnot> {
         super::child(&self.0)
     }
     pub fn context(&self) -> Option<ContextBlock> {

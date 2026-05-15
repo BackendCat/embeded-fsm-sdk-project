@@ -5,6 +5,7 @@ use crate::cst::SyntaxNode;
 use super::{ast_node, children, first_ident, AstChildren, AstNode};
 
 ast_node!(StateDecl, STATE_DECL);
+ast_node!(SubmachineRef, SUBMACHINE_REF);
 ast_node!(EntryDecl, ENTRY_DECL);
 ast_node!(ExitDecl, EXIT_DECL);
 ast_node!(FinalDecl, FINAL_DECL);
@@ -65,6 +66,20 @@ impl StateDecl {
     }
     pub fn defers(&self) -> AstChildren<DeferDecl> {
         children(&self.0)
+    }
+    /// The optional `is SubName` binding (Doc 04 §15). `None` for an
+    /// ordinary state; `Some(_)` when the state's behaviour is an instance
+    /// of a named submachine. Modelled as an optional child node (mirroring
+    /// `entry`/`exit`) — a single STATE_DECL kind carries both shapes.
+    pub fn submachine_ref(&self) -> Option<SubmachineRef> {
+        super::child(&self.0)
+    }
+}
+
+impl SubmachineRef {
+    /// The referenced submachine name (the ident after `is`).
+    pub fn name(&self) -> Option<String> {
+        first_ident(&self.0)
     }
 }
 
