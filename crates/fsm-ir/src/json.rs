@@ -60,6 +60,65 @@ pub fn from_json(s: &str) -> Result<Ir, IrJsonError> {
     Ok(ir)
 }
 
+/// The canonical IR JSON Schema (draft-07), embedded at compile time.
+///
+/// `include_str!` resolves relative to *this source file*
+/// (`crates/fsm-ir/src/json.rs`), so the gate works regardless of the
+/// process CWD — `fsm` run from any directory still validates against the
+/// schema that shipped with the binary. The path climbs out of
+/// `crates/fsm-ir/src/` to the repo root, then down into `schema/`.
+#[cfg(feature = "schema-validate")]
+pub const IR_SCHEMA_JSON: &str =
+    include_str!("../../../schema/ir/1.0.0/model.json");
+
+/// Validate a fully-lowered [`Ir`] against the canonical JSON Schema
+/// (`schema/ir/1.0.0/model.json`).
+///
+/// **This is an internal compiler-invariant check, not user input
+/// validation.** A well-formed source that the analyzer accepted must
+/// lower to schema-valid IR; a failure here means a *lowering bug* — the
+/// analyzer produced IR the documented wire contract forbids. The
+/// analyzer↔simulator `region.initial` representation mismatch fixed in
+/// Wave 1.9 is exactly this class: a malformed-IR bug that surfaced three
+/// crates downstream instead of at the producer. Wiring this at the
+/// analyzer boundary (see `fsm_analyzer::analyze_with_source`, called
+/// under `#[cfg(debug_assertions)]`) turns that class of bug into an
+/// immediate, localized failure.
+///
+/// Returns `Ok(())` when the serialized IR satisfies the schema, or
+/// `Err(messages)` where each entry is one schema violation rendered as
+/// `"<instance-path>: <reason>"` — enough to point a developer straight at
+/// the offending node.
+///
+/// Only compiled when the `schema-validate` feature is enabled (on by
+/// default; a `--no-default-features` build drops both this function and
+/// the `jsonschema` dependency).
+#[cfg(feature = "schema-validate")]
+pub fn validate_ir_against_schema(ir: &Ir) -> Result<(), Vec<String>> {
+    let instance: serde_json::Value = serde_json::to_value(ir).map_err(|e| {
+        // Serializing our own owned data structure cannot realistically
+        // fail; if it does, surface it as a single diagnostic string
+        // rather than panicking inside a debug-assert path.
+        vec![format!("IR serialization failed before schema check: {e}")]
+    })?;
+
+    let schema_value: serde_json::Value = serde_json::from_str(IR_SCHEMA_JSON)
+        .map_err(|e| vec![format!("embedded IR schema is not valid JSON: {e}")])?;
+
+    let compiled = jsonschema::JSONSchema::options()
+        .with_draft(jsonschema::Draft::Draft7)
+        .compile(&schema_value)
+        .map_err(|e| vec![format!("embedded IR schema failed to compile: {e}")])?;
+
+    if let Err(errors) = compiled.validate(&instance) {
+        let messages: Vec<String> = errors
+            .map(|e| format!("{}: {e}", e.instance_path))
+            .collect();
+        return Err(messages);
+    }
+    Ok(())
+}
+
 /// Write an [`Ir`] as pretty-printed JSON to `w`.
 pub fn to_writer<W: Write>(mut w: W, ir: &Ir) -> Result<(), IrJsonError> {
     let s = to_json(ir)?;

@@ -21,5 +21,7 @@ pub mod model;
 pub mod visitor;
 
 pub use json::{from_json, from_reader, to_json, to_writer, IrJsonError};
+#[cfg(feature = "schema-validate")]
+pub use json::{validate_ir_against_schema, IR_SCHEMA_JSON};
 pub use model::*;
 pub use visitor::{walk_ir, walk_machine, walk_region, walk_state, IrVisitor};
