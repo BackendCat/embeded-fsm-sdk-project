@@ -1295,7 +1295,11 @@ shape.
 | §11.16 | gcc tests for ALL 3 shipped examples (motor, traffic-light, vending-machine); skip is opt-in via `FSM_SKIP_GCC_TESTS` env var | P1-3; previously silent skip on missing gcc | P1 wave / `1f5d7de` |
 | §11.17 | CGEN-002 conformance fixture asserts on structural strings (`parent_table`, ancestor-walk loop pattern), not literal comment text | Comments are reword-fragile; structural code proves B-10 | Trace refresh / `e400bc1` |
 | §11.18 | Context field defaults emitted in `Motor_init` AND applied in `Interpreter::init` | Closed silent data-loss path; users' declared defaults now take effect | R1 / `a94ff91` |
+| §11.19 | Submachine epic reconstructed as 4 waves after false "already lowered" claim; nested-in-composite/parallel ref REJECTED at analysis (FSM-E0502), not silently emitted as broken C | P0-1 aspirational-prose pattern recurred (incl. orchestrator-level, caught by §11.3 phase audit); clean reject > broken output (G1, defer/E0903 precedent) | W2a-d `7a69612`/`2384608`/`8b66dc2`/`af8c300` + P1-2 `02d4ded` |
+| §11.20 | Leading comment/whitespace before `language` no longer panics rowan builder (FILE node opened before leading-trivia flush) | License/banner headers atop files are ubiquitous; a parser panic violates G1 | PB1 `3017c1c` |
+| §11.21 | `likely`/`rare` are **contextual** (not reserved) keywords; hint wraps the guard condition; portable `__builtin_expect` macro + non-GNU fallback + opt-out; sim accepts-ignores (layout-only) | Back-compat (existing `.fsm` may use them as idents); embedded portability; zero semantic effect keeps sim≡codegen | W4 `300d1e4` |
+| §11.22 | Checkpoint/release tags require a COLD from-source green quad; warm shared-`CARGO_TARGET_DIR` can serve stale cross-worktree test binaries (baked `-wt-` abs paths) | Phase-audit P1-1: a warm post-merge quad is necessary-not-sufficient; "known-good" must mean built-from-source | §11.1 hardened / `e2e9294` |
 
 ---
 
-*End of FSM-SPEC-DEC v1.0.0 (TL-amended 2026-05-11; §11 appended 2026-05-14)*
+*End of FSM-SPEC-DEC v1.0.0 (TL-amended 2026-05-11; §11 appended 2026-05-14; v1.1 rows §11.19-22 appended 2026-05-15)*
