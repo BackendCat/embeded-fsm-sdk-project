@@ -126,6 +126,30 @@ pub struct EnumEntry {
     pub variants: Vec<String>,
 }
 
+/// Submachine-template registry entry — Doc 04 §15. Submachines are
+/// **templates** referenced by `state X is Sub`, not instantiable top-level
+/// machines, so they live in their own namespace (W2a kept
+/// [`ast::File::submachines`] disjoint from [`ast::File::machines`] for
+/// exactly this reason). The analyzer records just enough to (a) resolve a
+/// `is Sub` reference, (b) decide FSM-E0500 (has an entry point: an
+/// `initial` or an `entry_point`) and FSM-E0501 (has an exit point: a
+/// `final` state or an `exit_point`), and (c) build the submachine
+/// instantiation graph for FSM-E0502 cycle detection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubmachineEntry {
+    pub name: String,
+    pub span: Span,
+    /// `true` when the template declares an `initial` or an `entry_point`
+    /// pseudo-state — the two entry forms per Doc 08 §12.2.
+    pub has_entry_point: bool,
+    /// `true` when the template declares a `final` state or an `exit_point`
+    /// pseudo-state — the exit forms per Doc 08 §12.3.
+    pub has_exit_point: bool,
+    /// Names of submachines this template references via `state Y is Z`
+    /// (its outgoing edges in the instantiation graph — FSM-E0502).
+    pub references: Vec<String>,
+}
+
 /// Top-level symbol table — one [`MachineSymbols`] per declared machine.
 #[derive(Clone, Debug, Default)]
 pub struct SymbolTable {
@@ -140,6 +164,13 @@ pub struct SymbolTable {
     pub file_extern_pure: Vec<bool>,
     /// Quick lookup machine_name -> index in `machines`.
     pub machine_index: HashMap<String, usize>,
+    /// Top-level `submachine Name { … }` templates (Doc 04 §15). Distinct
+    /// from `machines` — a submachine is a referenced template, never a
+    /// top-level instantiable machine, so `is Sub` resolves here and never
+    /// pollutes machine resolution.
+    pub submachines: Vec<SubmachineEntry>,
+    /// Quick lookup submachine_name -> index in `submachines`.
+    pub submachine_index: HashMap<String, usize>,
 }
 
 impl SymbolTable {
@@ -206,6 +237,31 @@ impl SymbolTable {
                     st.file_extern_pure.push(is_pure);
                 }
             }
+        }
+
+        // Submachine templates (Doc 04 §15). Registered before machines so a
+        // machine's `state X is Sub` can resolve `Sub`. Duplicate template
+        // names reuse the machine-redefinition code (FSM-E0020) — a
+        // submachine occupies the same "named top-level construct" space.
+        for sm in file.submachines() {
+            let sname = sm.name().unwrap_or_default();
+            if sname.is_empty() {
+                continue;
+            }
+            let sspan = span_of(sm.syntax());
+            if let Some(&prev_idx) = st.submachine_index.get(&sname) {
+                let prev = &st.submachines[prev_idx];
+                diags.push(Diagnostic::new(DiagnosticCode::E0020, sspan).with_related(
+                    RelatedInfo {
+                        message: format!("previous submachine '{}' here", prev.name),
+                        span: prev.span,
+                    },
+                ));
+                continue;
+            }
+            let entry = build_submachine_entry(&sm, sname.clone(), sspan);
+            st.submachine_index.insert(sname, st.submachines.len());
+            st.submachines.push(entry);
         }
 
         // Machines.
@@ -356,6 +412,14 @@ impl SymbolTable {
         self.machines.get(idx)
     }
 
+    /// Resolve a submachine template by name (Doc 04 §15). Returns `None`
+    /// when `state X is <name>` names something that is not a declared
+    /// `submachine` — the FSM-E0103 trigger.
+    pub fn resolve_submachine(&self, name: &str) -> Option<&SubmachineEntry> {
+        let idx = *self.submachine_index.get(name)?;
+        self.submachines.get(idx)
+    }
+
     /// Resolve a qualified name `Enum.Variant` — returns the matching enum
     /// entry if the variant exists.
     pub fn resolve_enum_variant(&self, enum_name: &str, variant: &str) -> Option<&EnumEntry> {
@@ -399,6 +463,44 @@ fn primitive_type_text(ty_ref: &fsm_parser::cst::SyntaxNode) -> Option<String> {
             )
         })
         .map(|t| t.text().to_string())
+}
+
+/// Build the [`SubmachineEntry`] for a `submachine Name { … }` template.
+///
+/// Walks the template's CST once collecting the three facts the analyzer
+/// needs downstream:
+///  - `has_entry_point`: an `initial` decl or an `entry_point` pseudo-state
+///    (the two entry forms, Doc 08 §12.2) — drives FSM-E0500;
+///  - `has_exit_point`: a `final` state or an `exit_point` pseudo-state
+///    (the exit forms, Doc 08 §12.3) — drives FSM-E0501;
+///  - `references`: every `state Y is Z` nested in the template — its
+///    outgoing edges for the FSM-E0502 instantiation-cycle graph.
+fn build_submachine_entry(sm: &ast::SubmachineDecl, name: String, span: Span) -> SubmachineEntry {
+    use fsm_parser::cst::SyntaxKind as K;
+    let mut has_entry_point = sm.initial().is_some();
+    let mut has_exit_point = false;
+    let mut references = Vec::new();
+    for node in sm.syntax().descendants() {
+        match node.kind() {
+            K::INITIAL_DECL => has_entry_point = true,
+            K::ENTRY_POINT_DECL => has_entry_point = true,
+            K::FINAL_DECL => has_exit_point = true,
+            K::EXIT_POINT_DECL => has_exit_point = true,
+            K::SUBMACHINE_REF => {
+                if let Some(r) = ast::SubmachineRef::cast(node.clone()).and_then(|r| r.name()) {
+                    references.push(r);
+                }
+            }
+            _ => {}
+        }
+    }
+    SubmachineEntry {
+        name,
+        span,
+        has_entry_point,
+        has_exit_point,
+        references,
+    }
 }
 
 /// Push `Entry` to `tab` if the name is fresh. On collision, emit a diagnostic

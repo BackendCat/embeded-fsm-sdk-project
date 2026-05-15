@@ -11,8 +11,8 @@
 use fsm_ir::{
     ChoiceBranch as IrChoiceBranch, ChoiceState, CompositeState, DeferDecl as IrDeferDecl,
     FinalState, ForkPseudo, GuardExpr, HistoryKind, HistoryObject, InitialPseudo, JoinPseudo,
-    JunctionState, ParallelState, RegionObject, SimpleState, StateNode, Statement, TimerKind,
-    TimerObject, TransitionKind, TransitionObject, Trigger,
+    JunctionState, ParallelState, RegionObject, SimpleState, StateNode, Statement, SubmachineRef,
+    TimerKind, TimerObject, TransitionKind, TransitionObject, Trigger,
 };
 use fsm_parser::ast::{self, AstNode};
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
@@ -113,6 +113,38 @@ fn lower_state(ids: &mut IdMinter, locs: &LocCtx, state: &ast::StateDecl) -> Sta
     let (timers, timer_transitions) = lower_timers(ids, locs, state, &id);
     transitions.extend(timer_transitions);
     let defers = lower_defers(ids, locs, state);
+
+    // `state X is Sub { … }` (Doc 04 §15 / Doc 09 §4.11). The `is` binding
+    // takes precedence over the state's structural shape: the state IS an
+    // instance of the named submachine template, so it lowers to a
+    // `StateNode::Submachine`, not Simple/Composite. The state's own
+    // transitions (external/local/internal + `done ->` completion + timer
+    // edges) are carried on the ref per §4.11 — the parent dispatches them
+    // around the sub-instance (running the sub-instance itself is W2c).
+    // `submachine_id` resolves to the template's MachineObject id
+    // (`m-<SubName>`); FSM-E0103 (unknown ref) / FSM-E0500 / FSM-E0501 /
+    // FSM-E0502 are emitted by `checks::submachine` against the same name —
+    // when unresolved we still emit a structurally-valid SubmachineRef
+    // (partial-IR principle, Doc 09 §1) so downstream stays schema-valid.
+    if let Some(sref) = state.submachine_ref() {
+        let sub_name = sref.name().unwrap_or_default();
+        return StateNode::Submachine(SubmachineRef {
+            id,
+            stable_id,
+            name,
+            submachine_id: format!("m-{sub_name}"),
+            // Named entry/exit-point *mappings* (`entry_point` /
+            // `exit_point` wiring, Doc 09 §4.12) are not expressible in the
+            // current `is Sub { … }` grammar — W2a's SUBMACHINE_REF carries
+            // only the submachine name. Implicit-initial entry + final-state
+            // exit (Doc 08 §12.2/§12.3) need no mapping table. Left empty;
+            // populated if/when the grammar gains explicit point bindings.
+            entry_points: Vec::new(),
+            exit_points: Vec::new(),
+            transitions,
+            loc: locs.loc(state.syntax()),
+        });
+    }
 
     let regions: Vec<_> = state.regions().collect();
     let nested_states: Vec<_> = state.nested_states().collect();

@@ -23,20 +23,107 @@ use super::ids::IdMinter;
 use super::loc::LocCtx;
 use super::state::lower_state_children;
 
-pub(super) fn lower_machine(
-    machine: &ast::MachineDecl,
+/// The accessors `lower_machine` needs, shared by `machine Name { … }` and
+/// `submachine Name { … }` (Doc 04 §15). W2a deliberately reuses
+/// `parse_machine_body` for both, so the two AST nodes expose an identical
+/// surface — this trait lets one lowerer serve both without duplicating the
+/// ~100-line body (and without risking byte-drift between two copies; the
+/// snapshot guard pins the machine path).
+pub(super) trait MachineLike {
+    fn syntax(&self) -> &SyntaxNode;
+    fn name(&self) -> Option<String>;
+    fn stable_id_text(&self) -> Option<String>;
+    fn context(&self) -> Option<ast::ContextBlock>;
+    fn events(&self) -> Option<ast::EventsBlock>;
+    fn externs(&self) -> ast::AstChildren<ast::ExternDecl>;
+    fn queue(&self) -> Option<ast::QueueBlock>;
+    fn target(&self) -> Option<ast::TargetBlock>;
+}
+
+impl MachineLike for ast::MachineDecl {
+    fn syntax(&self) -> &SyntaxNode {
+        AstNode::syntax(self)
+    }
+    fn name(&self) -> Option<String> {
+        ast::MachineDecl::name(self)
+    }
+    fn stable_id_text(&self) -> Option<String> {
+        self.stable_id().and_then(|s| s.id())
+    }
+    fn context(&self) -> Option<ast::ContextBlock> {
+        ast::MachineDecl::context(self)
+    }
+    fn events(&self) -> Option<ast::EventsBlock> {
+        ast::MachineDecl::events(self)
+    }
+    fn externs(&self) -> ast::AstChildren<ast::ExternDecl> {
+        ast::MachineDecl::externs(self)
+    }
+    fn queue(&self) -> Option<ast::QueueBlock> {
+        ast::MachineDecl::queue(self)
+    }
+    fn target(&self) -> Option<ast::TargetBlock> {
+        ast::MachineDecl::target(self)
+    }
+}
+
+impl MachineLike for ast::SubmachineDecl {
+    fn syntax(&self) -> &SyntaxNode {
+        AstNode::syntax(self)
+    }
+    fn name(&self) -> Option<String> {
+        ast::SubmachineDecl::name(self)
+    }
+    fn stable_id_text(&self) -> Option<String> {
+        self.stable_id().and_then(|s| s.id())
+    }
+    fn context(&self) -> Option<ast::ContextBlock> {
+        ast::SubmachineDecl::context(self)
+    }
+    fn events(&self) -> Option<ast::EventsBlock> {
+        ast::SubmachineDecl::events(self)
+    }
+    fn externs(&self) -> ast::AstChildren<ast::ExternDecl> {
+        ast::SubmachineDecl::externs(self)
+    }
+    fn queue(&self) -> Option<ast::QueueBlock> {
+        ast::SubmachineDecl::queue(self)
+    }
+    fn target(&self) -> Option<ast::TargetBlock> {
+        ast::SubmachineDecl::target(self)
+    }
+}
+
+pub(super) fn lower_machine<M: MachineLike>(
+    machine: &M,
     m_idx: usize,
     st: &SymbolTable,
     file: &str,
     src: &str,
     ast_file: &ast::File,
 ) -> Option<MachineObject> {
+    // Top-level machines carry the flat submachine-template set; a
+    // submachine's *own* `submachines` stays empty (the IR models templates
+    // as a flat per-machine list, not a recursive tree — recursing here
+    // would not terminate for a submachine that references another).
+    lower_machine_inner(machine, m_idx, st, file, src, ast_file, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_machine_inner<M: MachineLike>(
+    machine: &M,
+    m_idx: usize,
+    st: &SymbolTable,
+    file: &str,
+    src: &str,
+    ast_file: &ast::File,
+    include_submachines: bool,
+) -> Option<MachineObject> {
     let name = machine
         .name()
         .unwrap_or_else(|| format!("__machine_{m_idx}"));
     let stable_id = machine
-        .stable_id()
-        .and_then(|s| s.id())
+        .stable_id_text()
         .unwrap_or_else(|| format!("M:{name}"));
     let mut ids = IdMinter::new(&name, m_idx);
     let locs = LocCtx::new(file, src);
@@ -89,6 +176,30 @@ pub(super) fn lower_machine(
     let imports = lower_imports();
     let features = lower_features();
 
+    // Submachine templates (Doc 04 §15 / Doc 09 §3). Every top-level
+    // `submachine Name { … }` is mirrored onto each machine (the same
+    // convention as file-level consts/externs) so a `MachineObject` is a
+    // self-contained codegen/simulator unit — `StateNode::Submachine`
+    // resolves its `submachine_id` within the *same* machine's
+    // `submachines`. A submachine lowers structurally exactly like a
+    // machine (`SubmachineDecl: MachineLike`) — same root region, same
+    // state-tree lowerer — recursively, so a submachine that itself
+    // references another submachine still carries the full template set.
+    let submachines: Vec<MachineObject> = if include_submachines {
+        ast_file
+            .submachines()
+            .enumerate()
+            .filter_map(|(sub_idx, sub)| {
+                // Distinct m_idx space; `include_submachines: false` so the
+                // recursion bottoms out (a submachine carries no nested
+                // template set — see `lower_machine`).
+                lower_machine_inner(&sub, m_idx + 1 + sub_idx, st, file, src, ast_file, false)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     // Root region.
     //
     // Per Doc 09 §5, `region.initial` MUST be the ID of an Initial
@@ -116,7 +227,7 @@ pub(super) fn lower_machine(
         events,
         externs,
         root,
-        submachines: Vec::new(),
+        submachines,
         consts,
         imports,
         features,
@@ -266,7 +377,7 @@ fn lower_queue(locs: &LocCtx, qb: Option<&ast::QueueBlock>) -> QueueConfig {
     }
 }
 
-fn lower_targets(locs: &LocCtx, machine: &ast::MachineDecl) -> Vec<TargetConfig> {
+fn lower_targets<M: MachineLike>(locs: &LocCtx, machine: &M) -> Vec<TargetConfig> {
     // The grammar emits a single TARGET_BLOCK; we currently surface one.
     let Some(tb) = machine.target() else {
         return Vec::new();

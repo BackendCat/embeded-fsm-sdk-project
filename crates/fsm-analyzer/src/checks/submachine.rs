@@ -1,15 +1,32 @@
-//! Submachine reference checks — Doc 04 §15.
+//! Submachine reference checks — Doc 04 §15, Doc 08 §12, Doc 10 §9.
 //!
-//! When a state declares a `submachine` reference (`submachine Foo : MachineId
-//! { entry → ... exit → ... }`), the referenced machine must exist and the
-//! entry/exit points declared on the parent must align with the submachine's
-//! declared entry/exit points.
+//! W2a landed the real grammar: a top-level `submachine Name { … }` is a
+//! `SUBMACHINE_DECL` CST node and `state X is Sub { … }` carries an optional
+//! `SUBMACHINE_REF` child on `STATE_DECL`. This pass operates on those real
+//! nodes (the previous best-effort `KwSubmachine` token-scan over
+//! `file.machines()` is gone — submachine *templates* live in the disjoint
+//! `file.submachines()` view, so the old scan could never have seen them).
 //!
-//! The current grammar exposes submachines via the `KwSubmachine` keyword
-//! but the parser does not yet wrap a distinct CST node for the reference —
-//! we look for the `submachine` keyword inside a state and emit FSM-E0103 /
-//! FSM-E0500 / FSM-E0501 best-effort. Full submachine wiring is gated behind
-//! `feature submachines` per Doc 04 §15.
+//! Diagnostics emitted (exact Doc 10 definitions):
+//!  - **FSM-E0610** "construct used without required `feature` flag" — any
+//!    submachine syntax (`SUBMACHINE_DECL` or `SUBMACHINE_REF`) present while
+//!    `feature submachines` is not declared at file scope (Doc 04 §2.2).
+//!  - **FSM-E0103** "unknown machine reference" — `state X is Name` where no
+//!    `submachine Name` is declared. (Submachines are a disjoint namespace
+//!    per Doc 04 §15; a plain `machine` is not a valid `is` target.)
+//!  - **FSM-E0500** "submachine entry point not declared" — a referenced
+//!    submachine has neither an `initial` nor an `entry_point`, so there is
+//!    no entry point to start it at (Doc 08 §12.2: entry is a named entry
+//!    point *or* the submachine's initial state).
+//!  - **FSM-E0501** "submachine exit point not declared" — the referencing
+//!    state declares a `done ->` completion (it expects the sub-instance to
+//!    complete) but the submachine has no `final` state / `exit_point`, so
+//!    nothing can drive that completion (Doc 08 §12.3).
+//!  - **FSM-E0502** "submachine instantiation cycle detected" — submachine A
+//!    references B and B (transitively) references A (Doc 10 §9;
+//!    recoverable: No).
+
+use std::collections::{HashMap, HashSet};
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
@@ -18,97 +35,205 @@ use fsm_parser::cst::SyntaxKind;
 use crate::symbol_table::SymbolTable;
 use crate::util::span_of;
 
-/// Run submachine checks. Currently emits FSM-E0103 if a `send EVENT to X`
-/// references an unknown machine — the rest of the submachine surface is
-/// handled by name-resolution. Cycle detection (FSM-E0502) checks the
-/// `submachines` field on the IR after lowering.
-pub fn check(file: &ast::File, st: &SymbolTable, out: &mut Vec<Diagnostic>) {
-    // Detect submachine declarations: a `submachine` keyword followed by a
-    // state-declaration in the same state. The parser does not currently
-    // produce a distinct CST node for the reference; we look for the keyword.
-    for m in file.machines() {
-        for descendant in m.syntax().descendants() {
-            if descendant.kind() != SyntaxKind::STATE_DECL {
-                continue;
-            }
-            // Direct token scan for `submachine` keyword.
-            let is_submachine = descendant
-                .children_with_tokens()
-                .filter_map(|el| el.into_token())
-                .any(|t| t.kind() == SyntaxKind::KwSubmachine);
-            if !is_submachine {
-                continue;
-            }
-            // The state declares it references a submachine. The first ident
-            // token after `submachine` is the referenced machine name.
-            let mut idents = descendant
-                .children_with_tokens()
-                .filter_map(|el| el.into_token())
-                .filter(|t| t.kind() == SyntaxKind::Ident)
-                .map(|t| t.text().to_string());
-            let _own_name = idents.next();
-            if let Some(reference) = idents.next() {
-                if st.resolve_machine(&reference).is_none() {
-                    out.push(
-                        Diagnostic::new(DiagnosticCode::E0103, span_of(&descendant)).with_message(
-                            format!("unknown machine '{reference}' in submachine reference"),
-                        ),
-                    );
-                }
-            }
-        }
-    }
-    // Cycle detection — simple direct cycles only. Build a name→submachine
-    // adjacency by scanning each machine subtree for nested `submachine`
-    // references.
-    let adjacency = build_submachine_graph(file, st);
-    for (src, dsts) in &adjacency {
-        for dst in dsts {
-            if adjacency.get(dst).map(|t| t.contains(src)).unwrap_or(false) {
-                if let Some(m) = file
-                    .machines()
-                    .find(|m| m.name().as_deref() == Some(src.as_str()))
-                {
-                    out.push(
-                        Diagnostic::new(DiagnosticCode::E0502, span_of(m.syntax()))
-                            .with_message(format!("submachine cycle detected: {src} <-> {dst}")),
-                    );
-                }
-            }
-        }
-    }
+/// `feature submachines` declared at file scope (Doc 04 §2.2). Feature flags
+/// are file-level only — an in-`machine`-body `feature` is a parse error
+/// (W2a), so the file's `features()` view is authoritative.
+fn submachines_feature_enabled(file: &ast::File) -> bool {
+    file.features()
+        .any(|f| f.name().as_deref() == Some("submachines"))
 }
 
-fn build_submachine_graph(
-    file: &ast::File,
-    _st: &SymbolTable,
-) -> std::collections::HashMap<String, Vec<String>> {
-    let mut adj = std::collections::HashMap::<String, Vec<String>>::new();
-    for m in file.machines() {
-        let Some(name) = m.name() else { continue };
-        let mut refs = Vec::new();
-        for descendant in m.syntax().descendants() {
-            if descendant.kind() != SyntaxKind::STATE_DECL {
-                continue;
-            }
-            let is_submachine = descendant
-                .children_with_tokens()
-                .filter_map(|el| el.into_token())
-                .any(|t| t.kind() == SyntaxKind::KwSubmachine);
-            if !is_submachine {
-                continue;
-            }
-            let idents: Vec<String> = descendant
-                .children_with_tokens()
-                .filter_map(|el| el.into_token())
-                .filter(|t| t.kind() == SyntaxKind::Ident)
-                .map(|t| t.text().to_string())
-                .collect();
-            if idents.len() >= 2 {
-                refs.push(idents[1].clone());
+pub fn check(file: &ast::File, st: &SymbolTable, out: &mut Vec<Diagnostic>) {
+    // -- FSM-E0610: feature gate ------------------------------------------
+    //
+    // Any submachine syntax (the top-level template OR a `state X is Sub`
+    // reference) requires `feature submachines`. Emitted per offending node
+    // so the user sees every site; structural checks below still run
+    // (cumulative diagnostics, Doc 09 §1) — the feature gate and the
+    // structural shape are independent failures.
+    if !submachines_feature_enabled(file) {
+        for node in file.syntax().descendants() {
+            if matches!(
+                node.kind(),
+                SyntaxKind::SUBMACHINE_DECL | SyntaxKind::SUBMACHINE_REF
+            ) {
+                out.push(
+                    Diagnostic::new(DiagnosticCode::E0610, span_of(&node)).with_message(
+                        "feature `submachines` is not enabled (add `feature submachines` \
+                         at file scope)"
+                            .to_string(),
+                    ),
+                );
             }
         }
-        adj.insert(name, refs);
     }
-    adj
+
+    // -- Per-reference checks: FSM-E0103 / FSM-E0500 / FSM-E0501 -----------
+    //
+    // Walk every `SUBMACHINE_REF` (under a machine OR nested inside another
+    // submachine template). For each: resolve the name; if unknown →
+    // FSM-E0103; if known but the template has no entry point → FSM-E0500;
+    // if known, the referencing state has a `done ->` completion, and the
+    // template has no exit point → FSM-E0501.
+    for sref_node in file
+        .syntax()
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::SUBMACHINE_REF)
+    {
+        let Some(sref) = ast::SubmachineRef::cast(sref_node.clone()) else {
+            continue;
+        };
+        let Some(ref_name) = sref.name() else {
+            // Malformed `state X is { … }` — the parser already diagnosed
+            // the missing name (W2a recovery); nothing to resolve here.
+            continue;
+        };
+
+        let Some(target) = st.resolve_submachine(&ref_name) else {
+            out.push(
+                Diagnostic::new(DiagnosticCode::E0103, span_of(&sref_node)).with_message(format!(
+                    "unknown submachine '{ref_name}' (no `submachine {ref_name}` is declared)"
+                )),
+            );
+            continue;
+        };
+
+        if !target.has_entry_point {
+            out.push(
+                Diagnostic::new(DiagnosticCode::E0500, span_of(&sref_node)).with_message(format!(
+                    "submachine '{ref_name}' declares no entry point — it has no `initial` \
+                     state and no `entry_point` (Doc 08 §12.2)"
+                )),
+            );
+        }
+
+        // FSM-E0501 is conditional on the *referencing* state expecting the
+        // sub-instance to complete, i.e. it declares a `done ->` completion
+        // edge. Without that edge the absence of an exit point is benign
+        // (the parent exits the ref via its own external transition,
+        // Doc 08 §12.3 case 2).
+        if state_has_completion(&sref_node) && !target.has_exit_point {
+            out.push(
+                Diagnostic::new(DiagnosticCode::E0501, span_of(&sref_node)).with_message(format!(
+                    "submachine '{ref_name}' declares no exit point — `done ->` cannot fire \
+                     because it has no `final` state and no `exit_point` (Doc 08 §12.3)"
+                )),
+            );
+        }
+    }
+
+    // -- FSM-E0502: submachine instantiation cycle ------------------------
+    check_instantiation_cycles(file, st, out);
+}
+
+/// Does the `STATE_DECL` enclosing this `SUBMACHINE_REF` declare a `done ->`
+/// completion edge? The completion is a `COMPLETION_DECL` sibling of the
+/// `SUBMACHINE_REF` (both direct children of the `STATE_DECL`, per W2a).
+fn state_has_completion(sref_node: &fsm_parser::cst::SyntaxNode) -> bool {
+    let Some(state_decl) = sref_node.parent() else {
+        return false;
+    };
+    if state_decl.kind() != SyntaxKind::STATE_DECL {
+        return false;
+    }
+    state_decl
+        .children()
+        .any(|c| c.kind() == SyntaxKind::COMPLETION_DECL)
+}
+
+/// Detect cycles in the submachine instantiation graph (FSM-E0502). Nodes
+/// are submachine-template names; an edge `A -> B` exists when template `A`
+/// contains a `state Y is B`. A machine that references a submachine is a
+/// graph *root* (machines are never `is`-referenced), so only template→
+/// template edges can close a cycle.
+///
+/// We DFS from every template with a colour map (white/grey/black). A grey
+/// node reachable again is a back-edge ⇒ cycle; we report FSM-E0502 once per
+/// template that participates, at the template's declaration span (the
+/// recoverable:No nature means one clear marker per culprit is enough — no
+/// per-edge spam).
+fn check_instantiation_cycles(file: &ast::File, st: &SymbolTable, out: &mut Vec<Diagnostic>) {
+    // adjacency: template name -> referenced template names (already
+    // collected by the symbol table while it walked each template's CST).
+    let adjacency: HashMap<&str, &Vec<String>> = st
+        .submachines
+        .iter()
+        .map(|s| (s.name.as_str(), &s.references))
+        .collect();
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Colour {
+        White,
+        Grey,
+        Black,
+    }
+    let mut colour: HashMap<&str, Colour> = adjacency.keys().map(|&k| (k, Colour::White)).collect();
+    let mut in_cycle: HashSet<String> = HashSet::new();
+
+    // Iterative DFS (templates can self-reference and the graph is tiny,
+    // but recursion-free keeps it robust against deep chains).
+    for &start in adjacency.keys() {
+        if colour.get(start) != Some(&Colour::White) {
+            continue;
+        }
+        // Stack frames: (node, enter?) — enter pushes children & greys,
+        // the matching exit blackens.
+        let mut stack: Vec<(&str, bool)> = vec![(start, true)];
+        let mut path: Vec<&str> = Vec::new();
+        while let Some((node, entering)) = stack.pop() {
+            if entering {
+                colour.insert(node, Colour::Grey);
+                path.push(node);
+                stack.push((node, false));
+                if let Some(refs) = adjacency.get(node) {
+                    for r in refs.iter() {
+                        match colour.get(r.as_str()) {
+                            Some(Colour::Grey) => {
+                                // Back-edge → every node on the current grey
+                                // path from `r` to `node` is in a cycle.
+                                let from = path.iter().position(|p| *p == r.as_str()).unwrap_or(0);
+                                for c in &path[from..] {
+                                    in_cycle.insert((*c).to_string());
+                                }
+                                in_cycle.insert(r.clone());
+                            }
+                            Some(Colour::White) | None => {
+                                if adjacency.contains_key(r.as_str()) {
+                                    stack.push((
+                                        adjacency.get_key_value(r.as_str()).unwrap().0,
+                                        true,
+                                    ));
+                                }
+                            }
+                            Some(Colour::Black) => {}
+                        }
+                    }
+                }
+            } else {
+                colour.insert(node, Colour::Black);
+                if let Some(p) = path.iter().rposition(|p| *p == node) {
+                    path.remove(p);
+                }
+            }
+        }
+    }
+
+    if in_cycle.is_empty() {
+        return;
+    }
+    // Report at each culpable template's declaration span.
+    for sub in file.submachines() {
+        if let Some(name) = sub.name() {
+            if in_cycle.contains(&name) {
+                out.push(
+                    Diagnostic::new(DiagnosticCode::E0502, span_of(sub.syntax())).with_message(
+                        format!(
+                            "submachine '{name}' participates in an instantiation cycle \
+                             (submachines may not transitively reference themselves)"
+                        ),
+                    ),
+                );
+            }
+        }
+    }
 }
