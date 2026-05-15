@@ -47,6 +47,13 @@ pub struct GenerateSection {
     pub isr_safe: Option<bool>,
     pub license: Option<String>,
     pub report_memory: Option<bool>,
+    /// C headers whose function declarations are imported as `extern`s for
+    /// every generate invocation in this project (Doc 18 §5/§6). CLI
+    /// `--import-header` flags are *appended* to this list (both sources
+    /// contribute; neither shadows the other, mirroring how multiple
+    /// `--import-header` flags accumulate).
+    #[serde(default)]
+    pub import_headers: Vec<PathBuf>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]

@@ -102,6 +102,15 @@ pub struct GenerateArgs {
     /// Also write the IR JSON next to the generated sources.
     #[arg(long)]
     pub emit_ir: bool,
+    /// Import `extern` declarations from an existing C header instead of
+    /// hand-writing them in the `.fsm`. Repeatable for several headers.
+    /// Functions the lightweight extractor cannot model (macros, typedefs,
+    /// function-pointer params, …) are skipped with a note, never
+    /// misparsed. A `.fsm` `extern` of the same name wins over an imported
+    /// one. Also settable via `fsm.toml` `[generate] import_headers`.
+    /// (Doc 18 §5 `fsm generate` — supported C subset + C→IR type table.)
+    #[arg(long = "import-header", value_name = "PATH")]
+    pub import_header: Vec<PathBuf>,
     /// Input .fsm file(s).
     #[arg(required = true)]
     pub files: Vec<PathBuf>,

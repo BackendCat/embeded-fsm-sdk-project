@@ -1,0 +1,42 @@
+language fsm 2.0
+
+// NOTE: there is intentionally NOT a single `extern` declaration here.
+// `driver_init`, `driver_set_speed`, `driver_read_fault` and
+// `driver_clear_fault` are all imported from driver.h by:
+//
+//     fsm generate --import-header driver.h motor_uses_driver.fsm
+//
+// The imported externs are indistinguishable from DSL `extern`s: the
+// transition actions below call them directly and codegen emits their
+// prototypes into Motor_impl.h exactly as if they were declared here.
+
+machine Motor {
+    context {
+        starts     : u32 = 0
+        fault_code : u8  = 0
+    }
+
+    events {
+        START
+        STOP
+        FAULT
+        RESET
+    }
+
+    initial Idle
+
+    state Idle {
+        // Two imported externs called as a transition-action sequence,
+        // plus a context mutation, mirroring the canonical motor example.
+        on START -> Running : ctx.starts = ctx.starts + 1; driver_set_speed(1500)
+    }
+
+    state Running {
+        on STOP  -> Idle    : driver_set_speed(0)
+        on FAULT -> Faulted : driver_clear_fault(false)
+    }
+
+    state Faulted {
+        on RESET -> Idle : driver_clear_fault(true)
+    }
+}

@@ -189,6 +189,7 @@ fsm generate [OPTIONS] <FILE>...
 | `--emit-offsets` | | off | Emit `M_asm_offsets.h` with struct byte offsets |
 | `--stdout` | | off | Write generated source to stdout instead of files |
 | `--emit-ir` | | off | Also write the IR JSON to `--out` directory |
+| `--import-header <PATH>` | | — | Derive `extern` declarations from an existing C header instead of hand-writing them in the `.fsm`. **Repeatable** (pass once per header). Also settable project-wide via `fsm.toml` `[generate] import_headers`. See *Imported Externs* below. |
 
 **Examples:**
 ```bash
@@ -203,7 +204,97 @@ fsm generate motor.fsm --target cpp17 --no-stl --out src/
 
 # Generate and also emit IR
 fsm generate motor.fsm --emit-ir --out build/
+
+# Import externs from an existing HAL header (no `extern` in the .fsm)
+fsm generate motor.fsm --import-header hal/driver.h
+
+# Several headers
+fsm generate motor.fsm --import-header hal/gpio.h --import-header hal/adc.h
 ```
+
+### Imported Externs (`--import-header`)
+
+Teams with a substantial existing C codebase should not have to
+hand-transcribe every HAL/driver function into a DSL `extern`.
+`--import-header <path.h>` reads a C header, extracts the function
+declarations it can confidently model, and makes them available to the
+`.fsm`'s guards/actions exactly as if they had been declared with
+`extern` in the source. An imported extern is **indistinguishable
+downstream** from a DSL-declared one (name resolution, codegen
+prototypes, the `_impl.h` user contract).
+
+**Conflict rule (DSL wins).** If the `.fsm` declares an `extern NAME`
+*and* an imported header also provides `NAME`, the **`.fsm` declaration
+wins** and the imported one is ignored (with a `note:` on stderr). The
+DSL is the explicit, in-repo source of truth and can carry `pure`
+(which a header cannot express), so it is never silently overridden.
+
+**Resilience over completeness.** The extractor is a self-contained,
+deterministic C-declaration parser — it does **not** shell out to a C
+compiler or link libclang (no heavy system dependency). A construct it
+cannot confidently model is **skipped with a `note:`**, never
+misparsed and never emitted as a broken prototype. `generate` still
+succeeds; the note tells the user *why* a function they expected was
+not imported (and that they may declare it manually).
+
+**Supported C subset (imported as an extern):**
+
+- Function declarations `RET NAME(PARAMS);` and `extern RET NAME(PARAMS);`,
+  including inline definitions (the prototype is taken; the body dropped).
+- Scalar base types only — see the type table below — for **every**
+  parameter and the return type. `void` parameter list ⇒ zero params.
+- Storage/specifier keywords (`extern`, `static`, `inline`) and
+  attributes (`__attribute__((...))`, `__declspec(...)`) are stripped.
+- Unnamed parameters get synthesised names (`arg0`, `arg1`, …). A
+  parameter whose C name collides with an FSM keyword (`on`, `state`,
+  `to`, …) is given a safe synthesized name in the generated prototype
+  (linkage is by position/type — C ignores prototype parameter names).
+- Variadic `...` — the fixed scalar prefix is imported; the ellipsis is
+  dropped (a DSL action can only pass the fixed arguments).
+- Comments and string/char literals are stripped before parsing, so a
+  `;` or `)` inside them never creates a phantom declaration.
+
+**Skipped (with a note — declare manually in the `.fsm` if needed):**
+
+- Preprocessor directives, including function-like macros
+  (`#define F(x) …`) — a macro is not a linkable symbol.
+- `typedef`s, and standalone `struct`/`enum`/`union` *definitions*.
+- `__attribute__`-only / variable declarations, K&R declarations.
+- Function-pointer return or parameter, array parameter, or any other
+  complex declarator.
+- **Any function whose signature contains a pointer / `struct` /
+  `union` / `size_t` / address-width / unknown-typedef type** in a
+  parameter or the return. Rationale: the DSL `extern` lowering models
+  only the scalar primitive types (an `opaque "T"` param/return on an
+  `extern` is dropped even when *hand-written* — a pre-existing
+  pipeline limitation), and a DSL guard/action cannot construct a
+  pointer/struct argument anyway. Importing such a function would
+  produce a wrong (lossy) prototype, so it is conservatively skipped.
+
+**C → IR type mapping** (the scalar subset that imports):
+
+| C type(s) | IR / DSL type |
+|---|---|
+| `void` (return) | *(no return type — like `extern f()`)* |
+| `bool`, `_Bool` | `bool` |
+| `char`, `signed char` | `i8` |
+| `unsigned char` | `u8` |
+| `short`, `signed short` (`int`) | `i16` |
+| `unsigned short` (`int`) | `u16` |
+| `int`, `signed`, `signed int` | `i32` |
+| `unsigned`, `unsigned int` | `u32` |
+| `long`, `signed long` (`int`) | `i32` |
+| `unsigned long` (`int`) | `u32` |
+| `long long`, `signed long long` (`int`) | `i64` |
+| `unsigned long long` (`int`) | `u64` |
+| `float` | `f32` |
+| `double`, `long double` | `f64` |
+| `int8_t` / `int16_t` / `int32_t` / `int64_t` | `i8` / `i16` / `i32` / `i64` |
+| `uint8_t` / `uint16_t` / `uint32_t` / `uint64_t` | `u8` / `u16` / `u32` / `u64` |
+| pointer (`T *`), `struct/union/enum X`, `size_t`, `uintptr_t`, unknown typedef | *not imported — function skipped with a note* |
+
+`const` / `volatile` qualifiers are accepted and ignored for the type
+mapping. A worked end-to-end example lives in `examples/import-header/`.
 
 **Output files for `Motor` machine:**
 ```
@@ -405,6 +496,11 @@ out      = "generated/"
 queue_size     = 8
 queue_overflow = "assert"
 isr_safe       = false
+# C headers whose function declarations are imported as `extern`s for
+# every `fsm generate` in this project (see Imported Externs above).
+# `--import-header` flags on the command line are *appended* to this
+# list (both sources contribute; neither shadows the other).
+import_headers = ["hal/gpio.h", "hal/adc.h"]
 
 [generate.cpp]
 stl_profile = "no-stl"

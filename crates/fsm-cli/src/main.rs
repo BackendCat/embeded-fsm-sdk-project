@@ -15,6 +15,7 @@ mod cli;
 mod cmd;
 mod config;
 mod diagnostics;
+mod import_header;
 
 use cli::{Cli, Command};
 
