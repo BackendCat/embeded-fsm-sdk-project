@@ -55,9 +55,36 @@
 //! list, never a dump of every symbol. Still one analysis, no second
 //! position converter (no `TextEdit` ranges are emitted).
 //!
-//! L5+ capabilities (references, rename, semanticTokens, codeAction,
-//! inlayHint) are out of L4 scope and are NOT stubbed (a silent no-op
-//! handler is worse than an unadvertised capability).
+//! ## L5 scope (Doc 26 §8 L5 — references + rename, the ONE new analysis)
+//!
+//! `textDocument/references` (Doc 14 §7) + `textDocument/prepareRename` +
+//! `textDocument/rename` (Doc 14 §8, **single-file** — cross-file is v1.3,
+//! Doc 26 §4.6/§9), advertised in `initialize`. These are powered by
+//! [`refs::ReferenceIndex`] — the **one genuinely-new analysis** of the
+//! LSP epic, and the only place L5 adds analysis. It is *derived* from the
+//! single `analyze()` (it runs no `analyze()`/lowering of its own — a
+//! single CST walk over that one analysis's `symbol_table` + parsed `cst`)
+//! and **semantic-only**: a token is a reference to a symbol iff the SAME
+//! L3 [`capabilities::resolve`] classifier (which mirrors the analyzer's
+//! `checks::name_resolution` and resolves through the SAME
+//! `SymbolTable::resolve_*` `fsm check` uses) resolves it to *exactly that
+//! declaration* — never an identifier-string/text match. A token inside a
+//! string literal, comment, or trivia is not a CST `Ident` in a classified
+//! position, and a same-spelled token in a different scope resolves to a
+//! different declaration `Span`; both are excluded **by construction**, so
+//! the `WorkspaceEdit` can never silently corrupt the user's source (Doc
+//! 26 risk-2, the cardinal sin in its most acute form). `prepareRename`
+//! hard-rejects (up-front, per the LSP contract — never silent-allow)
+//! machine names (codegen/ABI blast radius, out of v1.2 scope),
+//! `@id`/state-id annotation strings, keywords/contextual keywords,
+//! non-identifier cursors, and any string/comment/trivia position;
+//! `rename` additionally rejects an invalid new identifier and an in-scope
+//! name collision with a clear message and **no edit**. Still one
+//! analysis, one position converter, one resolver — reused, not duplicated.
+//!
+//! L6+ capabilities (semanticTokens, codeAction, inlayHint) are out of L5
+//! scope and are NOT stubbed (a silent no-op handler is worse than an
+//! unadvertised capability — the `workspaceSymbol` precedent).
 //!
 //! ## The reuse seam
 //!
@@ -77,6 +104,7 @@ pub mod analysis;
 pub mod capabilities;
 pub mod document_store;
 pub mod position;
+pub mod refs;
 pub mod server;
 
 use tower_lsp::{LspService, Server};

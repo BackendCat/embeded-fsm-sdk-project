@@ -73,6 +73,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   absent, under **both** UTF-8 and UTF-16 on a multibyte fixture. See
   `docs/26-LSP-Architecture.md` §8 L4 and
   `docs/00-Decisions-And-Reconciliation.md` §11.35.
+- **`fsm-lsp` — `references` + `prepareRename`/`rename`** (v1.2-LSP-L5,
+  single-file): Doc 14 §7 `textDocument/references` and Doc 14 §8
+  `textDocument/prepareRename` + `textDocument/rename` advertised
+  (`rename_provider.prepareProvider = true`). Powered by the new
+  `ReferenceIndex` — the **one genuinely-new analysis** of the LSP epic,
+  *derived* from the single `fsm check` analysis (a single CST walk over
+  its `symbol_table` + parse — no second analysis pass, no parallel
+  resolver) and **semantic-only**: a token is a reference iff the SAME L3
+  `resolve` classifier (mirroring `checks::name_resolution`, resolving
+  through the SAME `SymbolTable::resolve_*` `fsm check` uses) resolves it
+  to *exactly that declaration* — never an identifier-string/text match.
+  A same-spelled token inside a string literal, a comment, or trivia is
+  not a CST `Ident` in a classified position, and one in a different
+  scope resolves to a different declaration; both are excluded **by
+  construction**, so a `rename`'s `WorkspaceEdit` can never silently
+  corrupt the user's source (Doc 26 risk-2, the cardinal silent-data-loss
+  risk in its most acute form). `references` honours `includeDeclaration`;
+  `prepareRename` hard-rejects (up-front, the LSP contract — never a
+  silent allow) machine names (codegen/ABI blast radius, out of v1.2
+  scope), `@id`/state-id annotation strings, keywords/contextual keywords,
+  non-identifier cursors, and any string/comment/trivia position; `rename`
+  additionally rejects an invalid new identifier and an in-scope name
+  collision with a clear message and **no edit**. Cross-file
+  references/rename remain explicitly v1.3 (Doc 26 §4.6/§9). Still one
+  analysis, one position converter, one resolver — reused, not
+  duplicated; L1–L4 diagnostics/symbols/hover/goto/completion proven
+  byte-unchanged. Proven by the most exhaustive in-process `tower-lsp`
+  client safety matrix of any wave — the headline risk-2 test asserts a
+  safe rename's edit set is **exactly** the semantic references and that a
+  same-spelled string-literal substring, comment word, AND different-scope
+  symbol are **NONE of them** in the `WorkspaceEdit` (applying the edits
+  leaves the other machine + the comment + the string byte-preserved and
+  the buffer still parses clean), plus a six-case `prepareRename`
+  negative-rejection matrix and all reference/rename ranges correct under
+  **both** UTF-8 and UTF-16 on a multibyte fixture. See
+  `docs/26-LSP-Architecture.md` §8 L5 and
+  `docs/00-Decisions-And-Reconciliation.md` §11.36.
 
 ### Changed
 

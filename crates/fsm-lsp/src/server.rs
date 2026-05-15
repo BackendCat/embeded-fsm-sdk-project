@@ -1,26 +1,32 @@
-//! The `tower-lsp` backend — Doc 26 §2.3 / §5 (L1+L2+L3+L4 capabilities).
+//! The `tower-lsp` backend — Doc 26 §2.3 / §5 (L1+L2+L3+L4+L5 caps).
 //!
 //! Implements the LSP lifecycle (`initialize`/`initialized`/`shutdown`),
 //! full-document sync (`didOpen`/`didChange`/`didClose`), a ~200ms debounce
 //! (Doc 14 §14 / Doc 26 §4.3), `publishDiagnostics`, the L2 read
 //! capabilities `documentSymbol` (Doc 14 §13) + `foldingRange` (Doc 14
 //! §12), the L3 capabilities `hover` (Doc 14 §5) + `definition` (Doc 14
-//! §6, single-file), and the L4 capability `completion` (Doc 14 §4,
-//! context-aware, single-file). Every diagnostic, symbol, hover, goto and
-//! completion comes from the exact `fsm check` pipeline
-//! ([`crate::analysis::analyze`]) — this module never re-analyses (Doc 20
-//! §9.4 / Doc 26 §3): `documentSymbol`/`hover`/`definition`/`completion`
-//! consume the `symbol_table` (and, for hover, the additively threaded
-//! `ir`) from the **same** `analyze()` the diagnostics path runs (Doc 26
-//! §8 L2/L3/L4: "one analysis feeds all"); `foldingRange` is a pure
-//! parse-tree walk (no analysis at all). `completion` additionally reuses
-//! L3's `resolve` CST substrate for trigger-context classification — no
-//! parallel context detector (Doc 26 §8 L4).
+//! §6, single-file), the L4 capability `completion` (Doc 14 §4,
+//! context-aware, single-file), and the L5 capabilities `references` (Doc
+//! 14 §7) + `prepareRename`/`rename` (Doc 14 §8, single-file). Every
+//! diagnostic, symbol, hover, goto, completion, reference and rename comes
+//! from the exact `fsm check` pipeline ([`crate::analysis::analyze`]) —
+//! this module never re-analyses (Doc 20 §9.4 / Doc 26 §3):
+//! `documentSymbol`/`hover`/`definition`/`completion` consume the
+//! `symbol_table` (and, for hover, the additively threaded `ir`) from the
+//! **same** `analyze()` the diagnostics path runs; `foldingRange` is a
+//! pure parse-tree walk (no analysis). `completion` reuses L3's `resolve`
+//! CST substrate for trigger-context classification. `references`/`rename`
+//! consume the L5 [`ReferenceIndex`] — the ONE genuinely-new analysis,
+//! itself *derived* from that same single `analyze()` (a single CST walk,
+//! no second pass) and **semantic-only** (every reference proven by the
+//! SAME L3 `resolve` classifier + `SymbolTable::resolve_*`, never a text
+//! match); they reuse the `resolve` seam, not a parallel resolver, and
+//! `LineIndex` for ranges, not a second converter (Doc 26 §8 L5).
 //!
-//! L4 scope boundary (Doc 26 §8): NO rename/references/semanticTokens/
-//! codeAction/inlayHint. Those are L5+ and are deliberately neither
-//! implemented nor stubbed (a silent no-op handler is worse than an
-//! unadvertised capability).
+//! L5 scope boundary (Doc 26 §8): NO semanticTokens/codeAction/inlayHint.
+//! Those are L6+ and are deliberately neither implemented nor stubbed (a
+//! silent no-op handler is worse than an unadvertised capability — the
+//! `workspaceSymbol`-left-unadvertised precedent, Doc 00 §11.33(5)).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -28,15 +34,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::Mutex;
+use tower_lsp::jsonrpc::Error as RpcError;
 use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::{
     CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
     DocumentSymbolResponse, FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability,
     GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf,
-    PositionEncodingKind, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Url,
+    InitializeParams, InitializeResult, InitializedParams, Location, MessageType, OneOf,
+    PositionEncodingKind, PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams,
+    ServerCapabilities, ServerInfo, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Url, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -47,8 +55,11 @@ use crate::capabilities::diagnostics::to_lsp_diagnostics;
 use crate::capabilities::document_symbol::document_symbols;
 use crate::capabilities::folding::folding_ranges;
 use crate::capabilities::hover::hover as build_hover;
+use crate::capabilities::references::references as build_references;
+use crate::capabilities::rename::{prepare_rename_handler, rename_handler};
 use crate::document_store::DocumentStore;
 use crate::position::OffsetEncoding;
+use crate::refs::ReferenceIndex;
 
 /// Debounce window before a re-analyze fires (Doc 14 §14 / Doc 22 §8
 /// `fsmLang.debounceMs` default; Doc 26 §4.3). Full re-parse+analyze of a
@@ -217,6 +228,23 @@ impl LanguageServer for Backend {
                     resolve_provider: Some(false),
                     ..Default::default()
                 }),
+                // L5 (Doc 26 §8 L5): references + rename. Both are honest,
+                // fully-implemented providers over the L5 `ReferenceIndex`
+                // (the ONE new analysis, derived from the same single
+                // analysis, semantic-only) — advertised because they
+                // genuinely work, NOT stubbed.
+                references_provider: Some(OneOf::Left(true)),
+                // `prepare_provider: true` — the client MUST call
+                // `prepareRename` first, which is exactly the up-front
+                // "is this renameable?" contract Doc 26 risk-2 wants
+                // (never silent-allow → corrupting edit). `rename` itself
+                // re-validates (defence-in-depth: a client may skip
+                // prepare). `RenameOptions` (not the bare `OneOf::Left`)
+                // is required to express `prepare_provider`.
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -466,5 +494,148 @@ impl LanguageServer for Backend {
         // here" — that is the deliberate degradation for an
         // unclassifiable / wrong context, NOT a missing capability.
         Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    /// `textDocument/references` — Doc 14 §7 / Doc 26 §8 L5 (single-file).
+    ///
+    /// Builds the L5 [`ReferenceIndex`] from the SAME single `analyze()`
+    /// the diagnostics path runs (the ONE new analysis, *derived* — a CST
+    /// walk over that analysis's `symbol_table` + parsed `cst`; no second
+    /// analysis pass, no parallel resolver) and returns every
+    /// semantically-resolved occurrence of the symbol under the cursor,
+    /// honouring `context.include_declaration`. Resolution is purely
+    /// semantic (the SAME L3 `resolve` classifier); a same-spelled
+    /// string/comment/different-scope token is excluded by construction
+    /// (Doc 26 risk-2). Cursor not on a resolvable in-file symbol → `None`
+    /// (the spec-correct empty answer, never a panic, never a textual
+    /// guess). Every range is in *this* buffer (single-file; cross-file is
+    /// v1.3, Doc 26 §4.6). Snapshot released before the await-free
+    /// analysis, exactly as the L2/L3/L4 paths do.
+    async fn references(&self, params: ReferenceParams) -> RpcResult<Option<Vec<Location>>> {
+        let pos = params.text_document_position;
+        let uri = pos.text_document.uri;
+        let include_declaration = params.context.include_declaration;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        let byte = line_index.offset(&text, pos.position, enc);
+        let path = Backend::uri_to_path(&uri);
+        // THE reuse seam — identical `fsm check` pipeline; the index is
+        // derived from THIS single run's symbol_table + parse.
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        let index = ReferenceIndex::build(&analysis.symbol_table, &cst);
+        Ok(build_references(
+            &analysis.symbol_table,
+            &index,
+            &cst,
+            &uri,
+            byte,
+            include_declaration,
+            &line_index,
+            &text,
+            enc,
+        ))
+    }
+
+    /// `textDocument/prepareRename` — Doc 14 §8 / Doc 26 §8 L5 / risk-2.
+    ///
+    /// The up-front renameability contract: returns the bare-identifier
+    /// range ONLY for a safely-renameable user symbol (state / event /
+    /// extern / context field declared in this file), and an **error**
+    /// (telling the client up-front it is not renameable — never a silent
+    /// allow that becomes a corrupting edit) for a machine name (codegen/
+    /// ABI blast radius, out of v1.2 scope), an `@id`/state-id annotation
+    /// string, a keyword/contextual keyword, a non-identifier cursor, or
+    /// any position inside a string/comment/trivia. Resolution is purely
+    /// semantic (the SAME L3 `resolve` seam via the [`ReferenceIndex`]),
+    /// so a non-`Ident`/string/comment position is structurally a
+    /// rejection. Snapshot released before the await-free analysis.
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> RpcResult<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        let byte = line_index.offset(&text, params.position, enc);
+        let path = Backend::uri_to_path(&uri);
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        // A refusal is surfaced as a JSON-RPC error so the client shows
+        // the reason up-front (the LSP `prepareRename` contract) rather
+        // than letting `rename` produce a dangerous edit (Doc 26 risk-2).
+        match prepare_rename_handler(&analysis.symbol_table, &cst, byte, &line_index, &text, enc) {
+            Ok(resp) => Ok(resp),
+            Err(message) => Err(RpcError::invalid_params(message)),
+        }
+    }
+
+    /// `textDocument/rename` — Doc 14 §8 / Doc 26 §8 L5 / risk-2 (the
+    /// cardinal silent-data-loss risk in its most acute form).
+    ///
+    /// Returns a [`WorkspaceEdit`] whose text edits are **exactly** the L5
+    /// [`ReferenceIndex`] occurrences (decl + semantically-resolved uses)
+    /// of the target, each rewritten to the new name. The edit set is
+    /// semantic-only: a same-spelled string-literal substring, comment
+    /// word, or different-scope symbol never entered the index, so it can
+    /// **never** be in the `WorkspaceEdit` (the headline risk-2
+    /// guarantee). Rejects (a clear JSON-RPC error, **no edit**) a
+    /// non-renameable cursor / machine name / cross-file-exposed symbol /
+    /// invalid new identifier / in-scope name collision. Single-file
+    /// only; cross-file is v1.3 (Doc 26 §4.6/§9). Snapshot released before
+    /// the await-free analysis.
+    async fn rename(&self, params: RenameParams) -> RpcResult<Option<WorkspaceEdit>> {
+        let pos = params.text_document_position;
+        let uri = pos.text_document.uri;
+        let new_name = params.new_name;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        let byte = line_index.offset(&text, pos.position, enc);
+        let path = Backend::uri_to_path(&uri);
+        // THE reuse seam — identical pipeline; the index is derived from
+        // THIS single run. NO second analysis, NO text-based matching.
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        let index = ReferenceIndex::build(&analysis.symbol_table, &cst);
+        match rename_handler(
+            &analysis.symbol_table,
+            &index,
+            &cst,
+            &uri,
+            byte,
+            &new_name,
+            &line_index,
+            &text,
+            enc,
+        ) {
+            Ok(edit) => Ok(Some(edit)),
+            // A clear message, NO edit — never a partial/wrong
+            // WorkspaceEdit (Doc 26 risk-2).
+            Err(message) => Err(RpcError::invalid_params(message)),
+        }
     }
 }

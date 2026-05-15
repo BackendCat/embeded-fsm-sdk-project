@@ -2074,3 +2074,791 @@ async fn doc26_l4_acceptance_sentence_verbatim() {
         "the `machine` keyword snippet MUST be verbatim Doc 14 §4"
     );
 }
+
+// ===========================================================================
+// L5 — references + prepareRename + rename (Doc 26 §8 L5 / risk-2).
+//
+// The most exhaustive §5.4 matrix of any wave: rename rewrites the user's
+// source, so a wrong edit silently corrupts their program (the cardinal
+// sin in its most acute form). Every test asserts decoded payloads vs the
+// analysis oracle + hard-coded cross-checks; symbol/route presence is NOT
+// acceptance. The headline risk-2 proof — a same-spelled string-literal /
+// comment / different-scope token is NOT in the `WorkspaceEdit` — is made
+// unmissable below.
+// ===========================================================================
+
+use tower_lsp::lsp_types::{PrepareRenameResponse, TextEdit, WorkspaceEdit};
+
+use fsm_lsp::capabilities::references::references as oracle_references;
+use fsm_lsp::refs::{prepare_rename as oracle_prepare, ReferenceIndex};
+
+fn refs_params(uri: &Url, line: u32, character: u32, include_decl: bool) -> Value {
+    json!({
+        "textDocument": { "uri": uri },
+        "position": { "line": line, "character": character },
+        "context": { "includeDeclaration": include_decl }
+    })
+}
+
+fn rename_params(uri: &Url, line: u32, character: u32, new_name: &str) -> Value {
+    json!({
+        "textDocument": { "uri": uri },
+        "position": { "line": line, "character": character },
+        "newName": new_name
+    })
+}
+
+fn decode_locations(result: &Value) -> Option<Vec<Location>> {
+    if result.is_null() {
+        return None;
+    }
+    Some(serde_json::from_value(result.clone()).expect("decode Location[]"))
+}
+
+/// All byte ranges of comment + string-literal + whitespace tokens in
+/// `text`, derived from the CST. The risk-2 guarantee is precisely that
+/// **no** rename/reference range may fall inside ANY of these — so the
+/// test asserts against the structural truth, not a brittle substring
+/// search (a stronger, fixture-edit-proof assertion).
+fn forbidden_trivia_and_string_ranges(text: &str) -> Vec<(usize, usize)> {
+    use fsm_parser::cst::SyntaxKind as K;
+    let cst = fsm_parser::parse(text).syntax();
+    cst.descendants_with_tokens()
+        .filter_map(|el| el.into_token())
+        .filter(|t| {
+            matches!(
+                t.kind(),
+                K::StringLiteral
+                    | K::LineComment
+                    | K::BlockComment
+                    | K::DocComment
+                    | K::Whitespace
+                    | K::Newline
+            )
+        })
+        .map(|t| {
+            let r = t.text_range();
+            (usize::from(r.start()), usize::from(r.end()))
+        })
+        .collect()
+}
+
+/// The full raw JSON-RPC envelope (so a request that returns an *error*
+/// — `prepareRename`/`rename` refusals are JSON-RPC errors by design —
+/// is observable; `call_request` only exposes `result`).
+async fn call_envelope<S>(service: &mut S, method: &'static str, params: Value, id: i64) -> Value
+where
+    S: Service<Request, Response = Option<tower_lsp::jsonrpc::Response>>,
+    S::Error: std::fmt::Debug,
+{
+    let req = Request::build(method).params(params).id(id).finish();
+    let resp = service
+        .ready()
+        .await
+        .unwrap()
+        .call(req)
+        .await
+        .unwrap()
+        .unwrap_or_else(|| panic!("{method} returned no response"));
+    serde_json::to_value(resp).unwrap()
+}
+
+/// (L5-a) `references` with the cursor on a **decl** and on a **use** →
+/// the EXACT semantic reference set (decl + the 3 transition uses), byte
+/// ranges oracle-matched, `includeDeclaration` honoured. Both cursor
+/// positions must yield the identical set (decl-cursor and use-cursor
+/// resolve to the same symbol).
+#[tokio::test(flavor = "current_thread")]
+async fn references_decl_and_use_yield_exact_semantic_set() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text, uri) = fixture("l5_basic.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    // --- Oracle: the SAME pipeline + ReferenceIndex the server runs. ----
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(&text, &path);
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "fixture invariant: l5_basic.fsm must be clean, got {:?}",
+        analysis.diagnostics
+    );
+    let cst = fsm_parser::parse(&text).syntax();
+    let idx = LineIndex::new(&text);
+    let rindex = ReferenceIndex::build(&analysis.symbol_table, &cst);
+
+    // `Moving`: declared once (`state Moving {`), used in 2 transition
+    // targets (`Idle.on CALL -> Moving` and the `Moving.on CALL ->
+    // Moving` self-target — `on STOP -> Idle` targets `Idle`, not
+    // `Moving`). Verified from the fixture: 1 decl + 2 use sites = 3
+    // with the declaration.
+    let decl_cur = byte_of(&text, "state Moving", 6); // the `Moving` name
+    let use_cur = byte_of(&text, "-> Moving", 3); // a transition target
+
+    let decl_pos = idx.position(&text, decl_cur as u32, OffsetEncoding::Utf8);
+    let use_pos = idx.position(&text, use_cur as u32, OffsetEncoding::Utf8);
+
+    let want_with_decl = oracle_references(
+        &analysis.symbol_table,
+        &rindex,
+        &cst,
+        &uri,
+        decl_cur as u32,
+        true,
+        &idx,
+        &text,
+        OffsetEncoding::Utf8,
+    )
+    .expect("oracle: Moving has references");
+
+    // Server, cursor on the DECL.
+    let r_decl = call_request(
+        &mut service,
+        "textDocument/references",
+        refs_params(&uri, decl_pos.line, decl_pos.character, true),
+        500,
+    )
+    .await;
+    let got_decl = decode_locations(&r_decl).expect("server: refs from decl");
+    assert_eq!(
+        got_decl, want_with_decl,
+        "references from the DECL cursor must byte-match the oracle"
+    );
+
+    // Server, cursor on a USE — must resolve to the SAME symbol → same set.
+    let r_use = call_request(
+        &mut service,
+        "textDocument/references",
+        refs_params(&uri, use_pos.line, use_pos.character, true),
+        501,
+    )
+    .await;
+    let got_use = decode_locations(&r_use).expect("server: refs from use");
+    assert_eq!(
+        got_use, want_with_decl,
+        "references from a USE cursor must equal the same semantic set"
+    );
+
+    // Exactly 3 with the declaration (1 decl + 2 uses) — count is exact.
+    assert_eq!(
+        got_decl.len(),
+        3,
+        "decl + 2 transition uses = 3, got {got_decl:#?}"
+    );
+    for l in &got_decl {
+        assert_eq!(l.uri, uri, "single-file: every reference is in this doc");
+    }
+
+    // includeDeclaration=false drops EXACTLY the declaration → 3, and the
+    // dropped one is the `state Moving {` decl-name range.
+    let r_nodecl = call_request(
+        &mut service,
+        "textDocument/references",
+        refs_params(&uri, use_pos.line, use_pos.character, false),
+        502,
+    )
+    .await;
+    let got_nodecl = decode_locations(&r_nodecl).expect("server: uses only");
+    assert_eq!(got_nodecl.len(), 2, "uses only = 2, got {got_nodecl:#?}");
+    // The decl range that was present with-decl and absent without-decl:
+    let decl_only: Vec<_> = got_decl
+        .iter()
+        .filter(|l| !got_nodecl.contains(l))
+        .collect();
+    assert_eq!(decl_only.len(), 1, "exactly one range is decl-only");
+    let dr = decl_only[0];
+    let db = idx.offset(&text, dr.range.start, OffsetEncoding::Utf8) as usize;
+    assert_eq!(
+        &text[db..db + "Moving".len()],
+        "Moving",
+        "the decl-only range is the bare `Moving` name token"
+    );
+}
+
+/// (L5-b) **risk-2 exclusion at the references layer.** A same-spelled
+/// identifier that resolves to a DIFFERENT symbol (a state `Moving` in a
+/// different machine) is EXCLUDED; a same-spelled token inside a string
+/// literal AND inside a comment is EXCLUDED. These are NOT in the
+/// reference set of `Lift.Moving`.
+#[tokio::test(flavor = "current_thread")]
+async fn references_exclude_diff_scope_string_and_comment() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text, uri) = fixture("l5_safety.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(&text, &path);
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "fixture invariant: l5_safety.fsm clean, got {:?}",
+        analysis.diagnostics
+    );
+    let idx = LineIndex::new(&text);
+
+    // Cursor on Lift's `state Moving` decl name (the FIRST occurrence —
+    // machine Crane's is later in the file).
+    let lift_moving = byte_of(&text, "state Moving", 6);
+    let lp = idx.position(&text, lift_moving as u32, OffsetEncoding::Utf8);
+    let r = call_request(
+        &mut service,
+        "textDocument/references",
+        refs_params(&uri, lp.line, lp.character, true),
+        510,
+    )
+    .await;
+    let got = decode_locations(&r).expect("Lift.Moving references");
+
+    // The different-machine boundary + ALL comment/string regions (CST-
+    // derived: fixture-edit-proof, and a STRONGER assertion than a single
+    // substring search — NO reference may fall in ANY trivia/string).
+    let crane_start = text.find("machine Crane").unwrap();
+    let forbidden = forbidden_trivia_and_string_ranges(&text);
+
+    for l in &got {
+        let b = idx.offset(&text, l.range.start, OffsetEncoding::Utf8) as usize;
+        assert!(
+            b < crane_start,
+            "a different-machine `Moving` (machine Crane) leaked into the \
+             reference set: byte {b}, range {:?}",
+            l.range
+        );
+        for &(s, e) in &forbidden {
+            assert!(
+                !(b >= s && b < e),
+                "a `Moving` substring inside a comment/string/trivia \
+                 ([{s},{e})) must NEVER be a reference: byte {b}"
+            );
+        }
+        // Every returned range is the literal bare name token.
+        assert_eq!(
+            &text[b..b + "Moving".len()],
+            "Moving",
+            "every reference range is the bare `Moving` identifier"
+        );
+    }
+    // Lift.Moving: decl + `Idle.on CALL -> Moving` + `Moving.on CALL ->
+    // Moving` = 3 (the comment/string/Crane occurrences are all excluded).
+    assert_eq!(
+        got.len(),
+        3,
+        "Lift.Moving = decl + 2 semantic uses ONLY, got {got:#?}"
+    );
+}
+
+/// (L5-c) `prepareRename` — the **negative matrix**, one rejection test
+/// EACH (Doc 26 §8 L5): machine-name, `@id`/state-id, keyword, string
+/// interior, comment, non-identifier/whitespace — all rejected with a
+/// JSON-RPC error (the up-front "not renameable" contract, never a silent
+/// allow that becomes a corrupting edit). Plus a positive: a renameable
+/// state/event/ctx-field → the correct bare-name range.
+#[tokio::test(flavor = "current_thread")]
+async fn prepare_rename_negative_matrix_and_positive() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    // A fixture exercising every rejection target on valid grammar.
+    let src = "language fsm 2.0\n\
+               machine M {\n\
+               \x20\x20context { note: str = \"Idle is a string\" }\n\
+               \x20\x20events { GO }\n\
+               \x20\x20initial Idle\n\
+               \x20\x20// the word Idle in a comment\n\
+               \x20\x20@id(\"s-idle-id\")\n\
+               \x20\x20state Idle {\n\
+               \x20\x20\x20\x20on GO -> Idle\n\
+               \x20\x20}\n\
+               }\n";
+    let uri = Url::from_file_path("/tmp/l5_prep.fsm").unwrap();
+    service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(did_open_params(&uri, src))
+                .finish(),
+        )
+        .await
+        .unwrap();
+    let idx = LineIndex::new(src);
+
+    // Helper: send prepareRename at a byte, return (is_error, envelope).
+    async fn prep(
+        service: &mut (impl Service<
+            Request,
+            Response = Option<tower_lsp::jsonrpc::Response>,
+            Error = impl std::fmt::Debug,
+        > + Unpin),
+        uri: &Url,
+        idx: &LineIndex,
+        src: &str,
+        byte: usize,
+        id: i64,
+    ) -> Value {
+        let p = idx.position(src, byte as u32, OffsetEncoding::Utf8);
+        call_envelope(
+            service,
+            "textDocument/prepareRename",
+            pos_params(uri, p.line, p.character),
+            id,
+        )
+        .await
+    }
+
+    // Negatives — each must be a JSON-RPC ERROR (no range, told up-front).
+    let cases: &[(&str, usize)] = &[
+        ("machine name", byte_of(src, "machine M", 8)),
+        ("@id annotation string", byte_of(src, "s-idle-id", 2)),
+        ("keyword `state`", byte_of(src, "state Idle", 1)),
+        ("string interior", byte_of(src, "Idle is a string", 0)),
+        (
+            "comment interior",
+            byte_of(src, "word Idle in a comment", 5),
+        ),
+        ("whitespace", byte_of(src, "machine M", 7)),
+    ];
+    for (label, byte) in cases {
+        let env = prep(&mut service, &uri, &idx, src, *byte, 600).await;
+        assert!(
+            env.get("error").is_some() && env.get("result").is_none(),
+            "prepareRename on {label} MUST be rejected up-front (a \
+             JSON-RPC error, never a range): got {env}"
+        );
+        // The error message is non-empty and explanatory.
+        let msg = env["error"]["message"].as_str().unwrap_or("");
+        assert!(
+            !msg.is_empty(),
+            "{label} rejection must carry a clear message"
+        );
+    }
+
+    // Positive: the `Idle` transition-target use → a Range covering EXACTLY
+    // the bare `Idle` name of `state Idle {`.
+    let pos_byte = byte_of(src, "-> Idle", 3);
+    let env = prep(&mut service, &uri, &idx, src, pos_byte, 610).await;
+    assert!(
+        env.get("error").is_none(),
+        "a real state must be renameable, got error {env}"
+    );
+    let resp: PrepareRenameResponse =
+        serde_json::from_value(env["result"].clone()).expect("decode prepareRename");
+    let range = match resp {
+        PrepareRenameResponse::Range(r) => r,
+        other => panic!("expected a bare Range, got {other:?}"),
+    };
+    let rb = idx.offset(src, range.start, OffsetEncoding::Utf8) as usize;
+    assert_eq!(
+        &src[rb..rb + "Idle".len()],
+        "Idle",
+        "prepareRename range must be the bare `Idle` name token"
+    );
+    // Independent: the decl-name `Idle` is on the `state Idle {` line.
+    let decl_line = src[..byte_of(src, "state Idle", 0)].matches('\n').count() as u32;
+    assert_eq!(
+        range.start.line, decl_line,
+        "the renameable range is on the `state Idle {{` declaration line"
+    );
+}
+
+/// (L5-d) **THE risk-2 core** — the headline safety proof, made
+/// unmissable. A safe `rename` → the `WorkspaceEdit` text-edit set is
+/// EXACTLY the semantic references (byte ranges oracle-matched, count
+/// exact). On a fixture where the target name ALSO appears as a
+/// string-literal substring AND in a comment AND as a different-scope
+/// same-spelled symbol → assert NONE of those three are in the
+/// `WorkspaceEdit`.
+#[tokio::test(flavor = "current_thread")]
+async fn rename_workspace_edit_is_exactly_semantic_refs_risk2_core() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text, uri) = fixture("l5_safety.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(&text, &path);
+    let cst = fsm_parser::parse(&text).syntax();
+    let idx = LineIndex::new(&text);
+    let rindex = ReferenceIndex::build(&analysis.symbol_table, &cst);
+
+    // Oracle: the semantic reference set of Lift.Moving (decl + uses).
+    let lift_moving = byte_of(&text, "state Moving", 6);
+    let oracle_set = oracle_references(
+        &analysis.symbol_table,
+        &rindex,
+        &cst,
+        &uri,
+        lift_moving as u32,
+        true,
+        &idx,
+        &text,
+        OffsetEncoding::Utf8,
+    )
+    .expect("oracle: Lift.Moving refs");
+    let oracle_ranges: std::collections::BTreeSet<(u32, u32, u32, u32)> = oracle_set
+        .iter()
+        .map(|l| {
+            (
+                l.range.start.line,
+                l.range.start.character,
+                l.range.end.line,
+                l.range.end.character,
+            )
+        })
+        .collect();
+
+    // Cursor on a USE of Lift.Moving; rename to `Lifting`.
+    let use_cur = byte_of(&text, "-> Moving", 3);
+    let up = idx.position(&text, use_cur as u32, OffsetEncoding::Utf8);
+    let env = call_envelope(
+        &mut service,
+        "textDocument/rename",
+        rename_params(&uri, up.line, up.character, "Lifting"),
+        700,
+    )
+    .await;
+    assert!(
+        env.get("error").is_none(),
+        "a safe rename must succeed, got error {env}"
+    );
+    let we: WorkspaceEdit =
+        serde_json::from_value(env["result"].clone()).expect("decode WorkspaceEdit");
+    let changes = we.changes.expect("rename produces `changes`");
+    let edits: &Vec<TextEdit> = changes
+        .get(&uri)
+        .expect("edits are for the requested document");
+
+    // 1. The edit set is EXACTLY the semantic reference set (same ranges).
+    let edit_ranges: std::collections::BTreeSet<(u32, u32, u32, u32)> = edits
+        .iter()
+        .map(|e| {
+            (
+                e.range.start.line,
+                e.range.start.character,
+                e.range.end.line,
+                e.range.end.character,
+            )
+        })
+        .collect();
+    assert_eq!(
+        edit_ranges, oracle_ranges,
+        "the WorkspaceEdit ranges MUST be exactly the semantic references"
+    );
+    // Count exact: decl + 2 uses = 3 (NOT the comment/string/Crane ones).
+    assert_eq!(
+        edits.len(),
+        3,
+        "exactly decl + 2 semantic uses = 3 edits, got {edits:#?}"
+    );
+    for e in edits {
+        assert_eq!(e.new_text, "Lifting", "every edit writes the new name");
+    }
+
+    // 2. THE risk-2 proof — NONE of the three forbidden occurrence
+    //    classes is in the WorkspaceEdit: (a) a different-scope
+    //    same-spelled `Moving` (machine Crane), (b) ANY comment, (c) ANY
+    //    string literal. (b)+(c) are derived from the CST so the guard is
+    //    fixture-edit-proof AND stricter than a single substring search.
+    let crane_start = text.find("machine Crane").unwrap();
+    let forbidden = forbidden_trivia_and_string_ranges(&text);
+    for e in edits {
+        let b = idx.offset(&text, e.range.start, OffsetEncoding::Utf8) as usize;
+        assert!(
+            b < crane_start,
+            "SILENT-CORRUPTION GUARD: an edit fell in machine Crane \
+             (a different-scope same-spelled `Moving`): byte {b}"
+        );
+        for &(s, en) in &forbidden {
+            assert!(
+                !(b >= s && b < en),
+                "SILENT-CORRUPTION GUARD: an edit fell inside a comment/\
+                 string/trivia region ([{s},{en})) — this is the exact \
+                 silent-source-corruption risk-2 forbids: byte {b}"
+            );
+        }
+        // And it is the bare identifier, never a wider/narrower slice.
+        assert_eq!(
+            &text[b..b + "Moving".len()],
+            "Moving",
+            "every edit replaces exactly the bare `Moving` identifier"
+        );
+    }
+
+    // 3. Independent reconstruction: applying the edits to the buffer
+    //    leaves Crane untouched and renames only Lift's Moving. Apply
+    //    right-to-left so earlier byte offsets stay valid.
+    let mut buf = text.clone();
+    let mut byte_edits: Vec<(usize, usize)> = edits
+        .iter()
+        .map(|e| {
+            let s = idx.offset(&text, e.range.start, OffsetEncoding::Utf8) as usize;
+            let en = idx.offset(&text, e.range.end, OffsetEncoding::Utf8) as usize;
+            (s, en)
+        })
+        .collect();
+    byte_edits.sort_by(|a, b| b.0.cmp(&a.0));
+    for (s, en) in byte_edits {
+        buf.replace_range(s..en, "Lifting");
+    }
+    // Crane's `state Moving` / `initial Moving` / `-> Moving` survive.
+    let crane_text = &buf[buf.find("machine Crane").unwrap()..];
+    assert!(
+        crane_text.contains("state Moving") && crane_text.contains("initial Moving"),
+        "machine Crane's `Moving` MUST be untouched by Lift's rename"
+    );
+    // The comment + string still literally say "Moving" (byte-preserved):
+    // these substrings appear ONLY in the comment / string in the fixture,
+    // so finding them intact proves the rename did not touch trivia.
+    assert!(
+        buf.contains("mentions Moving by name"),
+        "the comment text MUST be byte-preserved"
+    );
+    assert!(
+        buf.contains("\"Moving to next floor\""),
+        "the string literal MUST be byte-preserved"
+    );
+    // The edited buffer still parses clean (the rename did not corrupt it).
+    let re = analyze(&buf, &path);
+    assert!(
+        re.diagnostics.is_empty(),
+        "the renamed buffer must still be clean, got {:?}",
+        re.diagnostics
+    );
+}
+
+/// (L5-e) A rename whose new name **collides** with an existing symbol in
+/// scope → rejected with a clear message and NO edit (Doc 26 risk-2: a
+/// silent merge/shadow is the same class of corruption as a wrong edit).
+#[tokio::test(flavor = "current_thread")]
+async fn rename_collision_is_rejected_with_no_edit() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text, uri) = fixture("l5_basic.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    let idx = LineIndex::new(&text);
+    // Rename `Moving` → `Idle` — `Idle` is an existing state in the SAME
+    // machine, so this would silently merge two states. Must be refused.
+    let use_cur = byte_of(&text, "-> Moving", 3);
+    let up = idx.position(&text, use_cur as u32, OffsetEncoding::Utf8);
+    let env = call_envelope(
+        &mut service,
+        "textDocument/rename",
+        rename_params(&uri, up.line, up.character, "Idle"),
+        710,
+    )
+    .await;
+    assert!(
+        env.get("error").is_some() && env.get("result").is_none(),
+        "a colliding rename MUST be rejected (error, NO WorkspaceEdit): {env}"
+    );
+    let msg = env["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        msg.contains("already exists"),
+        "the collision message must explain the conflict, got {msg:?}"
+    );
+
+    // An invalid identifier is likewise rejected with no edit.
+    let env2 = call_envelope(
+        &mut service,
+        "textDocument/rename",
+        rename_params(&uri, up.line, up.character, "9bad name"),
+        711,
+    )
+    .await;
+    assert!(
+        env2.get("error").is_some() && env2.get("result").is_none(),
+        "an invalid new identifier MUST be rejected with no edit: {env2}"
+    );
+}
+
+/// (L5-f) **Non-ASCII, BOTH encodings.** All reference & rename edit
+/// ranges are correct under `positionEncoding` UTF-8 AND UTF-16 — a
+/// byte/scalar shim must fail this. Multibyte text is ONLY in a
+/// lexer-valid block comment (`/* 🚀 ы переход к Target */`); the renamed
+/// state `Target` is referenced on the SAME line after that comment and
+/// on a later line, so the intra-line column math is exercised under both
+/// encodings.
+#[tokio::test(flavor = "current_thread")]
+async fn references_and_rename_non_ascii_both_encodings() {
+    for enc_kind in [PositionEncodingKind::UTF8, PositionEncodingKind::UTF16] {
+        let (mut service, _socket) = LspService::new(Backend::new);
+        do_initialize(&mut service, std::slice::from_ref(&enc_kind)).await;
+        let enc = OffsetEncoding::from_lsp(&enc_kind);
+
+        let (text, uri) = fixture("l5_non_ascii.fsm");
+        let did_open = Request::build("textDocument/didOpen")
+            .params(did_open_params(&uri, &text))
+            .finish();
+        service.ready().await.unwrap().call(did_open).await.unwrap();
+
+        let path = uri.to_file_path().unwrap();
+        let analysis = analyze(&text, &path);
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "[{enc_kind:?}] l5_non_ascii.fsm must be clean, got {:?}",
+            analysis.diagnostics
+        );
+        let cst = fsm_parser::parse(&text).syntax();
+        let idx = LineIndex::new(&text);
+        let rindex = ReferenceIndex::build(&analysis.symbol_table, &cst);
+
+        // Cursor on the `Target` use in `…переход к Target */ on GO ->
+        // Target` (the post-comment, post-arrow target on the multibyte
+        // line) — its column DIFFERS between UTF-8 (bytes) and UTF-16
+        // (code units) because of 🚀+Cyrillic earlier on the line.
+        let use_cur = byte_of(&text, "-> Target", 3);
+        let cur_pos = idx.position(&text, use_cur as u32, enc);
+
+        // Oracle references in THIS encoding.
+        let want = oracle_references(
+            &analysis.symbol_table,
+            &rindex,
+            &cst,
+            &uri,
+            use_cur as u32,
+            true,
+            &idx,
+            &text,
+            enc,
+        )
+        .expect("[oracle] Target refs");
+
+        let r = call_request(
+            &mut service,
+            "textDocument/references",
+            refs_params(&uri, cur_pos.line, cur_pos.character, true),
+            800,
+        )
+        .await;
+        let got = decode_locations(&r).expect("server: Target refs");
+        assert_eq!(
+            got, want,
+            "[{enc_kind:?}] references must byte-match the oracle in this encoding"
+        );
+        // decl + 2 uses (`Start.-> Target`, `Target.-> Target`) = 3.
+        assert_eq!(got.len(), 3, "[{enc_kind:?}] decl + 2 uses, got {got:#?}");
+
+        // Every range round-trips back to the bare `Target` token via the
+        // SAME encoding's inverse — a wrong intra-line transcoding fails
+        // this on the multibyte line.
+        for l in &got {
+            let b = idx.offset(&text, l.range.start, enc) as usize;
+            assert_eq!(
+                &text[b..b + "Target".len()],
+                "Target",
+                "[{enc_kind:?}] every reference range is the bare `Target`"
+            );
+        }
+
+        // Rename in this encoding → edits must also round-trip correctly.
+        let env = call_envelope(
+            &mut service,
+            "textDocument/rename",
+            rename_params(&uri, cur_pos.line, cur_pos.character, "Goal"),
+            801,
+        )
+        .await;
+        assert!(
+            env.get("error").is_none(),
+            "[{enc_kind:?}] safe rename must succeed, got {env}"
+        );
+        let we: WorkspaceEdit =
+            serde_json::from_value(env["result"].clone()).expect("decode WorkspaceEdit");
+        let edits = &we.changes.unwrap()[&uri];
+        assert_eq!(
+            edits.len(),
+            3,
+            "[{enc_kind:?}] rename edits = decl + 2 uses = 3, got {edits:#?}"
+        );
+        // Apply right-to-left; the result must parse clean AND the
+        // multibyte comment must be byte-preserved (the rename only
+        // touched `Target` identifiers, never the 🚀/Cyrillic trivia).
+        let mut buf = text.clone();
+        let mut be: Vec<(usize, usize)> = edits
+            .iter()
+            .map(|e| {
+                (
+                    idx.offset(&text, e.range.start, enc) as usize,
+                    idx.offset(&text, e.range.end, enc) as usize,
+                )
+            })
+            .collect();
+        be.sort_by(|a, b| b.0.cmp(&a.0));
+        for (s, en) in be {
+            assert_eq!(
+                &text[s..en],
+                "Target",
+                "[{enc_kind:?}] each edit range is exactly `Target`"
+            );
+            buf.replace_range(s..en, "Goal");
+        }
+        assert!(
+            buf.contains("🚀 ы переход к Target */"),
+            "[{enc_kind:?}] the multibyte comment MUST be byte-preserved \
+             (the rename must not touch `Target` inside the comment)"
+        );
+        let re = analyze(&buf, &path);
+        assert!(
+            re.diagnostics.is_empty(),
+            "[{enc_kind:?}] renamed buffer must still be clean, got {:?}",
+            re.diagnostics
+        );
+    }
+}
+
+/// (L5-g) `references`/`prepareRename` on a non-resolvable cursor return
+/// the spec-correct empty/error answer — never a panic, never a textual
+/// guess (the single-file graceful-degradation contract, Doc 14 §8).
+#[tokio::test(flavor = "current_thread")]
+async fn references_none_and_prepare_error_on_non_symbol() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text, uri) = fixture("l5_basic.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+    let idx = LineIndex::new(&text);
+
+    // Cursor on the `state` keyword → references is `null`.
+    let kw = byte_of(&text, "state Moving", 1);
+    let kp = idx.position(&text, kw as u32, OffsetEncoding::Utf8);
+    let r = call_request(
+        &mut service,
+        "textDocument/references",
+        refs_params(&uri, kp.line, kp.character, true),
+        900,
+    )
+    .await;
+    assert!(
+        r.is_null(),
+        "references on a keyword must be null (no textual guess), got {r}"
+    );
+
+    // The oracle agrees (the SAME prepare logic): a keyword is not
+    // renameable.
+    let cst = fsm_parser::parse(&text).syntax();
+    let analysis = analyze(&text, &uri.to_file_path().unwrap());
+    assert!(
+        oracle_prepare(&analysis.symbol_table, &cst, kw as u32).is_err(),
+        "oracle: a keyword cursor is not renameable"
+    );
+}

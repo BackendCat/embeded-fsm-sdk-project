@@ -19,11 +19,24 @@
 //! analyzer's own name-resolution dispatch so a goto/hover/completion can
 //! never disagree with a diagnostic (Doc 26 §3/§4.1/§5).
 //!
-//! The remaining L5+ handlers (references, rename, semanticTokens,
-//! codeAction, inlayHint — Doc 26 §5/§8) are out of L4 scope (Doc 26 §8 L4
-//! scope boundary) and are deliberately NOT stubbed: an empty handler that
-//! silently returns nothing is worse than an unadvertised capability (the
-//! client would think the feature works).
+//! L5 adds [`references`] (`textDocument/references`, Doc 14 §7) and
+//! [`rename`] (`textDocument/prepareRename` + `textDocument/rename`, Doc
+//! 14 §8), both pure projections of the L5 [`crate::refs::ReferenceIndex`]
+//! — the ONE genuinely-new analysis, itself *derived* from the single
+//! `analyze()` (no second pass) and **semantic-only** (every reference is
+//! proven by the SAME L3 [`resolve`] classifier + `SymbolTable::resolve_*`,
+//! never a text match). They reuse the [`resolve`] seam, not a parallel
+//! resolver; their ranges go through L1's `LineIndex` (no second position
+//! converter). `rename` is conservative-by-construction per Doc 26 risk-2:
+//! a same-spelled string/comment/different-scope token can never be in the
+//! `WorkspaceEdit` because it never entered the index.
+//!
+//! The remaining L6+ handlers (semanticTokens, codeAction, inlayHint —
+//! Doc 26 §5/§8) are out of L5 scope (Doc 26 §8 L5 scope boundary) and are
+//! deliberately NOT stubbed: an empty handler that silently returns
+//! nothing is worse than an unadvertised capability (the client would
+//! think the feature works) — the `workspaceSymbol`-left-unadvertised
+//! precedent (Doc 00 §11.33(5)).
 
 pub mod complete;
 pub mod definition;
@@ -31,4 +44,6 @@ pub mod diagnostics;
 pub mod document_symbol;
 pub mod folding;
 pub mod hover;
+pub mod references;
+pub mod rename;
 pub mod resolve;

@@ -1,0 +1,40 @@
+language fsm 2.0
+
+machine Lift {
+    context {
+        // A string literal whose text contains the word Moving as a
+        // substring — it must NEVER be touched by a rename of the state.
+        label: str = "Moving to next floor"
+    }
+
+    events {
+        CALL(dest: u16)
+        STOP
+    }
+
+    initial Idle
+
+    state Idle {
+        // A comment that mentions Moving by name — also must NEVER be
+        // touched by a rename of the state.
+        on CALL -> Moving
+    }
+
+    state Moving {
+        on STOP -> Idle
+        on CALL -> Moving
+    }
+}
+
+machine Crane {
+    events {
+        CALL(dest: u16)
+        STOP
+    }
+
+    initial Moving
+
+    state Moving {
+        on STOP -> Moving
+    }
+}
