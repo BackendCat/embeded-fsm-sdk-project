@@ -1,0 +1,231 @@
+# Subagent Conventions
+
+**Audience:** TL/PM (the orchestrator) writing wave briefs + the subagents executing them.
+
+**Status:** Normative. Every wave brief MUST conform.
+
+**Document ID:** FSM-PROC-SUBAGENT
+**Version:** 1.0.0
+
+This document codifies how implementation work gets done by background agents on FSM Studio. It exists because: a project of this size, run autonomously, can only stay coherent if every wave follows the same shape, leaves the same evidence, and respects the same boundaries. Deviations from these rules cause regressions, lost work, and audit findings that should have been prevented.
+
+---
+
+## 1. Wave brief template
+
+Every brief must have these sections, in this order:
+
+1. **Role framing** — one sentence: "You are a senior X engineer fixing Y." Sets the quality bar.
+2. **Repo root** — absolute path. Always `/root/dev/embeded-fsm-sdk`.
+3. **Git setup** — exact commands to run first. Worktree or no-worktree decision per §3.
+4. **Disk budget** — current `df -h /` free space at dispatch time + the rule "dev builds only, no `--release` unless required".
+5. **Read first** — strict list of input docs by path + §section. NEVER "read the whole repo".
+6. **Scope** — what the wave fixes/implements, with finding IDs (e.g., `Per docs/AUDIT_…md §P0-X`).
+7. **The fix** — concrete steps, file-level, with line-number cites where stable.
+8. **Tests** — specific test files to create or update. Behavioral assertions, never just symbol-presence. Tests must FAIL on old behavior + PASS on new.
+9. **Verification quad** — `cargo build/test/clippy/fmt --workspace`, all green; manual smoke if user-visible.
+10. **Scope boundary** — explicit "DO NOT touch X, Y, Z" list. Names crates + paths another wave owns.
+11. **Commit message** — full proposed message inside a triple-backtick block. Agent may polish but structure must match.
+12. **Completion report** — bullet list of what the agent must report back: branch, LOC delta, test count delta, judgment calls, verify-quad confirmation.
+
+A brief missing any of these is incomplete and risks scope creep.
+
+---
+
+## 2. Commit message format
+
+```
+Imperative subject ≤72 chars summarizing the WHAT
+
+Body explains the WHY: what the bug or gap was, why the chosen approach,
+any alternative considered. Wrap at 80 columns. Multiple paragraphs OK.
+
+Per docs/<audit-or-spec>.md §<section> citing the finding ID.
+
+Verified: cargo build/test/clippy/fmt all green workspace-wide.
+```
+
+- Subject in imperative mood ("Fix P0-1", "Implement fsm-lexer", "Refactor LoweringCtx")
+- Subject ≤72 chars; no trailing period
+- Blank line between subject and body
+- Body addresses WHY (the WHAT lives in the code; the WHY decays from PR descriptions)
+- Cite finding ID(s) when fixing audit items
+- Footer "Verified:" line is the agent's attestation that the verification quad passed
+
+No Co-Authored-By trailers unless explicitly briefed.
+
+---
+
+## 3. Worktree isolation rules
+
+**Default: each writer wave gets its own worktree.**
+
+```bash
+cd /root/dev/embeded-fsm-sdk
+git worktree add /root/dev/embeded-fsm-sdk-wt-<NAME> phase<N>/<DESCRIPTOR>
+cd /root/dev/embeded-fsm-sdk-wt-<NAME>
+# do work
+git commit
+# orchestrator merges + removes worktree
+```
+
+Exception — work on main checkout directly via a branch is acceptable when:
+- Only one writer is active in the workspace
+- The wave is small (single-crate, ~200 LOC change)
+- The wave is mostly doc edits (markdown only)
+
+The orchestrator pays for clean isolation. Never two writers in the same checkout.
+
+**Naming convention:** `phase<N>.<sub>/<descriptor>`. Examples: `phase1.10/p0-1-lowering`, `phase3/doc-reconciliation`, `phaseR2/ir-visitor-adoption`. Branch name + worktree dir name share the descriptor.
+
+---
+
+## 4. Verification quad (non-negotiable)
+
+Before any commit, the wave must run:
+
+```bash
+cargo build --workspace                       # → exit 0
+cargo test --workspace                        # → all green
+cargo clippy --workspace --all-targets -- -D warnings   # → exit 0
+cargo fmt --check --all                       # → exit 0
+```
+
+If any fails, the wave does NOT commit; it fixes the issue first. If it cannot fix, it reports the failure in the completion report (the orchestrator decides whether to extend scope or abort).
+
+`--release` is forbidden unless a specific test requires it. Dev builds only by default.
+
+For waves touching codegen, an additional manual smoke is recommended when feasible:
+
+```bash
+cargo run -p fsm-cli -- generate --target c99 examples/motor/motor.fsm --out /tmp/smoke
+gcc -std=c99 -Wall -Wextra -Wpedantic -Werror -c /tmp/smoke/*.c
+```
+
+---
+
+## 5. Test discipline
+
+### 5.1 Regression coverage rule
+
+Every fix wave must add at least one test that:
+- **FAILS** on `main` before the fix
+- **PASSES** after the fix
+
+This is the proof of correctness. Without it, the fix is unverified.
+
+Example: P0-1 added `motor_emits_guards_and_actions.rs` asserting `can_start`, `set_speed(100)`, etc. appear in generated Motor.c. The test was authored against the FIXED behavior; without the fix it produced "set_speed not found in 0-byte buffer" failures.
+
+### 5.2 Forbidden test patterns
+
+- **Symbol-presence-only assertions** — `text.contains("Motor_init")` proves the function name appears, NOT that it does anything correctly. Use behavioral assertions: compile the generated code with gcc -Werror and execute it.
+- **Empty `expected` blocks in trace files** — `expected: []` lets any simulator output pass. Always populate expected, even if hand-authoring is tedious.
+- **Tests with `#[ignore]` but no comment explaining why** — either fix it or document the deferred work.
+- **Sleeps for synchronization** — never. This is a compile-time tool; no real-time dependencies.
+- **`unwrap()` in test setup that hides errors** — the test is meaningful only if setup succeeds; let it panic with a clear context.
+
+### 5.3 Test naming
+
+Test function names should answer "what scenario does this prove":
+- ✅ `motor_emits_guards_and_actions`
+- ✅ `parallel_completion_does_not_fire_when_one_region_unfinished`
+- ✅ `defer_event_rejected_at_analysis_with_e0903`
+- ❌ `test_motor` / `it_works` / `basic_test`
+
+---
+
+## 6. Scope boundary discipline
+
+Every brief includes an explicit "DO NOT touch X" section. Reasons:
+- Parallel waves working on other crates
+- Files owned by deferred work (e.g., DO NOT modify `docs/AUDIT_*.md` — frozen history)
+- Workspace-level files (Cargo.toml, rust-toolchain.toml) require dedicated waves
+- Anything not in the wave's stated scope
+
+Agents respect this. If they discover they NEED to touch an out-of-scope file, they report in the completion notes and the orchestrator extends scope explicitly — they do NOT silently expand.
+
+---
+
+## 7. Disk hygiene
+
+Per the [Disk 5% margin] rule:
+- Agents check `df -h /` before starting
+- If disk < 1G free, agents `cargo clean` their own worktree (NEVER another agent's)
+- After commit, agents leave the worktree in place (orchestrator cleans on merge)
+- Never `cargo build --release` to save target space
+
+The orchestrator:
+- Runs `cargo clean` on main before dispatching parallel waves
+- Removes merged worktrees immediately
+- Monitors disk between waves; defers parallelism if margin < 8% (gives waves room to build)
+
+---
+
+## 8. Judgment call disclosure
+
+Every completion report includes a "Judgment calls" section listing every non-obvious decision the agent made. Format:
+
+> 1. **Subject** — what the choice was, what the alternatives were, why this one.
+> 2. **Subject** — ...
+
+These accumulate in `docs/00-Decisions-And-Reconciliation.md §11` (the implementation-time decisions table) so future maintainers can find them.
+
+---
+
+## 9. Brief size + agent context
+
+- Briefs typically run 300-800 words. Longer is fine for major waves (codegen).
+- Don't dump full spec docs into the brief — name the section to read and let the agent navigate (saves context for actual work).
+- Don't add "general best practices" lists — they live HERE in conventions.
+- Each input doc cited gets its expected purpose ("§X — the grammar your output must re-parse against").
+
+The agent's context window is precious. Briefs maximize useful information density.
+
+---
+
+## 10. Anti-patterns (do not do)
+
+| Anti-pattern | Why it hurts | What to do instead |
+|---|---|---|
+| Skipping the verification quad on a "small" change | Quality regressions accumulate silently | Always run the quad |
+| Two writer agents in the same checkout | Index races, lost work | Worktrees |
+| Updating audit docs to "fix" findings | Audits are evidence; rewriting hides reality | Fix the code; reference the audit ID in commit |
+| `git push` without explicit user approval | User controls remote | Local tags + branches only |
+| `unwrap()` in user-input code paths | Process aborts; bad UX | Result-propagated errors with miette rendering |
+| Commenting out tests to make CI green | Hides the regression | Fix the test or the code; never disable |
+| "Refactor" waves that change behavior | Hidden semantic shifts | Behavioral tests prove pre/post identity |
+| Auto-accepting insta snapshots without review | Locks in wrong output | Read each .snap.new; accept only verified-correct |
+| Editing fsm.toml or Cargo.toml in a scope-creep way | Workspace surface changes need dedicated waves | Defer to a workspace-config wave |
+| Touching another agent's worktree | Cross-contamination + race | NEVER. Each agent owns its own worktree. |
+
+---
+
+## 11. Orchestrator (TL/PM) responsibilities
+
+The orchestrator (the conversation-level Claude that dispatches waves) is responsible for:
+
+- Maintaining the wave queue + dependency ordering
+- Sizing each wave so it fits one agent's context comfortably (split if necessary)
+- Tracking disk margin between dispatches
+- Merging branches sequentially with verification quad on main
+- Removing worktrees post-merge
+- Updating backlog + memory after each merge
+- Running audits on the cadence defined in the plan
+- Updating CHANGELOG.md
+- Surfacing learned lessons as new `feedback_*.md` memory entries
+
+The orchestrator does NOT implement. Implementation is delegated. The orchestrator's value is in coordination, sequencing, and protecting the codebase from incoherent change.
+
+---
+
+## 12. References
+
+- `docs/00-Decisions-And-Reconciliation.md` — normative decisions, including §11 implementation-time decisions table
+- `docs/AUDIT_*_*.md` — audit findings drive wave priorities
+- `~/.claude/projects/-home-backend-cat/memory/project_embeded_fsm_sdk_backlog.md` — wave-by-wave status
+- `~/.claude/projects/-home-backend-cat/memory/MEMORY.md` — cross-project rules apply here too
+- Plan file: `~/.claude/plans/toasty-prancing-goose.md` — current phase + roadmap
+
+---
+
+*End of FSM-PROC-SUBAGENT v1.0.0*
