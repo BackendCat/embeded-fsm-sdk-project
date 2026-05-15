@@ -8,7 +8,7 @@ This roadmap captures the strategic direction of FSM Studio beyond v1.0. It is i
 
 ---
 
-## v1.0 (current — tagging in flight)
+## v1.0 — SHIPPED (tagged `v1.0.0`, 2026-05-15, local)
 
 **Theme: Correct, tested, embedded-ready core.**
 
@@ -34,7 +34,7 @@ See `docs/00-Decisions-And-Reconciliation.md` §11 for the full implementation-t
 
 ---
 
-## v1.1 — Integration ergonomics & UML completion
+## v1.1 — Integration ergonomics & UML completion — ✅ SHIPPED (tagged `v1.1.0`→`9634c7e`, 2026-05-15, local; `checkpoint/2026-05-15` anchor)
 
 **Theme: Make the DSL usable in real customer codebases. Finish UML feature parity.**
 
@@ -44,9 +44,7 @@ Adoption-blocking items first; UML completeness second.
 >
 > ✅ **W7-FU-2 (P1) RESOLVED** (`41b9e46`) — default transition priority reconciled to **100** (corpus-verified: Doc 04 §8.6, Doc 09 §6, the IR field's own doc-comment; the `unwrap_or(0)` impl was the bug). Class-of-issues: 8 materialization sites → one `DEFAULT_TRANSITION_PRIORITY` constant; byte-identity delta proven exactly `0→100` with no structural perturbation; no shipped-example runtime change. Detail: Doc 00 §11.27, CHANGELOG *Fixed*.
 >
-> 🟡 **Pre-tag audit COMPLETE** (3 lenses, frozen evidence `020f009`): Architecture **0 P0** (AD-1/2/3 paydown verified true in source); Correctness **0 P0**, 0 overstated Doc-00 rows (scope-honesty clean); Reliability/Security test-integrity strong (the §5.4 tests are real gcc-RUN, not symbol-presence) — but found **⛔ SEC-P0-1 (P0, the one hard blocker):** the new `--import-header` / `fsm.toml import_headers` file-read path bypasses v1.0's G-02 import hardening (no canonicalize/containment, unbounded read) → arbitrary-file-read + CI DoS. No tag over a P0.
->
-> Remaining to tag: **SEC-P0-1 fix** (reuse the hardened `resolve_import`; converge the divergent path) → doc-honesty pass (REL-P1-1 precise nested-submachine wording + historical-staleness fixes) folded into CHANGELOG `[1.1.0]` → **cold-from-source workspace quad** (§11.1/§11.22 — resolves the audit's live-reproduced stale-`-wt-`-binary hazard; workspace-from-source rebuild keeping content-addressed registry deps, conventional CI-cache practice, fits current disk) → `checkpoint/2026-05-15` + annotated `v1.1.0` (local, no push). Post-tag: G9 — push to exercise the never-run CI matrix (SEC-P0-1's fix touches path-canonicalization, the most Windows-divergent area).
+> ✅ **SHIPPED 2026-05-15.** 3-lens pre-tag audit (frozen `020f009`): Arch **0 P0** (AD-1/2/3 verified true in source); Correctness **0 P0**, 0 overstated Doc-00 rows; Reliability/Security test-integrity strong, found **SEC-P0-1** (the one P0 — `--import-header`/`fsm.toml` G-02 bypass) → fixed `2b3d221` by converging on `resolve_import` (no third variant; +17 security tests). REL-P1-1 was **stale vs current code** (nested-submachine reject had already shipped in P1-2 `02d4ded`); the record was corrected to the shipped `FSM-E0502` reality, not regressed — verify-vs-code applies to audit claims too (Doc 00 §11.29). **§11.22 cold-from-source quad GREEN:** `cargo clean -p` 9 crates (1436 files/6.4 GiB) → full from-source rebuild → 673 pass / 0 fail, **`-wt-` stale-path = 0**, clippy `-D warnings` clean, fmt clean, examples 5/5, conformance 25/25 (disk safe throughout — the conventional workspace-from-source approach fit without provisioning). Canonical record: `docs/GATE_VERIFICATION_v1_1.md`. **Post-tag owner action (only thing needing the user):** push the tag + commits to exercise the never-run CI matrix (G9; SEC-P0-1's path-canonicalization is the most Windows-divergent surface) — `GATE_VERIFICATION_v1_1.md` §5.
 
 ### Integration features
 - **`fsm generate --import-header <path.h>`** — auto-extern from existing C header files. ✅ **COMPLETE 2026-05-15** (W5). Reduces friction for users with substantial existing C codebases who currently must hand-write each `extern` declaration. (OPAQUE-BUG-1, surfaced *by* this wave's honest scoping, then fixed in §11.23 — opaque pointer/struct HAL params now model end-to-end; relaxing W5's importer opaque-skip tracked as W5-FU-1.)
