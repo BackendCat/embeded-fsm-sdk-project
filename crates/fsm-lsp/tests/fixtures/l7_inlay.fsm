@@ -1,0 +1,57 @@
+language fsm 2.0
+
+feature parallel
+feature hsm
+
+machine Engine {
+    events {
+        START
+        TICK
+    }
+
+    initial Idle
+
+    state Idle {
+        on START priority 50 -> Fast
+        after 1500ms -> Slow
+        after 90000ms -> Idle
+    }
+
+    state Fast {
+        on TICK -> Idle
+    }
+
+    state Slow {
+        on TICK -> Idle
+    }
+
+    state Operational {
+        region Work {
+            initial Sub
+
+            state Sub {
+                on TICK -> Sub2
+            }
+
+            state Sub2 {
+                on TICK -> Sub
+            }
+
+            state Sub3 {
+                on TICK -> Sub
+            }
+        }
+
+        region Aux {
+            initial AuxIdle
+
+            state AuxIdle {
+                on TICK -> AuxBusy
+            }
+
+            state AuxBusy {
+                on TICK -> AuxIdle
+            }
+        }
+    }
+}

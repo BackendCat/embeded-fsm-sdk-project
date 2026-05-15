@@ -153,6 +153,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the decoded positions/lengths asserted correct in each. See
   `docs/26-LSP-Architecture.md` §8 L6 and
   `docs/00-Decisions-And-Reconciliation.md` §11.37.
+- **`fsm-lsp` — `codeAction` + `inlayHint`** (v1.2-LSP-L7, single-file —
+  the **final** LSP capability of the v1.2 epic): Doc 14 §9
+  `textDocument/codeAction` and Doc 14 §11 `textDocument/inlayHint`
+  advertised in `initialize` (`codeActionProvider.codeActionKinds =
+  ["quickfix","refactor"]`, `inlayHintProvider`). `codeAction` is
+  **edit-producing**, so it inherits L5's risk-2 silent-corruption
+  discipline: a `quickfix` is offered **only** when the fix is provably
+  mechanical — **FSM-E0107** (insert `initial <FirstState>` after the
+  machine's `{`, the first state taken from the same parse the diagnostic
+  came from) and **FSM-E0022** (delete the duplicate event declaration,
+  whose span the analyzer already pins exactly; **withheld** if the
+  duplicate carries its own `@id` annotation, where the deletion would
+  stop being mechanical). The other five Doc 14 §9 codes
+  (`FSM-E0100`/`E0106`/`W0200`/`W0500`/`E0300`) **and both
+  `refactor.extract` actions** are deliberately **scoped out and flagged**
+  (Doc 00 §11.38): `W0200`/`W0500` are never emitted by the toolchain at
+  all, and `E0100`/`E0106`/`E0300`/extract cannot be produced without a
+  heuristic or a forbidden parallel re-analysis — a missing quick-fix is a
+  minor UX gap, a wrong edit is the cardinal sin. The edit is matched on
+  the server-authoritative diagnostic code (not the client-supplied
+  context), tied back to the diagnostic it resolves, and every range goes
+  through the one `LineIndex` (no string munging). `inlayHint` is
+  **read-only display** sourced from the lowered `Ir` of the **same**
+  single `fsm check` analysis — the three Doc 26 §5 families
+  (non-default transition priority `// priority: 50`, human timer
+  durations `// 1.5 s` / `// 1 min 30 s`, composite/parallel substate
+  count `// 5 substates`), each gated by its Doc 22 §8 toggle plus the
+  master `enableInlayHints`, read from `initialize`
+  `initializationOptions` and live `workspace/didChangeConfiguration`
+  (only the behaviour-gating inlay keys are consumed; every other
+  `fsmLang.*` key is stub-accepted, never a panic). Doc 14 §11's
+  extern-parameter-name row is scoped out (no Doc 22 §8 toggle, not in Doc
+  26 §5's IR-sourced set) and flagged. Still one analysis, one position
+  converter — reused, not duplicated; L1–L6
+  diagnostics/symbols/folding/hover/goto/completion/references/rename/
+  semantic-tokens proven byte-unchanged (785 workspace tests, the `fsm`
+  examples 5/5 and conformance 25/25 suites green). Proven by in-process
+  `tower-lsp` client tests applying L5's apply-and-verify rigor to the
+  edit-producer — the headline test requests the FSM-E0107 quick-fix,
+  asserts the `WorkspaceEdit` byte-equals the reused-pipeline oracle,
+  **applies it**, and asserts the diagnostic is resolved, no new
+  diagnostic appears, every other byte is unchanged, and the buffer still
+  parses; plus a no-bogus-action negative (a scoped-out diagnostic yields
+  no action), an inlayHint oracle with hard-coded Doc 14 §11 family
+  cross-checks and a `didChangeConfiguration` toggle round-trip, and a
+  non-ASCII fixture under **both** UTF-8 and UTF-16 with the codeAction
+  edit range and the inlayHint positions asserted correct in each. After
+  this wave the v1.2 LSP capability set is **feature-complete**. See
+  `docs/26-LSP-Architecture.md` §8 L7 and
+  `docs/00-Decisions-And-Reconciliation.md` §11.38.
 
 ### Changed
 

@@ -3425,3 +3425,647 @@ async fn semantic_tokens_full_on_unopened_doc_is_null() {
         "semanticTokens on a not-open doc must be null, got {result}"
     );
 }
+
+// ===========================================================================
+// L7 — codeAction + inlayHint (Doc 26 §8 L7 / Doc 14 §9/§11). THE FINAL
+// wave of the LSP epic.
+//
+// `codeAction` is **edit-producing**, so its tests follow L5's risk-2
+// apply-and-verify rigor: request the action, assert the returned
+// `WorkspaceEdit` is EXACTLY the expected mechanical edit (oracle byte
+// ranges), then **apply it and assert the diagnostic is resolved AND
+// nothing else changed** (the buffer still parses, no other text touched).
+// A diagnostic with NO safe mechanical fix offers NO action (the no-bogus
+// negative). `inlayHint` is read-only: the served hint set (position +
+// label + kind) is asserted == the analysis oracle, with hard-coded
+// cross-checks. The non-ASCII fixtures run under BOTH `positionEncoding`s —
+// a byte/scalar shim makes a codeAction edit range OR an inlayHint position
+// wrong → the test fails (the §4.1 defect guard, at the L7 layer).
+// Symbol/route-presence is NOT acceptance — the asserted bytes are.
+// ===========================================================================
+
+use tower_lsp::lsp_types::{
+    CodeActionOrCommand, CodeActionResponse, InlayHint, InlayHintLabel, NumberOrString,
+};
+
+use fsm_lsp::capabilities::code_action::code_actions as oracle_code_actions;
+use fsm_lsp::capabilities::inlay_hints::inlay_hints as oracle_inlay_hints;
+use fsm_lsp::config::InlayHintConfig;
+
+fn code_action_params(uri: &Url, range: Range) -> Value {
+    json!({
+        "textDocument": { "uri": uri },
+        "range": range,
+        "context": { "diagnostics": [] }
+    })
+}
+
+fn inlay_params(uri: &Url, range: Range) -> Value {
+    json!({ "textDocument": { "uri": uri }, "range": range })
+}
+
+/// Full-buffer range in `enc` — the conservative "give me everything"
+/// invocation/viewport (a real client passes the selection/viewport; the
+/// handlers filter, so the full range exercises the whole result).
+fn whole_range(li: &LineIndex, text: &str, enc: OffsetEncoding) -> Range {
+    li.range(text, fsm_diagnostics::Span::new(0, text.len()), enc)
+}
+
+fn label_of(h: &InlayHint) -> String {
+    match &h.label {
+        InlayHintLabel::String(s) => s.clone(),
+        InlayHintLabel::LabelParts(_) => panic!("L7 emits only String labels"),
+    }
+}
+
+fn decode_code_actions(result: &Value) -> CodeActionResponse {
+    serde_json::from_value(result.clone()).expect("decode codeAction response")
+}
+
+fn decode_inlays(result: &Value) -> Vec<InlayHint> {
+    serde_json::from_value(result.clone()).expect("decode inlayHint response")
+}
+
+/// (L7-a) THE codeAction apply-and-verify (the risk-2 rigor for an
+/// edit-producer). A file with **FSM-E0107** (no `initial`): request
+/// `codeAction` over the diagnostic's range → assert the returned
+/// `WorkspaceEdit` is **exactly** the oracle mechanical edit (byte
+/// ranges), then **apply it** and assert (1) FSM-E0107 is resolved, (2)
+/// NO new diagnostic was introduced, (3) it was a pure insertion that
+/// touched no other byte (the buffer outside the inserted text is
+/// byte-identical), (4) the edited buffer still parses. Symbol-presence is
+/// NOT acceptance — the applied-edit outcome is.
+#[tokio::test(flavor = "current_thread")]
+async fn code_action_e0107_workspace_edit_applies_and_resolves_nothing_else_changed() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    // `broken.fsm` is the established L1 oracle fixture whose ONLY error
+    // is FSM-E0107 (no initial) — reused so the §5.4 corpus stays tight.
+    let (text, uri) = fixture("broken.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(&text, &path);
+    assert!(
+        analysis
+            .diagnostics
+            .iter()
+            .any(|d| d.code == fsm_diagnostics::DiagnosticCode::E0107),
+        "fixture invariant: broken.fsm has FSM-E0107"
+    );
+    let cst = fsm_parser::parse(&text).syntax();
+    let li = LineIndex::new(&text);
+
+    // Oracle: the SAME `code_actions` the server runs, off the SAME
+    // analysis (so equality proves the server wired the pipeline AND the
+    // position math correctly; the both-encoding test pins the math
+    // independently).
+    let want_actions: CodeActionResponse = oracle_code_actions(
+        &analysis.diagnostics,
+        &cst,
+        &uri,
+        whole_range(&li, &text, OffsetEncoding::Utf8),
+        &li,
+        &text,
+        OffsetEncoding::Utf8,
+    )
+    .expect("oracle: E0107 yields a quick-fix");
+
+    let result = call_request(
+        &mut service,
+        "textDocument/codeAction",
+        code_action_params(&uri, whole_range(&li, &text, OffsetEncoding::Utf8)),
+        800,
+    )
+    .await;
+    let got = decode_code_actions(&result);
+
+    // The served action set is EXACTLY the oracle (count + content).
+    assert_eq!(
+        got.len(),
+        1,
+        "exactly one provably-mechanical quick-fix for E0107, got {got:#?}"
+    );
+    assert_eq!(
+        serde_json::to_value(&got).unwrap(),
+        serde_json::to_value(&want_actions).unwrap(),
+        "served codeAction MUST byte-equal the reused-pipeline oracle"
+    );
+
+    let CodeActionOrCommand::CodeAction(action) = &got[0] else {
+        panic!("expected a CodeAction, not a Command");
+    };
+    assert_eq!(
+        action.kind,
+        Some(tower_lsp::lsp_types::CodeActionKind::QUICKFIX),
+        "the only produced kind is quickfix"
+    );
+    // It is tied to the exact diagnostic it resolves (the LSP contract).
+    let tied = action
+        .diagnostics
+        .as_ref()
+        .expect("a quick-fix names its diagnostic");
+    assert_eq!(tied.len(), 1);
+    assert_eq!(
+        tied[0].code,
+        Some(NumberOrString::String("FSM-E0107".to_owned())),
+        "the action is tied to FSM-E0107"
+    );
+
+    let we = action
+        .edit
+        .as_ref()
+        .expect("quick-fix carries a WorkspaceEdit");
+    let edits = &we.changes.as_ref().unwrap()[&uri];
+    assert_eq!(edits.len(), 1, "E0107 fix is a single edit");
+    let e = &edits[0];
+
+    // Oracle byte ranges: it MUST be a pure insertion (zero-width range).
+    let s = li.offset(&text, e.range.start, OffsetEncoding::Utf8) as usize;
+    let en = li.offset(&text, e.range.end, OffsetEncoding::Utf8) as usize;
+    assert_eq!(
+        s, en,
+        "E0107 fix MUST be a pure insertion (zero-width range), got [{s},{en})"
+    );
+    // The inserted text is `\n    initial <FirstState>`; the first state
+    // in broken.fsm is the one the analyzer counts — assert it resolves
+    // rather than hard-coding a name (the fix derives it from the parse).
+    assert!(
+        e.new_text.starts_with("\n    initial "),
+        "inserted text is an `initial` declaration, got {:?}",
+        e.new_text
+    );
+
+    // APPLY the edit and verify the outcome (the edit-producer mandate).
+    let mut buf = text.clone();
+    buf.insert_str(s, &e.new_text);
+
+    // (3) Nothing else changed: the buffer outside the insertion is
+    // byte-identical (a pure insertion splices, never rewrites).
+    assert_eq!(
+        &buf[..s],
+        &text[..s],
+        "bytes before the insertion unchanged"
+    );
+    assert_eq!(
+        &buf[s + e.new_text.len()..],
+        &text[s..],
+        "bytes after the insertion unchanged (pure splice, no other edit)"
+    );
+
+    // (1)+(2)+(4): re-analyse the applied buffer.
+    let re = analyze(&buf, &path);
+    assert!(
+        !re.diagnostics
+            .iter()
+            .any(|d| d.code == fsm_diagnostics::DiagnosticCode::E0107),
+        "FSM-E0107 MUST be resolved by the applied fix, got {:?}",
+        re.diagnostics.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+    assert!(
+        re.diagnostics.is_empty(),
+        "the fix MUST NOT introduce any new diagnostic, got {:?}",
+        re.diagnostics
+    );
+    // The edited buffer still parses to a real machine (not an ERROR
+    // tree) — proven by it being analysable + clean above; assert the
+    // inserted decl is actually present and well-formed.
+    assert!(
+        buf.contains("\n    initial "),
+        "the applied buffer contains the inserted initial decl"
+    );
+}
+
+/// (L7-b) The no-bogus-action negative. A file whose ONLY error is a
+/// **scoped-out** diagnostic (FSM-E0100, unknown state — its fix is NOT
+/// provably mechanical, so it is deliberately not offered) → `codeAction`
+/// returns NO action (never a speculative/possibly-corrupting one). This
+/// is the edit-producer analogue of L5's "a non-renameable cursor offers
+/// no rename".
+#[tokio::test(flavor = "current_thread")]
+async fn code_action_no_action_for_scoped_out_diagnostic() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    // Clean except for one FSM-E0100 (transition to an undeclared state).
+    let src = "language fsm 2.0\n\
+               machine M {\n\
+               \x20\x20events { GO }\n\
+               \x20\x20initial Idle\n\
+               \x20\x20state Idle {\n\
+               \x20\x20\x20\x20on GO -> Nowhere\n\
+               \x20\x20}\n\
+               }\n";
+    let uri = Url::from_file_path("/tmp/l7_no_fix.fsm").unwrap();
+    service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(did_open_params(&uri, src))
+                .finish(),
+        )
+        .await
+        .unwrap();
+
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(src, &path);
+    assert!(
+        analysis
+            .diagnostics
+            .iter()
+            .any(|d| d.code == fsm_diagnostics::DiagnosticCode::E0100),
+        "fixture invariant: the scoped-out FSM-E0100 is present"
+    );
+    let li = LineIndex::new(src);
+
+    let result = call_request(
+        &mut service,
+        "textDocument/codeAction",
+        code_action_params(&uri, whole_range(&li, src, OffsetEncoding::Utf8)),
+        810,
+    )
+    .await;
+    // tower-lsp serialises `Ok(None)` as JSON `null` — the spec-correct
+    // "no actions", NEVER a bogus action for a fix we cannot prove safe.
+    assert!(
+        result.is_null() || decode_code_actions(&result).is_empty(),
+        "a scoped-out diagnostic MUST offer NO code action, got {result}"
+    );
+}
+
+/// (L7-c) The inlayHint oracle. Request hints over the clean
+/// `l7_inlay.fsm` → assert the served hint set (position + label + kind)
+/// equals the analysis oracle (the SAME `inlay_hints` the server runs,
+/// off the SAME analysis), with hard-coded cross-checks on the three Doc
+/// 14 §11 families: the explicit `priority 50` (`// priority: 50`), the
+/// 1500ms timer (`// 1.5 s`), the 90000ms timer (`// 1 min 30 s`).
+/// `showStateTypes` is off by default (Doc 22 §8) so no substate hint;
+/// then flip it via `didChangeConfiguration` and assert `// 5 substates`
+/// appears (the toggle round-trip).
+#[tokio::test(flavor = "current_thread")]
+async fn inlay_hints_oracle_set_and_doc14_s11_families_and_toggle() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+
+    let (text, uri) = fixture("l7_inlay.fsm");
+    let did_open = Request::build("textDocument/didOpen")
+        .params(did_open_params(&uri, &text))
+        .finish();
+    service.ready().await.unwrap().call(did_open).await.unwrap();
+
+    let path = uri.to_file_path().unwrap();
+    let analysis = analyze(&text, &path);
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "fixture invariant: l7_inlay.fsm is clean, got {:?}",
+        analysis.diagnostics
+    );
+    let cst = fsm_parser::parse(&text).syntax();
+    let li = LineIndex::new(&text);
+    let range = whole_range(&li, &text, OffsetEncoding::Utf8);
+
+    // Oracle with the Doc 22 §8 DEFAULT config (priorities on, timers on,
+    // state-types OFF).
+    let want = oracle_inlay_hints(
+        analysis.ir.as_ref(),
+        &cst,
+        InlayHintConfig::default(),
+        range,
+        &li,
+        &text,
+        OffsetEncoding::Utf8,
+    );
+    let result = call_request(
+        &mut service,
+        "textDocument/inlayHint",
+        inlay_params(&uri, range),
+        820,
+    )
+    .await;
+    let got = decode_inlays(&result);
+
+    // Full set equality (position + label + kind), order-insensitive.
+    let norm = |hs: &[InlayHint]| -> std::collections::BTreeSet<(u32, u32, String, i32)> {
+        hs.iter()
+            .map(|h| {
+                (
+                    h.position.line,
+                    h.position.character,
+                    label_of(h),
+                    // InlayHintKind has no public accessor; serialise it.
+                    serde_json::to_value(h.kind).unwrap().as_i64().unwrap_or(0) as i32,
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        norm(&got),
+        norm(&want),
+        "served inlay set MUST equal the reused-analysis oracle (pos+label+kind)"
+    );
+
+    // Hard-coded cross-checks — the three Doc 14 §11 families, by content.
+    let labels: Vec<String> = got.iter().map(label_of).collect();
+    assert!(
+        labels.contains(&"// priority: 50".to_owned()),
+        "Doc 14 §11 priority family: `on START priority 50` → `// priority: 50`, got {labels:?}"
+    );
+    assert!(
+        labels.contains(&"// 1.5 s".to_owned()),
+        "Doc 14 §11 timer family (>1000ms): 1500ms → `// 1.5 s`, got {labels:?}"
+    );
+    assert!(
+        labels.contains(&"// 1 min 30 s".to_owned()),
+        "Doc 14 §11 timer family (>60000ms): 90000ms → `// 1 min 30 s`, got {labels:?}"
+    );
+    // showStateTypes default is FALSE → NO substate hint yet.
+    assert!(
+        !labels.iter().any(|l| l.contains("substate")),
+        "substate hint is OFF by Doc 22 §8 default, got {labels:?}"
+    );
+    // Every hint kind is `Type` (1) and read-only (no text_edits).
+    for h in &got {
+        assert_eq!(
+            h.kind,
+            Some(tower_lsp::lsp_types::InlayHintKind::TYPE),
+            "L7 hints are the TYPE kind (inferred/auxiliary)"
+        );
+        assert!(h.text_edits.is_none(), "inlay hints are read-only");
+    }
+
+    // Toggle `showStateTypes=true` via didChangeConfiguration and re-ask.
+    service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("workspace/didChangeConfiguration")
+                .params(json!({
+                    "settings": {
+                        "fsmLang": { "inlayHints": { "showStateTypes": true } }
+                    }
+                }))
+                .finish(),
+        )
+        .await
+        .unwrap();
+    let result2 = call_request(
+        &mut service,
+        "textDocument/inlayHint",
+        inlay_params(&uri, range),
+        821,
+    )
+    .await;
+    let labels2: Vec<String> = decode_inlays(&result2).iter().map(label_of).collect();
+    assert!(
+        labels2.contains(&"// 5 substates".to_owned()),
+        "after enabling showStateTypes the parallel `Operational` (5 child \
+         states) MUST show `// 5 substates`, got {labels2:?}"
+    );
+    // The other families are unaffected by the new toggle.
+    assert!(
+        labels2.contains(&"// priority: 50".to_owned()) && labels2.contains(&"// 1.5 s".to_owned()),
+        "toggling showStateTypes must not disturb priority/timer hints"
+    );
+}
+
+/// (L7-d) The §4.1 defect guard at the L7 layer — BOTH `positionEncoding`s.
+/// A non-ASCII fixture where the hinted/edited position falls AFTER a
+/// multibyte (🚀 + Cyrillic) comment on its line, so the LSP `character`
+/// DIFFERS UTF-8 (bytes) vs UTF-16 (code units). Asserts (i) the
+/// `inlayHint` positions on `l7_non_ascii.fsm` and (ii) the `codeAction`
+/// E0107 edit range on `l7_ca_non_ascii.fsm` are each correct in EACH
+/// encoding (a byte/scalar shim gets one wrong → the test fails). Multibyte
+/// is ONLY in lexer-valid block-comment trivia (the standing
+/// Cyrillic-identifier lesson — identifiers stay ASCII).
+#[tokio::test(flavor = "current_thread")]
+async fn l7_non_ascii_code_action_and_inlay_correct_under_both_encodings() {
+    for enc_kind in [PositionEncodingKind::UTF8, PositionEncodingKind::UTF16] {
+        let enc = OffsetEncoding::from_lsp(&enc_kind);
+
+        // ---- (i) inlayHint positions on the clean non-ASCII fixture ----
+        {
+            let (mut service, _socket) = LspService::new(Backend::new);
+            do_initialize(&mut service, std::slice::from_ref(&enc_kind)).await;
+            let (text, uri) = fixture("l7_non_ascii.fsm");
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    Request::build("textDocument/didOpen")
+                        .params(did_open_params(&uri, &text))
+                        .finish(),
+                )
+                .await
+                .unwrap();
+            let path = uri.to_file_path().unwrap();
+            let analysis = analyze(&text, &path);
+            assert!(
+                analysis.diagnostics.is_empty(),
+                "[{enc_kind:?}] l7_non_ascii.fsm must be clean, got {:?}",
+                analysis.diagnostics
+            );
+            let cst = fsm_parser::parse(&text).syntax();
+            let li = LineIndex::new(&text);
+            let range = whole_range(&li, &text, enc);
+            let want = oracle_inlay_hints(
+                analysis.ir.as_ref(),
+                &cst,
+                InlayHintConfig::default(),
+                range,
+                &li,
+                &text,
+                enc,
+            );
+            let got = decode_inlays(
+                &call_request(
+                    &mut service,
+                    "textDocument/inlayHint",
+                    inlay_params(&uri, range),
+                    830,
+                )
+                .await,
+            );
+            // The `// priority: 50` hint sits after `🚀 ы переход к Fast */
+            // on START priority 50 -> Fast` — its `character` differs by
+            // encoding. Assert the served set equals the oracle in THIS
+            // encoding (a transcoding bug corrupts the oracle+server
+            // identically, so also pin the value independently below).
+            assert_eq!(
+                got.len(),
+                want.len(),
+                "[{enc_kind:?}] inlay count matches the oracle"
+            );
+            for (g, w) in got.iter().zip(want.iter()) {
+                assert_eq!(
+                    (g.position.line, g.position.character, label_of(g)),
+                    (w.position.line, w.position.character, label_of(w)),
+                    "[{enc_kind:?}] inlay position+label MUST match the oracle"
+                );
+            }
+            // INDEPENDENT pin: the `// priority: 50` hint's column is the
+            // encoded length of the multibyte prefix on its line. UTF-8
+            // counts 🚀=4 + Cyrillic-2-bytes-each; UTF-16 counts 🚀=2 +
+            // Cyrillic-1-unit-each — so the columns differ by exactly the
+            // byte/unit delta. Round-trip the served position back through
+            // the SAME encoding's inverse → it must land on the byte just
+            // after the transition's last token (a wrong intra-line
+            // transcoding fails this).
+            let prio = got
+                .iter()
+                .find(|h| label_of(h) == "// priority: 50")
+                .expect("the priority hint is present");
+            let back = li.offset(&text, prio.position, enc) as usize;
+            // The byte just before `back` is the end of `Fast` (the
+            // transition's last significant token); the char there is 't'.
+            assert_eq!(
+                &text[back - 1..back],
+                "t",
+                "[{enc_kind:?}] the priority-hint position round-trips to \
+                 just after `…-> Fast` (correct in this encoding)"
+            );
+            // And the two encodings genuinely diverge for this hint
+            // (proving the test exercises the multibyte path, not ASCII).
+            if enc == OffsetEncoding::Utf8 {
+                assert!(
+                    prio.position.character >= 70,
+                    "[utf-8] byte column is the larger one (multibyte prefix)"
+                );
+            } else {
+                assert!(
+                    prio.position.character <= 65,
+                    "[utf-16] code-unit column is the smaller one"
+                );
+            }
+        }
+
+        // ---- (ii) codeAction E0107 edit range on the broken fixture ----
+        {
+            let (mut service, _socket) = LspService::new(Backend::new);
+            do_initialize(&mut service, std::slice::from_ref(&enc_kind)).await;
+            let (text, uri) = fixture("l7_ca_non_ascii.fsm");
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    Request::build("textDocument/didOpen")
+                        .params(did_open_params(&uri, &text))
+                        .finish(),
+                )
+                .await
+                .unwrap();
+            let path = uri.to_file_path().unwrap();
+            let analysis = analyze(&text, &path);
+            assert!(
+                analysis
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code == fsm_diagnostics::DiagnosticCode::E0107),
+                "[{enc_kind:?}] fixture invariant: FSM-E0107 present"
+            );
+            let cst = fsm_parser::parse(&text).syntax();
+            let li = LineIndex::new(&text);
+            let range = whole_range(&li, &text, enc);
+            let want =
+                oracle_code_actions(&analysis.diagnostics, &cst, &uri, range, &li, &text, enc)
+                    .expect("oracle: E0107 quick-fix in this encoding");
+            let got = decode_code_actions(
+                &call_request(
+                    &mut service,
+                    "textDocument/codeAction",
+                    code_action_params(&uri, range),
+                    840,
+                )
+                .await,
+            );
+            assert_eq!(
+                serde_json::to_value(&got).unwrap(),
+                serde_json::to_value(&want).unwrap(),
+                "[{enc_kind:?}] served codeAction MUST equal the oracle in this encoding"
+            );
+            let CodeActionOrCommand::CodeAction(a) = &got[0] else {
+                panic!("[{enc_kind:?}] expected a CodeAction")
+            };
+            let e = &a.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri][0];
+            // The insertion `character` is the encoded length of
+            // `🚀 ы машина */ machine Mach ` on line 2 — DIFFERENT per
+            // encoding. Round-trip the served position via THIS encoding's
+            // inverse → it must land exactly on the byte after the
+            // machine's `{` (a wrong intra-line transcoding fails this).
+            let back = li.offset(&text, e.range.start, enc) as usize;
+            assert_eq!(
+                &text[back - 1..back],
+                "{",
+                "[{enc_kind:?}] the E0107 insert position round-trips to \
+                 just after the machine `{{` (correct in this encoding)"
+            );
+            // Apply in THIS encoding and confirm E0107 is resolved (the
+            // edit is correct, not just position-decodable).
+            let mut buf = text.clone();
+            buf.insert_str(back, &e.new_text);
+            let re = analyze(&buf, &path);
+            assert!(
+                re.diagnostics.is_empty(),
+                "[{enc_kind:?}] applied E0107 fix resolves it with no new \
+                 diagnostic, got {:?}",
+                re.diagnostics
+            );
+            // The two encodings genuinely diverge for this position.
+            if enc == OffsetEncoding::Utf8 {
+                assert!(
+                    e.range.start.character >= 38,
+                    "[utf-8] byte column is the larger one"
+                );
+            } else {
+                assert!(
+                    e.range.start.character <= 35,
+                    "[utf-16] code-unit column is the smaller one"
+                );
+            }
+        }
+    }
+}
+
+/// (L7-e) `codeAction`/`inlayHint` on a not-open document → the
+/// spec-correct empty answer (`null` / `[]`), never a panic, never a
+/// fabricated edit or hint (the L2–L6 not-open discipline, at L7).
+#[tokio::test(flavor = "current_thread")]
+async fn l7_handlers_on_unopened_doc_are_empty_not_panic() {
+    let (mut service, _socket) = LspService::new(Backend::new);
+    do_initialize(&mut service, &[PositionEncodingKind::UTF8]).await;
+    let uri = Url::parse("file:///tmp/never-opened-l7.fsm").unwrap();
+    let zero = Range::default();
+
+    let ca = call_request(
+        &mut service,
+        "textDocument/codeAction",
+        code_action_params(&uri, zero),
+        850,
+    )
+    .await;
+    assert!(
+        ca.is_null(),
+        "codeAction on a not-open doc must be null, got {ca}"
+    );
+
+    let ih = call_request(
+        &mut service,
+        "textDocument/inlayHint",
+        inlay_params(&uri, zero),
+        851,
+    )
+    .await;
+    // tower-lsp serialises `Ok(None)` for inlayHint as `null`.
+    assert!(
+        ih.is_null() || decode_inlays(&ih).is_empty(),
+        "inlayHint on a not-open doc must be empty/null, got {ih}"
+    );
+}

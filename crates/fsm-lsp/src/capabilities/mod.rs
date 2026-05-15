@@ -44,18 +44,30 @@
 //! `deltaStartChar`/`length` in the negotiated `positionEncoding` via L1's
 //! one authoritative `LineIndex` (no second converter).
 //!
-//! The remaining L7 handlers (codeAction, inlayHint — Doc 26 §5/§8) are out
-//! of L6 scope (Doc 26 §8 L6 scope boundary) and are deliberately NOT
-//! stubbed: an empty handler that silently returns nothing is worse than an
-//! unadvertised capability (the client would think the feature works) — the
-//! `workspaceSymbol`-left-unadvertised precedent (Doc 00 §11.33(5)).
+//! L7 adds [`code_action`] (`textDocument/codeAction`, Doc 14 §9) and
+//! [`inlay_hints`] (`textDocument/inlayHint`, Doc 14 §11) — the final
+//! capabilities of the v1.2 LSP epic. Both are pure projections of the
+//! **same** single `analyze()` every other handler runs (Doc 26 §3/§8 L7:
+//! no second analysis, no second position converter). `code_action` is
+//! **edit-producing** and inherits L5's risk-2 silent-corruption
+//! discipline: it offers a `quickfix` ONLY for a diagnostic whose fix is
+//! provably mechanical (E0107 insert / E0022-guarded delete — the rest of
+//! Doc 14 §9 + both refactor.extract actions are scoped out and flagged in
+//! Doc 00 §11.38, never a possibly-corrupting edit to hit a list), with
+//! every edit `Range` via L1's one `LineIndex`. `inlay_hints` is read-only
+//! display sourced from the threaded `Analysis.ir` (the Doc-26-§5 trio:
+//! non-default priority / timer durations / substate count, each gated by
+//! its Doc 22 §8 toggle); positions go through the same one `LineIndex`.
+//! Neither is advertised-but-stubbed — both genuinely work.
 
+pub mod code_action;
 pub mod complete;
 pub mod definition;
 pub mod diagnostics;
 pub mod document_symbol;
 pub mod folding;
 pub mod hover;
+pub mod inlay_hints;
 pub mod references;
 pub mod rename;
 pub mod resolve;

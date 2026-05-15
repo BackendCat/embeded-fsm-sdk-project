@@ -1,0 +1,9 @@
+language fsm 2.0
+
+/* 🚀 ы машина */ machine Mach {
+    events { GO }
+
+    state Idle {
+        on GO -> Idle
+    }
+}

@@ -108,9 +108,28 @@
 //! `multilineTokenSupport` defaults off). Still one analysis, one position
 //! converter, one resolver — reused, not duplicated.
 //!
-//! L7 capabilities (codeAction, inlayHint) are out of L6 scope and are NOT
-//! stubbed (a silent no-op handler is worse than an unadvertised capability
-//! — the `workspaceSymbol` precedent).
+//! ## L7 scope (Doc 26 §8 L7 — `codeAction` + `inlayHint`, feature-complete)
+//!
+//! `textDocument/codeAction` (Doc 14 §9) + `textDocument/inlayHint` (Doc 14
+//! §11), advertised in `initialize` — the final v1.2 LSP capabilities.
+//! `codeAction` is **edit-producing**, so it inherits L5's risk-2
+//! silent-corruption discipline: a `quickfix` is offered ONLY when the fix
+//! is provably mechanical — `FSM-E0107` (insert `initial <FirstState>`
+//! after the machine's `{`) and `FSM-E0022` (delete the duplicate event
+//! declaration, withheld if it carries its own `@id`). The other five Doc
+//! 14 §9 codes (E0100/E0106/W0200/W0500/E0300) and **both**
+//! `refactor.extract` actions are deliberately **scoped OUT** (W0200/W0500
+//! are never emitted by the toolchain at all; E0100/E0106/E0300/extract
+//! cannot be mechanized without a heuristic or a parallel re-analysis) and
+//! flagged in Doc 00 §11.38 — a missing quick-fix is a minor UX gap, a
+//! wrong edit is the cardinal sin. `inlayHint` is **read-only display**
+//! from the threaded `Analysis.ir` (the Doc-26-§5 trio: non-default
+//! transition priority, timer durations, composite/parallel substate
+//! count), each gated by its Doc 22 §8 toggle plus the master
+//! `enableInlayHints`; Doc 14 §11's extern-param-name row is scoped out
+//! (no Doc 22 §8 toggle, not in Doc 26 §5's IR-sourced set) and flagged.
+//! Still one analysis, one position converter — reused, not duplicated;
+//! L1–L6 behaviour byte-unchanged.
 //!
 //! ## The reuse seam
 //!
@@ -128,6 +147,7 @@
 
 pub mod analysis;
 pub mod capabilities;
+pub mod config;
 pub mod document_store;
 pub mod position;
 pub mod refs;

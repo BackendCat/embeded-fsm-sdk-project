@@ -1,0 +1,19 @@
+language fsm 2.0
+
+machine Bot {
+    events {
+        START
+        TICK
+    }
+
+    initial Idle
+
+    state Idle {
+        /* 🚀 ы переход к Fast */ on START priority 50 -> Fast
+        after 1500ms -> Idle
+    }
+
+    state Fast {
+        on TICK -> Idle
+    }
+}

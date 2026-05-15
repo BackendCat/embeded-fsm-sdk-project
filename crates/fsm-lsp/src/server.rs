@@ -34,10 +34,20 @@
 //! encoding measures `deltaStartChar`/`length` in the negotiated
 //! `positionEncoding` via L1's one authoritative `LineIndex`.
 //!
-//! L6 scope boundary (Doc 26 §8): NO codeAction/inlayHint. Those are L7 and
-//! are deliberately neither implemented nor stubbed (a silent no-op handler
-//! is worse than an unadvertised capability — the
-//! `workspaceSymbol`-left-unadvertised precedent, Doc 00 §11.33(5)).
+//! L7 adds `codeAction` (`textDocument/codeAction`, Doc 14 §9) and
+//! `inlayHint` (`textDocument/inlayHint`, Doc 14 §11) — the final v1.2 LSP
+//! capabilities. `codeAction` is **edit-producing**, so it inherits L5's
+//! risk-2 silent-corruption discipline (a `quickfix` only for a provably
+//! mechanical fix — E0107 / E0022-guarded; the rest of Doc 14 §9 + both
+//! refactor.extract actions scoped out + flagged Doc 00 §11.38, never a
+//! possibly-corrupting edit). `inlayHint` is read-only display from the
+//! threaded `Analysis.ir` (Doc-26-§5 trio: non-default priority / timer
+//! durations / substate count), gated by the Doc 22 §8 toggles the server
+//! now reads from `initialize` `initializationOptions` +
+//! `workspace/didChangeConfiguration` (Doc 14 §3 / Doc 26 §7 open-q 8:
+//! wire the behaviour-gating keys, stub-accept the rest). Both reuse the
+//! SAME single `analyze()` + the one `LineIndex` — NO second analysis, NO
+//! second converter. Neither is advertised-but-stubbed.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -48,32 +58,37 @@ use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Error as RpcError;
 use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::{
-    CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
-    DocumentSymbolResponse, FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, Location, MessageType, OneOf,
-    PositionEncodingKind, PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams,
-    SemanticTokensOptions, SemanticTokensParams, SemanticTokensRangeParams,
-    SemanticTokensRangeResult, SemanticTokensResult, SemanticTokensServerCapabilities,
-    ServerCapabilities, ServerInfo, TextDocumentPositionParams, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Url, WorkspaceEdit,
+    CodeActionParams, CodeActionProviderCapability, CodeActionResponse, CompletionOptions,
+    CompletionParams, CompletionResponse, DidChangeConfigurationParams,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+    FoldingRangeProviderCapability, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    InlayHint, InlayHintParams, Location, MessageType, OneOf, PositionEncodingKind,
+    PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, SemanticTokensOptions,
+    SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
+    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
 
 use crate::analysis::analyze;
+use crate::capabilities::code_action::{code_action_kinds, code_actions};
 use crate::capabilities::complete::completions;
 use crate::capabilities::definition::goto_definition;
 use crate::capabilities::diagnostics::to_lsp_diagnostics;
 use crate::capabilities::document_symbol::document_symbols;
 use crate::capabilities::folding::folding_ranges;
 use crate::capabilities::hover::hover as build_hover;
+use crate::capabilities::inlay_hints::inlay_hints as build_inlay_hints;
 use crate::capabilities::references::references as build_references;
 use crate::capabilities::rename::{prepare_rename_handler, rename_handler};
 use crate::capabilities::semantic_tokens::{
     legend as semantic_tokens_legend, semantic_tokens_full as build_semantic_tokens_full,
     semantic_tokens_range as build_semantic_tokens_range,
 };
+use crate::config::InlayHintConfig;
 use crate::document_store::DocumentStore;
 use crate::position::OffsetEncoding;
 use crate::refs::ReferenceIndex;
@@ -99,6 +114,13 @@ pub struct Backend {
     /// generation is still current — so a burst of keystrokes collapses to
     /// one analysis (Doc 26 §4.3), with no timer cancellation bookkeeping.
     debounce: Arc<Mutex<HashMap<Url, u64>>>,
+    /// The Doc 22 §8 inlay-hint toggles (Doc 26 §8 L7). Read from
+    /// `initialize` `initializationOptions` and updated on
+    /// `workspace/didChangeConfiguration` (Doc 14 §3). Behind a mutex
+    /// because `initialize`/`did_change_configuration` write it while
+    /// `inlay_hint` reads it, all on the same `&self`. Defaults to the
+    /// Doc 22 §8 documented defaults until `initialize` sets it.
+    inlay_cfg: Arc<Mutex<InlayHintConfig>>,
 }
 
 impl Backend {
@@ -111,6 +133,8 @@ impl Backend {
             // client's `general.positionEncodings` capability.
             encoding: Arc::new(Mutex::new(OffsetEncoding::Utf8)),
             debounce: Arc::new(Mutex::new(HashMap::new())),
+            // Doc 22 §8 documented defaults until the client sends config.
+            inlay_cfg: Arc::new(Mutex::new(InlayHintConfig::default())),
         }
     }
 
@@ -201,6 +225,15 @@ impl LanguageServer for Backend {
         };
         *self.encoding.lock().await = negotiated;
 
+        // L7: read the Doc 22 §8 inlay-hint toggles from the Doc 14 §2
+        // `initializationOptions` channel (the server "reads the following
+        // keys … on startup", Doc 14 §3). Defensive: any absent/mistyped
+        // key keeps its Doc 22 §8 default (no panic, no silent flip).
+        // `didChangeConfiguration` later overrides this live.
+        if let Some(opts) = &params.initialization_options {
+            *self.inlay_cfg.lock().await = InlayHintConfig::from_settings(opts);
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 position_encoding: Some(negotiated.to_lsp()),
@@ -284,6 +317,46 @@ impl LanguageServer for Backend {
                         },
                     ),
                 ),
+                // L7 (Doc 26 §8 L7 / Doc 14 §2/§9): codeAction. An honest
+                // provider that returns ONLY provably-mechanical quickfix
+                // edits (E0107 / E0022-guarded; the rest of Doc 14 §9 +
+                // both refactor.extract scoped out + flagged Doc 00
+                // §11.38 — never a possibly-corrupting edit). The
+                // advertised `codeActionKinds` are the EXACT Doc 14 §2
+                // `codeActionProvider.codeActionKinds`
+                // `["quickfix","refactor"]` (verified against the spec's
+                // `ServerCapabilities` block, not guessed), declared ONCE
+                // in `code_action::code_action_kinds()` and reused by the
+                // `context.only` filter. `refactor` is advertised because
+                // Doc 14 §2 lists it and a client may filter on it; only
+                // the safe `quickfix` subset is ever produced (the
+                // advertise-the-spec / ship-only-the-safe discipline, the
+                // L6 `deprecated`-modifier precedent). NOT
+                // advertised-but-stubbed — it genuinely works.
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    tower_lsp::lsp_types::CodeActionOptions {
+                        code_action_kinds: Some(code_action_kinds()),
+                        work_done_progress_options: Default::default(),
+                        resolve_provider: Some(false),
+                    },
+                )),
+                // L7 (Doc 26 §8 L7 / Doc 14 §2/§11): inlayHint. An honest,
+                // fully-implemented read-only provider sourced from the
+                // SAME single analysis's `ir` (the Doc-26-§5 trio:
+                // non-default priority / timer durations / substate
+                // count), gated by the Doc 22 §8 toggles. `resolve_provider
+                // : false` — every hint is fully materialized (no
+                // `inlayHint/resolve` round-trip; advertising a resolve we
+                // do not implement would be the stub-a-no-op sin). NOT
+                // advertised-but-stubbed — it genuinely works.
+                inlay_hint_provider: Some(OneOf::Right(
+                    tower_lsp::lsp_types::InlayHintServerCapabilities::Options(
+                        tower_lsp::lsp_types::InlayHintOptions {
+                            work_done_progress_options: Default::default(),
+                            resolve_provider: Some(false),
+                        },
+                    ),
+                )),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -765,5 +838,124 @@ impl LanguageServer for Backend {
             end_byte,
         );
         Ok(Some(SemanticTokensRangeResult::Tokens(tokens)))
+    }
+
+    /// `workspace/didChangeConfiguration` — Doc 14 §3 / Doc 26 §8 L7.
+    ///
+    /// The server "reads the following keys … on startup and on
+    /// `workspace/didChangeConfiguration`" (Doc 14 §3). Only the four Doc
+    /// 22 §8 inlay-hint toggles gate *existing* L7 behaviour, so only
+    /// those are consumed; every other key in the settings blob is
+    /// stub-accepted (ignored — Doc 26 §7 open-question 8). The parse is
+    /// defensive: a malformed value keeps the Doc 22 §8 default rather
+    /// than silently flipping a hint family the user did not change. This
+    /// updates the live config so a subsequent `inlayHint` request honours
+    /// the new toggles immediately (the test toggles
+    /// `showTransitionPriorities` and asserts the hint set changes).
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        *self.inlay_cfg.lock().await = InlayHintConfig::from_settings(&params.settings);
+    }
+
+    /// `textDocument/codeAction` — Doc 14 §9 / Doc 26 §8 L7
+    /// (edit-producing — inherits L5 risk-2 silent-corruption discipline).
+    ///
+    /// Runs the SAME single `analyze()` the diagnostics path runs (the
+    /// reuse seam, Doc 26 §3 — NO second analysis, NO second position
+    /// converter) and offers a `quickfix` ONLY for a diagnostic whose fix
+    /// is **provably mechanical**: `FSM-E0107` (insert `initial
+    /// <FirstState>`) and `FSM-E0022` (delete the duplicate event,
+    /// withheld if it carries its own `@id`). The match is on the
+    /// **server-authoritative native `DiagnosticCode`** (not the
+    /// client-supplied `context.diagnostics`) and the action is tied back
+    /// to the LSP `Diagnostic` it resolves. Every edit `Range` goes
+    /// through L1's one `LineIndex`. The other Doc 14 §9 codes + both
+    /// refactor.extract actions are deliberately NOT produced (scoped out
+    /// + flagged Doc 00 §11.38) — a missing quick-fix is a minor UX gap, a
+    /// wrong edit is the cardinal sin. A client `context.only` filter that
+    /// excludes `quickfix` → no actions (we produce only `quickfix`).
+    /// Not-open document / nothing safe → `None` (the spec-correct empty
+    /// answer, never a bogus action). Snapshot released before the
+    /// await-free analysis, exactly as the L2–L6 paths do.
+    async fn code_action(&self, params: CodeActionParams) -> RpcResult<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        // Honour a client `only` filter up-front: we exclusively produce
+        // `quickfix` actions, so if the client asked for kinds that do
+        // not include `quickfix` there is nothing to compute.
+        if let Some(only) = &params.context.only {
+            let wants_quickfix = only.iter().any(|k| {
+                tower_lsp::lsp_types::CodeActionKind::QUICKFIX
+                    .as_str()
+                    .starts_with(k.as_str())
+                    || k == &tower_lsp::lsp_types::CodeActionKind::QUICKFIX
+            });
+            if !wants_quickfix {
+                return Ok(None);
+            }
+        }
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        let path = Backend::uri_to_path(&uri);
+        // THE reuse seam — identical `fsm check` pipeline; the quick-fix
+        // is matched on THIS run's authoritative diagnostics.
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        Ok(code_actions(
+            &analysis.diagnostics,
+            &cst,
+            &uri,
+            params.range,
+            &line_index,
+            &text,
+            enc,
+        ))
+    }
+
+    /// `textDocument/inlayHint` — Doc 14 §11 / Doc 26 §8 L7 (read-only).
+    ///
+    /// Pure projection of the SAME single `analyze()`'s threaded `ir` (the
+    /// Doc-26-§5 trio: non-default transition priority, timer durations,
+    /// composite/parallel substate count — no second analysis, no second
+    /// position converter; positions via L1's one `LineIndex`), gated by
+    /// the live Doc 22 §8 toggles. The master `enableInlayHints=false`
+    /// suppresses everything; each per-category toggle gates its family.
+    /// Hints outside the requested viewport `range` are filtered. A
+    /// not-open document or `ir == None` (catastrophic lowering failure) →
+    /// an empty list (the spec-correct "no hints here", never a panic).
+    /// Snapshot released before the await-free analysis.
+    async fn inlay_hint(&self, params: InlayHintParams) -> RpcResult<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+        let snapshot = {
+            let store = self.docs.lock().await;
+            store
+                .get(&uri)
+                .map(|d| (d.text.clone(), d.line_index.clone()))
+        };
+        let Some((text, line_index)) = snapshot else {
+            return Ok(None);
+        };
+        let enc = *self.encoding.lock().await;
+        let cfg = *self.inlay_cfg.lock().await;
+        let path = Backend::uri_to_path(&uri);
+        // THE reuse seam — identical `fsm check` pipeline; hints read
+        // THIS run's threaded `ir` (no second analysis / lowering).
+        let analysis = analyze(&text, &path);
+        let cst = fsm_parser::parse(&text).syntax();
+        Ok(Some(build_inlay_hints(
+            analysis.ir.as_ref(),
+            &cst,
+            cfg,
+            params.range,
+            &line_index,
+            &text,
+            enc,
+        )))
     }
 }
