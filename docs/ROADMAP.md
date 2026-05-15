@@ -105,6 +105,28 @@ Codified post-release step (this section's own "How the roadmap evolves" rule). 
 - **VS Code extension** (Doc 22): TextMate grammar (Doc 21 already drafted), LSP client wiring, diagram WebviewPanel using @elklayout/core.
 - **C++17 code generator** (Doc 12): wraps generated C with `extern "C"` + adds a CRTP class API for embedded C++ users. No-STL profile per Doc 12 §3.
 
+### v1.2 refinement — LSP-first sequencing (extraction pass, 2026-05-15)
+
+The v1.1 retrospective feed-forward (b) recommended LSP-first over C++17; the extraction-first-for-epics discipline (FSM-PROC-SUBAGENT) then produced a deep-extraction architecture pass scoped against the *current code at HEAD `0a657d4`*. Result: **`docs/26-LSP-Architecture.md`** (FSM-ARCH-LSP v1.0.0) — the authoritative LSP crate shape + wave plan; it refines (does not contradict) Doc 20 §9.
+
+**Why LSP-first holds (confirmed against code, not prose):** the LSP is the required substrate for both the VS Code extension (Doc 22, an LSP client) and the Web IDE (Doc 05 §2.5, LSP client in a Web Worker) — largest downstream fan-out. C++17 codegen is self-contained (wraps the already-correct C emitter) and may land in parallel or after without blocking anything.
+
+**Dependency edge:** the LSP epic is gated on the standing v1.2 pub-hygiene wave (retrospective feed-forward (a) — `pub→pub(crate)` sweep + `unreachable_pub`/`missing_docs`). That wave MUST run **first** and be briefed with the Doc 26 §6 "keep-public, document-as-intended-`fsm-lsp`-API" allowlist, so the surface narrowing is informed by the LSP's real needs rather than blind. This is listed in Doc 26 as L0 (the gate prerequisite, not new scope).
+
+**Wave plan (one line per wave; full briefs + §5.4-LSP behavioural-acceptance definitions in Doc 26 §8):**
+- **L0** (gate) — pub-hygiene sweep + Doc 26 §6 intended-API allowlist (the existing standing gate wave; pinned here as the dependency edge).
+- **L1** — MVP spine: `fsm-lsp` crate + `fsm-lang-server` bin + `initialize` (UTF-8/UTF-16 `positionEncoding` negotiation) + `publishDiagnostics` reusing the *exact* `fsm check` pipeline (`parse` + `analyze_with_source`). Proves the reuse seam + position encoding end-to-end before any breadth.
+- **L2** — `documentSymbol` + `foldingRange` (pure forward-`SymbolTable`/CST; no new analysis).
+- **L3** — `hover` + `definition` (single-file; `resolve_*` decl spans + IR enrichment).
+- **L4** — `completion` (context-sensitive; keywords from Doc 04 §1.5; snippets from Doc 22 §9).
+- **L5** — `references` + `rename` + `prepareRename` (introduces the one new analysis: `ReferenceIndex`, a derived CST walk resolved through `SymbolTable`).
+- **L6** — `semanticTokens` (consumes the already-drafted Doc 21; decl-vs-ref disambiguation).
+- **L7** — `codeAction` + `inlayHint` (diagnostic-driven fixes + IR-derived hints).
+
+Phase-boundary audits (FSM-PROC-SUBAGENT §11.3) after L1 and after L5.
+
+**Explicitly scoped OUT of v1.2 (Doc 26 §9 — no implied freebies):** incremental CST parsing (`parse_incremental` does **not** exist — Doc 20 §4.5/L787 is aspirational prose; full re-parse-on-debounce is the v1.2 contract); cross-file/workspace-wide definition/references/rename + the startup workspace scan (no in-tree project-index substrate — single-file in v1.2, shipping Doc 14 §8's own cross-file degradation message; deferred to v1.3 with the Web IDE multi-file story); the `wasm32` build of `fsm-lsp` (architecture stays WASM-compatible — analysis core is tokio-free — but compiling it is v1.3 scope); `workspaceSymbol` (same project-index dependency).
+
 ---
 
 ## v1.3 — Simulation & verification
