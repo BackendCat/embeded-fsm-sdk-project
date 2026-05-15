@@ -163,6 +163,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged). The `unreachable_pub` lint wiring is deferred — residual
   warnings are confined to shared integration-test helpers, not `src/`
   (see `docs/00-Decisions-And-Reconciliation.md` §11.31).
+- Docs: `docs/20-Architecture-Overview.md` reconciled to shipped reality
+  (DRIFT-1). §4.5 / §12.2 advertised an incremental-CST-reparse pipeline
+  and a `parse_incremental(old_tree, edit)` API that **do not exist** —
+  `fsm-parser` does a **full** re-parse only (`parse`/`parse_with_limits`/
+  `parse_with_tokens`). These (plus the §4.1 + ADR-004 mentions) are now
+  explicitly annotated as a **v1.3+ deferred optimisation, not
+  implemented**, with the design intent preserved as the future target;
+  the v1.2 LSP epic deliberately built on full re-parse-on-debounce (Doc
+  26 §4.3–§4.5). No code change. See
+  `docs/00-Decisions-And-Reconciliation.md` §11.39.
 
 ## [1.1.0] — 2026-05-15
 

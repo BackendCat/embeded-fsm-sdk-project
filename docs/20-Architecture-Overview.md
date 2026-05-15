@@ -139,7 +139,9 @@ continues — the parser handles error propagation.
 
 Two-phase parsing:
 1. **CST (Concrete Syntax Tree)** — lossless; every token including whitespace and
-   comments is stored. Used by the formatter and incremental reparsing for LSP.
+   comments is stored. Used by the formatter and (as a v1.3+ aspiration —
+   *not* implemented; LSP ships full re-parse, see §4.5 / Doc 00 §11.39)
+   incremental reparsing for LSP.
 2. **AST (Abstract Syntax Tree)** — typed, trivia-free. Used by the analyzer and
    code generators.
 
@@ -206,6 +208,29 @@ of top-level declarations: `machine`, `state`, `composite`, `parallel`, `event`,
 even when one is malformed.
 
 ## 4.5 Incremental Reparsing (LSP)
+
+> **NOT IMPLEMENTED in v1.x — deferred to v1.3+ (DRIFT-1).** The
+> green-tree-diff/subtree-splice scheme described in this section, and the
+> `parse_incremental(old_tree, edit)` signature in §12.2, **do not exist in
+> code**. The shipped `fsm-parser` does a **full re-parse** only:
+> `parse` / `parse_with_limits` / `parse_with_tokens` (`crates/fsm-parser/
+> src/lib.rs:52`); all three drive the *whole* grammar via
+> `grammar::parse_file` over the entire token vector (`crates/fsm-parser/
+> src/parse.rs:59`/`:67`/`:94`, `grammar/file.rs:50`). `parse_with_tokens`
+> only skips **re-lexing** untouched ranges — it still re-parses the full
+> grammar; there is no `parse_incremental`, no CST diff, no subtree reuse.
+> The v1.2 LSP epic **deliberately built on full re-parse-on-debounce**
+> (Doc 26 §4.3–§4.5; the L1–L6 waves do not depend on `parse_incremental`):
+> a full re-parse + re-analyze of a realistic embedded `.fsm` is
+> sub-millisecond to low-single-digit-ms, comfortably inside the 200ms
+> change-debounce, so the 50ms target below is met *without* incremental
+> parsing. True incremental CST patching is a tracked **v1.3+
+> optimisation** for pathologically large files — a separate, self-contained
+> `fsm-parser` epic with its own behavioural acceptance — **not a current
+> capability**. Recorded per Doc 00 §11.39 (the prose-vs-code / P0-1
+> "aspirational-prose" reconciliation discipline; cf. §11.19/§11.24); the
+> design intent below is preserved as the v1.3+ target, not as shipped
+> behaviour.
 
 For LSP `textDocument/didChange` events, the CST supports incremental reparsing:
 the changed range is re-tokenized, the affected CST subtree is replaced, and only
@@ -782,8 +807,17 @@ impl<'src> Lexer<'src> {
 
 ## 12.2 `fsm-parser` Public API
 
+> **DRIFT-1 — reality check.** The *shipped* `fsm-parser` public API is
+> `parse` / `parse_with_limits` / `parse_with_tokens` returning a
+> `ParseResult { green, errors }` (`crates/fsm-parser/src/lib.rs:52`,
+> `parse.rs:59`/`:67`/`:94`). `parse_incremental` below **does not exist in
+> v1.x** — it is a deferred v1.3+ aspiration (full re-parse only today; see
+> §4.5 and Doc 00 §11.39). The signature is kept as the future-API sketch,
+> not as a present contract.
+
 ```rust
 pub fn parse(src: &str) -> ParseResult;
+// v1.3+ aspiration — NOT implemented (see §4.5 / Doc 00 §11.39):
 pub fn parse_incremental(old_tree: &SyntaxNode, edit: &TextEdit) -> ParseResult;
 
 pub struct ParseResult {
@@ -1049,7 +1083,9 @@ small enough that a hand-written parser is maintainable.
 **Decision:** Use rowan-style green trees for the CST.
 
 **Rationale:** Lossless tree enables formatter (must preserve all whitespace and
-comments) and incremental reparsing for LSP (only re-parse changed subtrees).
+comments) and — as a future v1.3+ optimisation, *not* implemented in v1.x
+(LSP ships full re-parse-on-debounce; see §4.5 / Doc 00 §11.39) —
+incremental reparsing for LSP (only re-parse changed subtrees).
 
 ## ADR-005: Why Not Reuse an SCXML Runtime
 
