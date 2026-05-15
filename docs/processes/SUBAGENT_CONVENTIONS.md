@@ -237,6 +237,11 @@ The orchestrator (the conversation-level Claude that dispatches waves) is respon
 
 After EVERY merge to main, the orchestrator independently re-runs the full quad on main: `cargo build/test/clippy/fmt --workspace`. No exceptions, regardless of what the agent's completion report claimed. Trust-but-verify is not optional — a merge can introduce conflicts the agent never saw, and self-reported green is not proof. If the post-merge quad fails, the merge is reverted (or fixed-forward immediately) before any further dispatch.
 
+**Warm-shared-target staleness caveat (2026-05-15, phase-audit P1-1).** The shared `CARGO_TARGET_DIR` (PD-1) has a side-effect: a test binary built inside a worktree bakes that worktree's *absolute* `CARGO_MANIFEST_DIR` into itself; after the worktree is removed, cargo's fingerprint still considers that cached binary "fresh" (source/deps unchanged) and reuses it — so `cargo test --workspace` can **fail spuriously** (a test panics on a now-deleted `-wt-*` path) OR, worse, **pass against a stale binary** that no longer reflects main. A warm post-merge quad is therefore necessary but NOT sufficient. Rules:
+- If a post-merge `cargo test` failure's message references a non-existent path containing `-wt-` (or any deleted worktree dir), treat it as a stale artifact, not a regression: `cargo clean -p <crate>` for the affected crate (or `touch` its source) and re-run that crate's tests fresh to get the true status. Confirm green from the fresh build before trusting.
+- A `checkpoint/*` or release tag (§11.4) requires a **COLD** green quad — `cargo test --workspace` from an invalidated/clean target — never a warm-cache pass. "Known-good" must mean built-from-source-green, not cache-green.
+- Per-wave warm quads remain the routine gate (speed), but the orchestrator stays alert for `-wt-` stale-path failures and never tags on a warm pass alone.
+
 ### 11.2 Liveness heartbeat (v1.1.0 — PD-4)
 
 When dispatching a background wave expected to run >10 min, the orchestrator sets a `ScheduleWakeup` (~25 min) as a deadman switch. If the wave's completion notification has not arrived by wakeup, the orchestrator probes liveness (`ps`, output-file mtime, worktree `git status`). A wave can die silently from disk, MCP disconnect, session interruption, or plan-mode activation — 4 instances during v1.0.
