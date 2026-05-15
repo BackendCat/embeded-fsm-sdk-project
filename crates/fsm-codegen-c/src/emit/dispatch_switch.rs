@@ -167,16 +167,40 @@ impl<'a, 'm> IrVisitor for SwitchEmitter<'a, 'm> {
                 name = rec.c_name,
                 dsl = rec.dsl_name,
             ));
-            // Sort by priority (ascending = lower priority number wins per
-            // Doc 08 §4.2), then document order. The IR already preserves
-            // document order via Vec, so sort_by_key with priority alone
-            // suffices.
+            // W7-FU-1 (Doc 08 §4.1/§4.2): a state may declare two or more
+            // transitions on the SAME event disambiguated by guards
+            // (`on E [g1] -> A` / `on E [g2] -> B` / optional `on E -> C`
+            // fallback). The candidate set for one (source,event) must
+            // collapse to a SINGLE C `case <EVENT>:` whose body evaluates the
+            // candidates' guards in (priority asc, document order) and takes
+            // the FIRST enabled one (an unguarded / `[else]` candidate is
+            // always-enabled = catch-all). Emitting one `case` per transition
+            // (the pre-fix bug) produced duplicate C `case` labels (gcc hard
+            // error) and made the 2nd+ guarded transition unreachable.
+            //
+            // Sort by priority ascending (lower number wins, Doc 08 §4.2);
+            // `sort_by` is STABLE so equal-priority candidates keep their IR
+            // Vec order = document order (Doc 08 §4.2 tiebreak), matching the
+            // simulator's `select_transitions` exactly (sim is the oracle).
             let mut sorted: Vec<&TransitionObject> = transitions.iter().collect();
             sorted.sort_by(|a, b| a.priority.cmp(&b.priority));
-            // Group cases by trigger id for cleaner switch output.
-            self.out.push_str("        switch (ev->id) {\n");
+            // Group the (now priority/doc-order-sorted) candidates by their
+            // resolved C event enum, PRESERVING first-appearance order of the
+            // events and the within-event candidate order. One emitted `case`
+            // per distinct event; its body chains every candidate.
+            let mut event_order: Vec<String> = Vec::new();
+            let mut by_event: std::collections::HashMap<String, Vec<&TransitionObject>> =
+                std::collections::HashMap::new();
             for t in &sorted {
-                emit_one_case(t, self.ctx, self.out);
+                let key = trigger_event_c(t, self.ctx);
+                if !by_event.contains_key(&key) {
+                    event_order.push(key.clone());
+                }
+                by_event.entry(key).or_default().push(t);
+            }
+            self.out.push_str("        switch (ev->id) {\n");
+            for event_c in &event_order {
+                emit_event_case(event_c, &by_event[event_c], self.ctx, self.out);
             }
             self.out.push_str("        default: break;\n");
             self.out.push_str("        }\n");
@@ -186,8 +210,21 @@ impl<'a, 'm> IrVisitor for SwitchEmitter<'a, 'm> {
     }
 }
 
-fn emit_one_case(t: &TransitionObject, ctx: &MachineEmitCtx<'_>, out: &mut String) {
-    let trigger_id = match &t.trigger {
+/// Resolve a transition's trigger to the C event-enum identifier its
+/// `switch (ev->id)` case is keyed by. Factored out of the old
+/// `emit_one_case` so the per-state emitter can GROUP transitions by event
+/// (W7-FU-1) before emitting one case per event.
+fn trigger_event_c(t: &TransitionObject, ctx: &MachineEmitCtx<'_>) -> String {
+    let trigger_id = trigger_id_of(t, ctx);
+    if trigger_id.starts_with(&ctx.macro_prefix()) {
+        trigger_id
+    } else {
+        ctx.event_c_enum(&trigger_id)
+    }
+}
+
+fn trigger_id_of(t: &TransitionObject, ctx: &MachineEmitCtx<'_>) -> String {
+    match &t.trigger {
         Some(fsm_ir::Trigger::Event { event_id, .. }) => event_id.clone(),
         // `done -> Y` / pre-P0-4 timer triggers come in with no trigger;
         // map to the reserved completion event id.
@@ -202,30 +239,60 @@ fn emit_one_case(t: &TransitionObject, ctx: &MachineEmitCtx<'_>, out: &mut Strin
             super::timer::timer_event_c(ctx, timer_id)
                 .unwrap_or_else(|| format!("{}_EVENT__COMPLETION", ctx.macro_prefix()))
         }
-    };
-    let event_c = if trigger_id.starts_with(&ctx.macro_prefix()) {
-        trigger_id.clone()
-    } else {
-        ctx.event_c_enum(&trigger_id)
-    };
+    }
+}
 
-    // Resolve the event-specific payload root. The payload union is keyed
-    // by event name (`ev->__payload.FAULT`), so `payload.code` in the DSL
-    // must lower to `ev->__payload.FAULT.code` inside FAULT's case body.
-    // Falling back to the bare union root keeps the code shape sane for
-    // events without a declared payload.
-    let payload_prefix = trigger_event_payload_prefix(ctx, &trigger_id);
-
+/// Emit ONE `case <EVENT>:` whose body evaluates `candidates` (already in
+/// priority/document order) and fires the FIRST enabled one — Doc 08 §4.1
+/// (`min(candidates, key=(priority, document_order))`) restricted to one
+/// (source,event) group. This is the W7-FU-1 fix: prior code emitted a
+/// separate `case` per transition, yielding a duplicate C `case` label
+/// (gcc hard error) and an unreachable 2nd+ guarded transition.
+///
+/// Each candidate is wrapped in `do { ... } while (0)`. `emit_transition_body`
+/// emits `if (!guard) <on_guard_fail>` first; with `on_guard_fail = "break;"`
+/// a failed guard `break`s out of THAT candidate's `do/while(0)` and control
+/// falls to the next candidate. A candidate with no guard (or `[else]`,
+/// which lowers to the always-true `1`) emits no guard check, so it always
+/// runs its body and `return true`s — the correct catch-all/fallback that
+/// terminates the chain (Doc 08 §4.2: an unguarded transition is an
+/// always-enabled candidate; in document order it wins only once every
+/// earlier guard has failed). If every candidate's guard is false and there
+/// is no unguarded fallback, the `case` falls through to its `break;` (the
+/// outer per-state `break;`), i.e. the event is not consumed in this state
+/// and the leaf-to-root walk continues to the parent (Doc 08 §4.1) — exactly
+/// the simulator's behaviour (no candidate enabled => no transition selected
+/// for this state, bubble up).
+fn emit_event_case(
+    event_c: &str,
+    candidates: &[&TransitionObject],
+    ctx: &MachineEmitCtx<'_>,
+    out: &mut String,
+) {
     out.push_str(&format!("        case {}: {{\n", event_c));
-    super::transition::emit_transition_body(
-        t,
-        ctx,
-        &payload_prefix,
-        /*indent_spaces=*/ 12,
-        /*on_guard_fail=*/ "break;",
-        out,
-    );
-    out.push_str("            return true;\n");
+    for t in candidates {
+        let trigger_id = trigger_id_of(t, ctx);
+        // Resolve the event-specific payload root. The payload union is
+        // keyed by event name (`ev->__payload.FAULT`), so `payload.code`
+        // in the DSL must lower to `ev->__payload.FAULT.code` inside
+        // FAULT's case body. Falling back to the bare union root keeps the
+        // code shape sane for events without a declared payload.
+        let payload_prefix = trigger_event_payload_prefix(ctx, &trigger_id);
+        // `do { ... } while (0)` scopes one candidate: a failed guard
+        // `break`s this candidate only and falls to the next.
+        out.push_str("            do {\n");
+        super::transition::emit_transition_body(
+            t,
+            ctx,
+            &payload_prefix,
+            /*indent_spaces=*/ 16,
+            /*on_guard_fail=*/ "break;",
+            out,
+        );
+        out.push_str("                return true;\n");
+        out.push_str("            } while (0);\n");
+    }
+    out.push_str("            break;\n");
     out.push_str("        }\n");
 }
 

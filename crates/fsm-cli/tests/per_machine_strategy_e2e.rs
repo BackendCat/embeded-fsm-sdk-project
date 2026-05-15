@@ -460,119 +460,134 @@ fn absent_machine_override_warns_but_still_succeeds() {
         .stderr(predicates::str::contains("no machine named `Phantom`"));
 }
 
-/// W7-FU-1 TRIPWIRE — documents a pre-existing core dispatch defect
-/// surfaced (NOT introduced) by this wave's §5.4 behavioural acceptance.
+/// W7-FU-1 CORRECTNESS (was a tripwire; converted when the defect was
+/// fixed — Doc 00 §11.26).
 ///
-/// The defect: a state with TWO `on EVENT` transitions distinguished
-/// ONLY by guards (`on E [g1] -> A` / `on E [g2] -> B`) — a legal,
-/// common UML statechart construct (the vending-machine
-/// `on DISPENSE [balance >= price]` style) — is mis-lowered by BOTH
-/// dispatch strategies, independently of W7:
-///   * SWITCH (`dispatch_switch.rs`): emits two `case <EVENT>:` labels in
-///     one C `switch` → `gcc` HARD ERROR `duplicate case value` (fails
-///     even WITHOUT `-Werror`); the second guarded transition is
-///     unreachable.
-///   * TABLE (`dispatch_table.rs`): `<M>_select_for_region` returns the
-///     first row matching `(source, trigger)` IGNORING the guard; the
-///     guard is only re-checked at execute, so if the first row's guard
-///     is false the event is dropped and the other eligible transition
-///     never fires.
+/// History: this started as an honest tripwire PINNING a pre-existing core
+/// dispatch defect (a state with TWO `on EVENT` transitions distinguished
+/// ONLY by guards — `on PING [n<1] -> S0` / `on PING [n>=1] -> S1` — was
+/// mis-lowered by BOTH strategies independently: SWITCH emitted duplicate C
+/// `case` labels => `gcc` hard error; TABLE selected the first
+/// `(source,trigger)` row IGNORING its guard => silently DROPPED the event
+/// when that guard was false, the P0-1 silent-data-loss class). The
+/// tripwire asserted the *defective* switch behaviour so it would FAIL
+/// LOUDLY once fixed. W7-FU-1 fixed it (in `dispatch_switch.rs` /
+/// `dispatch_table.rs`); per the honest-surface standard this is now a
+/// POSITIVE behavioural test of the now-correct semantics on BOTH
+/// strategies. Companion broad acceptance (priority tiebreak, unguarded
+/// fallback, no-match, sim==codegen): `guard_disambiguated_dispatch_e2e.rs`.
 ///
-/// W7 only routes WHICH strategy a machine uses; fixing guard
-/// disambiguation is in `dispatch_switch.rs`/`dispatch_table.rs` and is
-/// explicitly OUT of W7 scope (the brief's DO-NOT list:
-/// "the dispatch implementations themselves"). This test PINS the
-/// current (defective) switch-strategy behaviour — a duplicate-`case`
-/// gcc failure — so the defect cannot silently regress further AND so
-/// this tripwire FAILS LOUDLY when W7-FU-1 is fixed, forcing whoever
-/// fixes it to convert this into a positive behavioural test. Same
-/// honest-surface pattern as SUB-FU-2 / OPAQUE-BUG-1 (Doc 00 §11.19/§11.23).
+/// The model: ONE state, TWO `on PING` transitions whose guards are
+/// statically COMPLEMENTARY (`[n < 1]` vs `[n >= 1]`) — exactly one is
+/// enabled at any time (the analyzer accepts this with no diagnostic; no
+/// priority needed because the guards are provably disjoint). Driving PING
+/// twice from `n = 0` must walk S0 --(n<1, n:=1)--> S0 --(n>=1)--> S1, on
+/// BOTH strategies, gcc -Werror clean and RUN-asserted (Doc 08 §4.1/§4.2 —
+/// first-enabled candidate wins; the simulator is the oracle and is
+/// independently spec-verified in the companion test).
 #[test]
-fn w7_fu1_guard_disambiguated_same_event_is_currently_miscompiled() {
+fn w7_fu1_guard_disambiguated_same_event_fires_correct_transition() {
     if common::should_skip_gcc("per_machine_strategy_e2e") {
         return;
     }
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let dir = tmp.path();
-    // Minimal repro: ONE state, TWO `on PING` guarded by complementary
-    // conditions. ASCII-only.
-    fs::write(
-        dir.join("amb.fsm"),
-        "language fsm 2.0\n\n\
-         machine Amb {\n\
-         \x20\x20\x20\x20context { n : u8 = 0 }\n\
-         \x20\x20\x20\x20events { PING }\n\
-         \x20\x20\x20\x20initial S0\n\
-         \x20\x20\x20\x20state S0 {\n\
-         \x20\x20\x20\x20\x20\x20\x20\x20on PING [ctx.n < 1] -> S0 : ctx.n = ctx.n + 1\n\
-         \x20\x20\x20\x20\x20\x20\x20\x20on PING [ctx.n >= 1] -> S1\n\
-         \x20\x20\x20\x20}\n\
-         \x20\x20\x20\x20state S1 { }\n\
-         }\n",
-    )
-    .unwrap();
+    for strategy in ["switch", "table"] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        // ASCII-only. Two `on PING` transitions, complementary guards.
+        fs::write(
+            dir.join("amb.fsm"),
+            "language fsm 2.0\n\n\
+             machine Amb {\n\
+             \x20\x20\x20\x20context { n : u8 = 0 }\n\
+             \x20\x20\x20\x20events { PING }\n\
+             \x20\x20\x20\x20initial S0\n\
+             \x20\x20\x20\x20state S0 {\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20on PING [ctx.n < 1] -> S0 : ctx.n = ctx.n + 1\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20on PING [ctx.n >= 1] -> S1\n\
+             \x20\x20\x20\x20}\n\
+             \x20\x20\x20\x20state S1 { }\n\
+             }\n",
+        )
+        .unwrap();
 
-    // Generate with the SWITCH strategy (the failure is deterministic and
-    // self-evident there: a C compile error). `fsm generate` itself
-    // SUCCEEDS — the analyzer accepts this valid DSL; the defect is at
-    // the C level, the P0-1 silent-data-loss class.
-    Assert::cargo_bin("fsm")
-        .unwrap()
-        .args(["generate", "--target", "c99", "--strategy", "switch"])
-        .arg(dir.join("amb.fsm"))
-        .arg("--out")
-        .arg(dir.join("out"))
-        .assert()
-        .success();
+        // `fsm generate` SUCCEEDS — the analyzer accepts this valid DSL;
+        // the defect was only ever at the emitted-C level.
+        Assert::cargo_bin("fsm")
+            .unwrap()
+            .args(["generate", "--target", "c99", "--strategy", strategy])
+            .arg(dir.join("amb.fsm"))
+            .arg("--out")
+            .arg(dir.join("out"))
+            .assert()
+            .success();
 
-    let amb_c = fs::read_to_string(dir.join("out/Amb.c")).unwrap();
-    fs::write(
-        dir.join("out/m.c"),
-        "#include \"Amb.h\"\n\
-         void Amb_entry_S0(Amb_t*m){(void)m;}\n\
-         void Amb_entry_S1(Amb_t*m){(void)m;}\n\
-         void Amb_exit_S0(Amb_t*m){(void)m;}\n\
-         void Amb_exit_S1(Amb_t*m){(void)m;}\n\
-         int main(void){Amb_t a;Amb_init(&a);return 0;}\n",
-    )
-    .unwrap();
-    fs::write(dir.join("out/h.c"), HOST_HAL_C).unwrap();
+        let out = dir.join("out");
+        // Host main: drive PING twice and assert S0 -> S0 -> S1 plus the
+        // `n` mutation (the first transition's action ran). RUN-asserted,
+        // NOT symbol-presence (SUBAGENT_CONVENTIONS §5.4).
+        fs::write(
+            out.join("m.c"),
+            "#include <stdio.h>\n\
+             #include \"Amb.h\"\n\
+             void Amb_entry_S0(Amb_t*m){(void)m;}\n\
+             void Amb_entry_S1(Amb_t*m){(void)m;}\n\
+             void Amb_exit_S0(Amb_t*m){(void)m;}\n\
+             void Amb_exit_S1(Amb_t*m){(void)m;}\n\
+             static int fails=0;\n\
+             static void chk(const char*w,int g,int e){if(g!=e){fprintf(stderr,\"FAIL %s got %d want %d\\n\",w,g,e);fails++;}}\n\
+             int main(void){\n\
+             \x20 Amb_t a; Amb_init(&a);\n\
+             \x20 chk(\"s.init\",(int)Amb_current_state(&a),(int)AMB_STATE_S0);\n\
+             \x20 Amb_Event_t e; e.id=AMB_EVENT_PING;\n\
+             \x20 Amb_dispatch(&a,&e);\n\
+             \x20 chk(\"s.after1\",(int)Amb_current_state(&a),(int)AMB_STATE_S0);\n\
+             \x20 chk(\"n.after1\",(int)a.context.n,1);\n\
+             \x20 Amb_dispatch(&a,&e);\n\
+             \x20 chk(\"s.after2\",(int)Amb_current_state(&a),(int)AMB_STATE_S1);\n\
+             \x20 chk(\"n.after2\",(int)a.context.n,1);\n\
+             \x20 if(fails){fprintf(stderr,\"%d failed\\n\",fails);return 1;}\n\
+             \x20 printf(\"AMB OK\\n\"); return 0;\n\
+             }\n",
+        )
+        .unwrap();
+        fs::write(out.join("h.c"), HOST_HAL_C).unwrap();
 
-    let res = Command::new("gcc")
-        .current_dir(dir.join("out"))
-        .args([
-            "-std=c99",
-            "-Wall",
-            "-Wextra",
-            "-Wpedantic",
-            "-Werror",
-            "-I.",
-            "Amb.c",
-            "m.c",
-            "h.c",
-            "-o",
-            "amb_app",
-        ])
-        .output()
-        .expect("gcc spawn");
+        let bin = out.join("amb_app");
+        let gcc = Command::new("gcc")
+            .current_dir(&out)
+            .args([
+                "-std=c99",
+                "-Wall",
+                "-Wextra",
+                "-Wpedantic",
+                "-Werror",
+                "-I.",
+                "Amb.c",
+                "m.c",
+                "h.c",
+                "-o",
+            ])
+            .arg(&bin)
+            .output()
+            .expect("gcc spawn");
+        assert!(
+            gcc.status.success(),
+            "[{strategy}] W7-FU-1 REGRESSION: gcc -Werror failed on \
+             guard-disambiguated same-event dispatch. stderr:\n{}\n\
+             --- generated Amb.c ---\n{}",
+            String::from_utf8_lossy(&gcc.stderr),
+            fs::read_to_string(out.join("Amb.c")).unwrap_or_default(),
+        );
 
-    // CURRENT (defective) expectation: the switch strategy emits a
-    // duplicate `case` so gcc FAILS. When W7-FU-1 is fixed this assertion
-    // flips and the test must be rewritten as a positive behavioural
-    // check (drive PING twice -> S0 then S1).
-    assert!(
-        !res.status.success(),
-        "W7-FU-1 APPEARS FIXED: the switch strategy now compiles \
-         guard-disambiguated same-event transitions. Convert this \
-         tripwire into a positive behavioural test (PING: S0 -> S0 -> S1) \
-         and update Doc 00 §11.25 / the W7-FU-1 follow-up entry."
-    );
-    let stderr = String::from_utf8_lossy(&res.stderr);
-    assert!(
-        stderr.contains("duplicate case"),
-        "expected the documented `duplicate case value` defect, got:\n{stderr}\
-         \n--- generated Amb.c ---\n{amb_c}"
-    );
+        let run = Command::new(&bin).output().expect("run amb_app");
+        assert!(
+            run.status.success() && String::from_utf8_lossy(&run.stdout).contains("AMB OK"),
+            "[{strategy}] W7-FU-1 REGRESSION: wrong transition fired \
+             (PING twice must walk S0 -> S0 -> S1). stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr),
+        );
+    }
 }
 
 /// Sanity that the fixture assets exist where docs/tests reference them.

@@ -1,0 +1,7 @@
+case SEL_EVENT_E: {
+if (!(m->context.x > 10)) break;
+m->context.hi_ct = (m->context.hi_ct + 1);
+if (!(m->context.x > 0)) break;
+m->context.lo_ct = (m->context.lo_ct + 1);
+m->context.zero_ct = (m->context.zero_ct + 1);
+} while (0);

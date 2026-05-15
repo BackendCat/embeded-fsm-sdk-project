@@ -195,6 +195,14 @@
           "description": "Parallel completion — verify per-region slots and B-08 all-regions-final helper. gcc -Werror clean.",
           "normative": true,
           "tags": ["parallel", "B-08"]
+        },
+        {
+          "id": "CGEN-004",
+          "kind": "golden",
+          "path": "codegen-c/004_guard_disambiguated_dispatch/",
+          "description": "W7-FU-1 (Doc 08 §4.1/§4.2, Doc 00 §11.26) — guard-disambiguated same-event transitions collapse to ONE case whose body picks the first-enabled candidate in (priority, document-order); the unguarded priority-3 transition is the always-enabled fallback. Regression guard for the duplicate-case (switch) / guard-ignoring first-row select (table, P0-1 silent-data-loss) defect.",
+          "normative": true,
+          "tags": ["guard", "transition-selection", "W7-FU-1", "P0-1"]
         }
       ]
     },

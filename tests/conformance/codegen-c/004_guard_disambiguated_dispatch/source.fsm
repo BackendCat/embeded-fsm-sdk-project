@@ -1,0 +1,29 @@
+language fsm 2.0
+
+// W7-FU-1 conformance point (Doc 08 §4.1/§4.2, Doc 00 §11.26): a UML
+// transition-selection semantics fixture. `Run` declares three `on E`
+// transitions disambiguated by guards + explicit priority (the FSM-E0300
+// fix-option-3 spec-legal form, acknowledged by FSM-W0300) plus an
+// unguarded priority-3 fallback. The generated C must collapse the
+// same-(source,event) group into ONE `case`/row-set whose body picks the
+// first-enabled candidate in (priority, document-order) — NOT a duplicate
+// `case` per transition (the pre-fix switch defect) and NOT a guard-
+// ignoring first-row select (the pre-fix table defect, P0-1 class).
+machine Sel {
+    context {
+        x       : i16 = 0
+        hi_ct   : u8  = 0
+        lo_ct   : u8  = 0
+        zero_ct : u8  = 0
+    }
+    events {
+        E
+    }
+    initial Run
+    state Run {
+        on E [ctx.x > 10] priority 1 -> Run : ctx.hi_ct = ctx.hi_ct + 1
+        on E [ctx.x > 0]  priority 2 -> Run : ctx.lo_ct = ctx.lo_ct + 1
+        on E              priority 3 -> Run : ctx.zero_ct = ctx.zero_ct + 1
+    }
+    state Done { }
+}
