@@ -275,6 +275,9 @@ fn format_record_summary(rec: &fsm_simulator::StepRecord) -> String {
         fsm_simulator::StepKind::Discarded => "discarded",
         fsm_simulator::StepKind::EventDeferred => "event_deferred",
         fsm_simulator::StepKind::EventRedispatched => "event_redispatched",
+        fsm_simulator::StepKind::SubmachineEntered => "submachine_entered",
+        fsm_simulator::StepKind::SubmachineEventDelegated => "submachine_event_delegated",
+        fsm_simulator::StepKind::SubmachineCompleted => "submachine_completed",
     };
     let evt = rec
         .event_received

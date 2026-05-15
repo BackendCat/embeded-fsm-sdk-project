@@ -40,6 +40,6 @@ pub use runtime::{
 };
 pub use trace::{
     execute_trace, parse_trace_yaml, write_trace_yaml, EventReceivedRecord, ExecError, InitTrace,
-    StepKind, StepRecord, TraceCommand, TraceFile, TraceParseError, TraceResult,
+    StepKind, StepRecord, SubmachineRecord, TraceCommand, TraceFile, TraceParseError, TraceResult,
     TransitionTakenRecord,
 };

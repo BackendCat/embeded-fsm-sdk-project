@@ -9,6 +9,7 @@ pub mod lca;
 pub mod machine_index;
 pub mod queue;
 pub mod state;
+pub mod submachine;
 pub mod timer;
 pub mod value;
 
@@ -18,5 +19,6 @@ pub use lca::{effective_lca, lca_inclusive};
 pub use machine_index::{MachineIndex, NodeKind, NodeRef, RegionRef};
 pub use queue::{EventQueue, QueueError};
 pub use state::{ContextValues, InterpreterSnapshot, RuntimeState};
+pub use submachine::{build_sub_runtime, entry_target, sub_reached_final, MAX_SUBMACHINE_DEPTH};
 pub use timer::{Timer, TimerFire, TimerSet};
 pub use value::Value;

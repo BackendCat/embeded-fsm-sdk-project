@@ -71,6 +71,38 @@ pub struct StepRecord {
     pub config_before: Vec<String>,
     /// Active config after the step.
     pub config_after: Vec<String>,
+    /// Submachine sub-instance detail — present only on the three
+    /// submachine step kinds (Doc 08 §12). `None` (and omitted from the
+    /// wire form) for every pre-existing step kind, so legacy traces
+    /// round-trip byte-identically; this is an append-only addition to the
+    /// StepRecord shape, never a change to existing fields. W2d's gcc
+    /// sim≡codegen matching consumes this to cross-check the generated C's
+    /// sub-instance behaviour against the simulator's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submachine: Option<SubmachineRecord>,
+}
+
+/// Sub-instance detail attached to the submachine step kinds (Doc 08 §12).
+/// Deterministic by construction — every field is an ordered `Vec` /
+/// scalar; no `HashMap`, so serde emits a byte-stable form (the Doc 13 §11
+/// wire-format contract that `BTreeMap` upholds elsewhere in this file).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmachineRecord {
+    /// The referencing `StateNode::Submachine` state id (e.g.
+    /// `s-Device-Connecting`) that owns this sub-instance.
+    pub ref_state_id: String,
+    /// Sub-instance active configuration before this step (empty just
+    /// before the instantiating entry).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sub_config_before: Vec<String>,
+    /// Sub-instance active configuration after this step.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sub_config_after: Vec<String>,
+    /// For `SubmachineEventDelegated`: the parent event name routed into
+    /// the sub-instance. `None` for enter / complete.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delegated_event: Option<String>,
 }
 
 /// Discriminator for the kind of step recorded. Set by the interpreter as a
@@ -103,6 +135,23 @@ pub enum StepKind {
     /// fields (transition / entered / exited) describe that reprocessing
     /// exactly as a normal dispatch would.
     EventRedispatched,
+    /// A `StateNode::Submachine` ref-state was entered and its nested
+    /// sub-instance was instantiated + initialised at the template's
+    /// initial pseudo-state (Doc 08 §12.2). `entered_states` covers the
+    /// parent-side entry; `submachine.sub_config_after` is the sub's
+    /// initial leaf. Appended post-`EventRedispatched` so the wire enum is
+    /// extended, never reordered.
+    SubmachineEntered,
+    /// A parent-unconsumed event was delegated into the active ref-state's
+    /// sub-instance and ran a sub-RTC step there (Doc 08 §12.1, after the
+    /// established transition-wins parent selection). `submachine` carries
+    /// the routed event name + the sub config before/after.
+    SubmachineEventDelegated,
+    /// The active ref-state's sub-instance reached its `Final` (Doc 08
+    /// §12.3). This record marks the detection; the parent's
+    /// `done -> Target` fires on the *following* `Completion` step through
+    /// the existing R1 completion path (not duplicated here).
+    SubmachineCompleted,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -325,6 +374,58 @@ mod tests {
             actions_executed: vec![],
             config_before: vec![],
             config_after: vec![],
+            submachine: None,
+        };
+        let s = serde_json::to_string(&rec).unwrap();
+        let back: StepRecord = serde_json::from_str(&s).unwrap();
+        assert_eq!(rec, back);
+    }
+
+    /// The appended `submachine` field is omitted from the wire form when
+    /// `None` — proves legacy traces (authored before W2c) round-trip
+    /// byte-identically and the addition is non-breaking (Doc 13 §11).
+    #[test]
+    fn submachine_field_omitted_when_none_keeps_legacy_wire_shape() {
+        let rec = StepRecord {
+            trace_id: 0,
+            kind: StepKind::Init,
+            virtual_clock_ms: 0,
+            event_received: None,
+            transition_taken: None,
+            exited_states: vec![],
+            entered_states: vec!["s-x".into()],
+            actions_executed: vec![],
+            config_before: vec![],
+            config_after: vec!["s-x".into()],
+            submachine: None,
+        };
+        let s = serde_json::to_string(&rec).unwrap();
+        assert!(
+            !s.contains("submachine"),
+            "None submachine must not appear in the wire form; got: {s}"
+        );
+    }
+
+    /// A `SubmachineRecord` is fully deterministic + round-trips.
+    #[test]
+    fn submachine_record_round_trips() {
+        let rec = StepRecord {
+            trace_id: 3,
+            kind: StepKind::SubmachineEventDelegated,
+            virtual_clock_ms: 0,
+            event_received: None,
+            transition_taken: None,
+            exited_states: vec![],
+            entered_states: vec![],
+            actions_executed: vec![],
+            config_before: vec!["s-Device-Connecting".into()],
+            config_after: vec!["s-Device-Connecting".into()],
+            submachine: Some(SubmachineRecord {
+                ref_state_id: "s-Device-Connecting".into(),
+                sub_config_before: vec!["s-Connection-Idle".into()],
+                sub_config_after: vec!["s-Connection-Handshake".into()],
+                delegated_event: Some("CONNECT".into()),
+            }),
         };
         let s = serde_json::to_string(&rec).unwrap();
         let back: StepRecord = serde_json::from_str(&s).unwrap();

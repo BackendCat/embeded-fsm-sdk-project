@@ -1,0 +1,46 @@
+language fsm 2.0
+
+feature submachines
+
+// A reusable connection protocol, factored as a submachine. It runs
+// Idle -> Handshake -> Established and then reaches its `final` state,
+// which signals completion back to whatever instantiates it.
+submachine Connection {
+    events { CONNECT ACK ESTABLISHED }
+
+    initial Idle
+
+    state Idle {
+        on CONNECT -> Handshake
+    }
+
+    state Handshake {
+        on ACK -> Established
+    }
+
+    state Established {
+        on ESTABLISHED -> Done
+    }
+
+    final Done
+}
+
+// The device embeds the Connection submachine as its `Connecting` state.
+// When the embedded protocol completes (its `final` is reached), the
+// `done -> Online` completion edge fires automatically — no external
+// event — and the device becomes Online. RECONNECT from Online tears the
+// sub-instance down and re-enters Connecting with a fresh one.
+machine Device {
+    events { CONNECT ACK ESTABLISHED RECONNECT }
+
+    initial Connecting
+
+    state Connecting is Connection {
+        done -> Online
+        on RECONNECT -> Connecting
+    }
+
+    state Online {
+        on RECONNECT -> Connecting
+    }
+}

@@ -62,6 +62,16 @@ impl EventQueue {
         self.inner.is_empty()
     }
 
+    /// Front-to-back iterator over queued events without consuming them.
+    /// Used by the submachine sync (Doc 08 §12) to make the parent
+    /// `Completion(ref_state)` enqueue idempotent — a sub that stays Final
+    /// until its ref-state exits must enqueue its completion exactly once,
+    /// otherwise every sync re-enqueues it and trips the §9.4
+    /// completion-loop cap.
+    pub fn iter(&self) -> impl Iterator<Item = &QueuedEvent> {
+        self.inner.iter()
+    }
+
     pub fn pop_front(&mut self) -> Option<QueuedEvent> {
         self.inner.pop_front()
     }

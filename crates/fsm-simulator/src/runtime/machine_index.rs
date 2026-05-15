@@ -109,6 +109,17 @@ pub struct MachineIndex {
     /// Index of events declared on the machine, by id.
     pub events_by_id: HashMap<String, Arc<fsm_ir::EventObject>>,
     pub events_by_name: HashMap<String, String>, // name → id
+    /// Submachine template indexes, keyed by template `MachineObject.id`
+    /// (`m-<SubName>`, e.g. `m-Connection`) — Doc 08 §12 / Doc 09 §3+§4.11.
+    /// A `StateNode::Submachine`'s `submachine_id` resolves here to the
+    /// fully-built index of its template, so the simulator can instantiate
+    /// a nested sub-`RuntimeState` over it (W2c). Each template lowers
+    /// structurally like a machine, so its index is built the same way,
+    /// recursively (W2b emits a sub-template's own `submachines` empty to
+    /// bottom out static recursion — FSM-E0502 already rejects template
+    /// cycles at analysis — but the recursive build keeps the structure
+    /// ready if a future sub-wave adds nested-template emission).
+    pub submachine_indexes: HashMap<String, Arc<MachineIndex>>,
 }
 
 /// R2.1 (2026-05-15): visitor that flattens a machine's region/state tree
@@ -196,6 +207,19 @@ impl MachineIndex {
             .iter()
             .map(|e| (e.name.clone(), e.id.clone()))
             .collect();
+        // Recursively index every submachine template carried on this
+        // machine (Doc 09 §3). `StateNode::Submachine.submachine_id` keys
+        // straight into this map at runtime.
+        let submachine_indexes: HashMap<String, Arc<MachineIndex>> = m
+            .submachines
+            .iter()
+            .map(|sm| {
+                (
+                    sm.id.clone(),
+                    Arc::new(MachineIndex::build(Arc::new(sm.clone()))),
+                )
+            })
+            .collect();
         Self {
             machine: m,
             root_region_id,
@@ -203,7 +227,18 @@ impl MachineIndex {
             regions,
             events_by_id,
             events_by_name,
+            submachine_indexes,
         }
+    }
+
+    /// Resolve a `StateNode::Submachine.submachine_id` to the fully-built
+    /// index of its template (Doc 08 §12 / Doc 09 §4.11). `None` if the
+    /// reference is unresolved — the analyzer emits FSM-E0103 in that case,
+    /// so a clean IR always resolves; the simulator degrades to a
+    /// leaf-no-op rather than panicking on a malformed IR (Doc 09 §1
+    /// partial-IR principle).
+    pub fn submachine_index(&self, submachine_id: &str) -> Option<Arc<MachineIndex>> {
+        self.submachine_indexes.get(submachine_id).cloned()
     }
 }
 

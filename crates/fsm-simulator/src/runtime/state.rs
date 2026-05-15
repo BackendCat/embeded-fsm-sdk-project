@@ -59,6 +59,16 @@ pub struct RuntimeState {
     /// Initialization flag — every method except [`super::super::Interpreter::init`]
     /// requires this to be true.
     pub initialized: bool,
+    /// Live submachine sub-instances, keyed by the **referencing**
+    /// `StateNode::Submachine` state id (e.g. `s-Device-Connecting`) — Doc
+    /// 08 §12. A nested `RuntimeState` is value-owned here while the
+    /// ref-state is the active leaf: entering the ref-state instantiates +
+    /// inits one at the template's initial; exiting the ref-state drops it
+    /// (deterministic teardown, no leak). `Box` keeps `RuntimeState`'s size
+    /// flat under recursion. `BTreeMap` (not `HashMap`) so any snapshot /
+    /// serialised form iterates keys in sorted order — the same wire-format
+    /// determinism contract as `context` / `history`.
+    pub submachines: BTreeMap<String, Box<RuntimeState>>,
 }
 
 impl RuntimeState {
@@ -78,6 +88,7 @@ impl RuntimeState {
             current_payload: None,
             completion_run: 0,
             initialized: false,
+            submachines: BTreeMap::new(),
         }
     }
 
