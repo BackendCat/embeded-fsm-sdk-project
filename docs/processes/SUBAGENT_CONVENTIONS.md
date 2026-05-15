@@ -164,18 +164,21 @@ Agents respect this. If they discover they NEED to touch an out-of-scope file, t
 
 ---
 
-## 7. Disk hygiene
+## 7. Disk hygiene (v1.1.0 — warm-cache policy)
 
-Per the [Disk 5% margin] rule:
-- Agents check `df -h /` before starting
-- If disk < 1G free, agents `cargo clean` their own worktree (NEVER another agent's)
-- After commit, agents leave the worktree in place (orchestrator cleans on merge)
-- Never `cargo build --release` to save target space
+**The shared `CARGO_TARGET_DIR` (`.cargo/config.toml` → `/root/dev/embeded-fsm-sdk-target`) is a bounded, reusable cache — NOT runaway growth.** `deps/` is fingerprint-keyed and reused across builds (~5-6G steady); `incremental/` (~1G) regenerates cheaply. Steady-state total ~7-9G, slow creep to ~10-12G over many waves (stale dep-version artifacts + per-test binaries) — never disk-runaway. The earlier per-wave `cargo clean` was a symptom of the now-fixed per-worktree target *multiplication*, NOT a real need. Cleaning a warm cache forces a slow cold rebuild (the 20-30 min/wave anti-pattern).
+
+**Policy — keep the cache warm:**
+- **Do NOT `cargo clean` between waves.** Warm builds are minutes; cold are 20-30 min. This is the single biggest wave-speed lever.
+- Agents check `df -h /` before starting. If disk is tight *during* a wave, the FIRST reclaim is `rm -rf <shared-target>/debug/incremental` (~1G, regenerates with a tiny penalty — NOT a cold rebuild). Never touch another agent's worktree.
+- Full `cargo clean` is a LAST RESORT, only when disk is genuinely starved (<~2G free) — it forfeits the warm cache.
+- Never `cargo build --release` to save space.
+- After commit, agents leave the worktree in place (orchestrator cleans on merge).
 
 The orchestrator:
-- Runs `cargo clean` on main before dispatching parallel waves
-- Removes merged worktrees immediately
-- Monitors disk between waves; defers parallelism if margin < 8% (gives waves room to build)
+- Does NOT pre-clean before waves (keeps the cache warm). Removes merged worktrees immediately (worktree source is tiny; the cache is shared+external so removal doesn't lose it).
+- Monitors `df -h /` between waves; if margin trends below the 5% line, does the incremental-only reclaim first, full-clean only if still starved.
+- Surfaces a hard disk ceiling to the user as a decision (per [[infra-constraint-escalation]]) rather than grinding clean/rebuild loops.
 
 ---
 
