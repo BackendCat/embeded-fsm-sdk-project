@@ -5,6 +5,18 @@ All notable changes to FSM Studio are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Corrected — v1.0.0 scope statement (audit integrity, 2026-05-15)
+
+The v1.0.0 entry below described scope as "full UML statechart semantics." This was **overstated**: **submachine support is entirely absent** across the pipeline (grammar has no `submachine`/`state … is X` production; `KwIs`/`KwSubmachine` tokens are orphans; `lower.rs` hard-codes `submachines: Vec::new()`; IR `SubmachineRef` is only built by a unit-test fixture; codegen/simulator arms are defensive-only for a never-produced variant). Earlier ROADMAP/backlog claims that "IR + analyzer already lower submachine references" were aspirational prose never reconciled against code — the same class as the P0-1 finding. The three shipped examples (motor, traffic-light, vending-machine) do not use submachines, so `GATE_VERIFICATION_v1_0.md` was accurate for what it tested; the defect is the *scope wording*, not the gate evidence. Submachine is now tracked as a v1.1 multi-wave epic (W2a parser/AST → W2b analyzer/IR → W2c simulator → W2d codegen). Correct reading of v1.0.0: **UML statecharts excluding submachines** (composite, parallel regions, history, choice/junction, fork/join, completion, deferred events all work and are gcc-verified).
+
+### Added (in progress toward v1.1)
+- `defer EVENT` runtime (removes the v1.0 FSM-E0903 limitation) — bounded buffer + FIFO replay on state exit; sim≡codegen verified.
+- IR-schema-validation gate (debug-mode, zero release cost) — malformed IR caught at the analyzer boundary; proven load-bearing.
+- Shared `CARGO_TARGET_DIR` + warm-cache build policy (wave-speed + disk-safety).
+- TD-BUG-1 + 3 sibling table-strategy degenerate-input codegen bugs fixed (zero-transition machine now gcc -Werror-clean, both strategies).
+
 ## [1.0.0] — 2026-05-14
 
 ### Added
