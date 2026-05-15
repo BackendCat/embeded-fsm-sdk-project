@@ -1,0 +1,58 @@
+{
+  "$comment": "FSM Studio metrics snapshot. Phase D.8 of the autonomy plan. Recurring every ~10 waves or 7 days. Regressions flag in next session's status report.",
+  "date": "2026-05-15",
+  "commit": "b480003",
+  "milestone": "v1.0.0 tagged; v1.1 sprint W1 (defer) in flight",
+  "tests": {
+    "total_passing": 495,
+    "total_failing": 0,
+    "conformance_fixtures": 25,
+    "note": "baseline at v1.0.0 tag; v1.1-W1 will add defer tests"
+  },
+  "loc": {
+    "src_excl_tests": 29797,
+    "tests": 10890,
+    "test_to_src_ratio": 0.366
+  },
+  "api_surface": {
+    "pub_items": 878,
+    "pub_crate_items": 5,
+    "note": "Audit B P2-A1: heavy pub over-exposure (only ~57 used cross-crate). pub(crate) sweep deferred to v1.1. Track this number trending DOWN as the sweep lands."
+  },
+  "mutation_density": {
+    "mut_self_methods": 278,
+    "ref_self_methods": 419,
+    "mut_ratio": 0.399,
+    "note": "Audit C flagged LoweringCtx super-struct (27 mut-self). Track DOWN as LoweringCtx split lands (deferred v1.1)."
+  },
+  "safety": {
+    "crates_forbid_unsafe": 9,
+    "crates_total": 9,
+    "unsafe_blocks": 0,
+    "note": "100% — all crates #![forbid(unsafe_code)] as of commit 7326608 (P1-Q2 closed)"
+  },
+  "diagnostics": {
+    "live_codes": 75,
+    "grep_token_count": 87,
+    "note": "75 live DiagnosticCode variants + deprecated (E0301/E0304/E0903-pending-retire-in-v1.1). grep count includes message-string mentions."
+  },
+  "gate_status": {
+    "cleanly_met": 7,
+    "acceptable_partial": 2,
+    "blocked": 0,
+    "detail": "G1-G6,G8 clean; G7 (conformance org) + G9 (remote CI) partial with v1.1 closure"
+  },
+  "audit_findings_trend": {
+    "audit_2026_05_14_correctness": {"P0": 5, "P1": 9, "resolved_P0": 5, "resolved_P1": 9},
+    "audit_B_architecture": {"P0": 0, "P1": 6, "resolved_P1": 1, "deferred_P1_v1_1": 5},
+    "audit_C_quality": {"P0": 2, "P1": 14, "note": "P0s quality-class; mostly resolved by R2"},
+    "audit_D_reliability": {"P0": 0, "P1": 4, "resolved_P1": 4},
+    "audit_pre_tag_2026_05_15": {"new_P0": 0, "new_P1": 2, "resolved": 1, "deferred_v1_1": 1}
+  },
+  "process": {
+    "waves_dispatched_total": 22,
+    "waves_salvaged_after_interruption": 3,
+    "subagent_conventions_doc": "docs/processes/SUBAGENT_CONVENTIONS.md v1.0.0",
+    "roadmap_doc": "docs/ROADMAP.md (v1.0..v2.0)"
+  }
+}
