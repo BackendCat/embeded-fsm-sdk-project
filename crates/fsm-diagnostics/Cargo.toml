@@ -8,6 +8,11 @@ authors.workspace = true
 repository.workspace = true
 description = "FSM Studio diagnostics foundation — Span, Severity, DiagnosticCode, Diagnostic"
 
+# Inherits the workspace lint policy (root `[workspace.lints.rust]`):
+# `unreachable_pub = "warn"`. Doc 00 §11.4x (the §11.31 deferral closed).
+[lints]
+workspace = true
+
 # Foundation crate: zero workspace deps by design (Doc 00 §7.1). Every other
 # crate that needs Span / SourceLocation / DiagnosticCode / Diagnostic depends
 # on this crate. Optional external integrations are gated behind features.

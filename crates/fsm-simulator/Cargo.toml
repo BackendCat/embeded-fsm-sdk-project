@@ -8,6 +8,11 @@ authors.workspace = true
 repository.workspace = true
 description = "FSM Studio interpreter — pure-Rust RTC step engine over IR"
 
+# Inherits the workspace lint policy (root `[workspace.lints.rust]`):
+# `unreachable_pub = "warn"`. Doc 00 §11.4x (the §11.31 deferral closed).
+[lints]
+workspace = true
+
 [dependencies]
 # v1.0 ships the interpreter only. The WebSocket / JSON-RPC daemon
 # (Doc 13 / Doc 20 §8.4) is deferred per Doc 00 §7.2 — tokio and

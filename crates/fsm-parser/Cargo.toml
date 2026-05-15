@@ -8,6 +8,11 @@ authors.workspace = true
 repository.workspace = true
 description = "FSM Studio parser — recursive-descent over rowan CST + typed AST"
 
+# Inherits the workspace lint policy (root `[workspace.lints.rust]`):
+# `unreachable_pub = "warn"`. Doc 00 §11.4x (the §11.31 deferral closed).
+[lints]
+workspace = true
+
 [dependencies]
 # Parser emits Diagnostic values on syntax errors, so it depends directly on
 # fsm-diagnostics rather than re-exporting through fsm-lexer (Doc 00 §7.1).

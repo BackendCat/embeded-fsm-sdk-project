@@ -8,6 +8,11 @@ authors.workspace = true
 repository.workspace = true
 description = "FSM Studio canonical formatter — CST in, formatted .fsm text out"
 
+# Inherits the workspace lint policy (root `[workspace.lints.rust]`):
+# `unreachable_pub = "warn"`. Doc 00 §11.4x (the §11.31 deferral closed).
+[lints]
+workspace = true
+
 [dependencies]
 # Formatter walks the CST only. By design, it does NOT depend on the
 # analyzer or IR (Doc 23 §4 / Doc 20 §11.5). It still surfaces parse-time

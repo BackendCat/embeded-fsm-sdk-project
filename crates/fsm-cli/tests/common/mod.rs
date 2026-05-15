@@ -10,6 +10,14 @@
 //! environment. CI must hard-require gcc; opting out is a developer-only
 //! escape hatch.
 
+// `tests/common/mod.rs` is the shared integration-test harness, recompiled per
+// test binary; the workspace `unreachable_pub` lint (Doc 00 §11.4x) sees these
+// helpers as unreachable per-binary even though they are a real cross-test API.
+// Same idiom-based justification as the existing per-item `#[allow(dead_code)]`
+// on `should_skip_gcc`/`workspace_root`; a single module attribute is the
+// lower-noise expression of it.
+#![allow(unreachable_pub)]
+
 use std::path::PathBuf;
 
 /// Returns `true` when the caller should short-circuit because gcc skipping
