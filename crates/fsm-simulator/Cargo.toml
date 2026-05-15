@@ -14,13 +14,23 @@ description = "FSM Studio interpreter — pure-Rust RTC step engine over IR"
 # tungstenite are intentionally NOT in the dependency set.
 fsm-diagnostics = { workspace = true }
 fsm-ir = { path = "../fsm-ir" }
-fsm-analyzer = { path = "../fsm-analyzer" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+# AD-2 / Audit B P1-A2 (2026-05-15): `fsm-analyzer` was a library
+# dependency but no `fsm_analyzer::` symbol is used anywhere in `src/`
+# (only a stale doc-comment, since corrected) — `cargo build -p
+# fsm-simulator` compiled the whole analyzer + serde/thiserror tree for
+# nothing. It is NOT fully dead, though: `examples/capture_trace.rs` (an
+# in-tree scratch trace-refresh helper) genuinely calls
+# `fsm_analyzer::analyze_with_source`. Demoting it to a dev-dependency
+# removes it from the shipped library's dependency surface (the actual
+# P1-A2 concern) while keeping that example compilable — mirroring the
+# `fsm-parser` dev-dep below, which exists for the very same example.
+fsm-analyzer = { path = "../fsm-analyzer" }
 # Used only by `examples/capture_trace.rs` — a scratch helper for refreshing
 # example traces after simulator-semantic changes.
 fsm-parser = { path = "../fsm-parser" }

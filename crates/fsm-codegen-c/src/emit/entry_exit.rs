@@ -16,12 +16,43 @@
 //! entry set root-first. For `Local` and `Internal` transitions the sets
 //! are empty (or empty on the source side); the LCA is the source itself.
 
-use fsm_ir::{TransitionKind, TransitionObject};
+use fsm_ir::{ParentResolver, TransitionKind, TransitionObject};
 
 use crate::parent_table::ParentTable;
 use crate::state_index::{StateIndex, ROOT_SENTINEL};
 
+/// `ParentTable` is the `u8`-index carrier for the shared LCA algorithm.
+///
+/// AD-1 (2026-05-15): the walk is the shared [`fsm_ir`] generic; this impl
+/// only supplies the per-step parent + the `ROOT_SENTINEL` terminator.
+/// Unlike the analyzer/simulator `String` carriers, regions are *not* in
+/// this chain — `parents[i]` is the enclosing composite/parallel state
+/// index (or `ROOT_SENTINEL`). `ROOT_SENTINEL` is its own parent in the
+/// table, so termination is via `is_root`, not via `parent` returning
+/// `None`; the shared walk's repeat-guard would also stop a malformed
+/// self-parent cycle. This reproduces the deleted bespoke chain walk
+/// exactly (proven by this module's tests).
+impl ParentResolver for ParentTable {
+    type Id = u8;
+
+    fn parent(&self, id: &u8) -> Option<u8> {
+        self.parents.get(*id as usize).copied()
+    }
+
+    fn is_root(&self, id: &u8) -> bool {
+        *id == ROOT_SENTINEL
+    }
+}
+
 /// Compute the effective LCA index for a transition, per B-09.
+///
+/// NOTE: codegen carries two extra kind rules the analyzer/simulator
+/// `effective_lca` do not model — `Local`/`Internal` collapse the LCA to
+/// `source` (their exit/entry sets are empty by construction in
+/// `exit_path`/`entry_path`). The shared [`fsm_ir::effective_lca`] only
+/// encodes the universal external-self lift, so codegen keeps this thin
+/// wrapper around the shared base walk rather than delegating wholesale —
+/// preserving the exact prior behaviour.
 pub fn effective_lca(t: &TransitionObject, index: &StateIndex, parents: &ParentTable) -> u8 {
     let source = index.must_lookup(&t.source);
     let target = index.must_lookup(&t.target);
@@ -35,32 +66,14 @@ pub fn effective_lca(t: &TransitionObject, index: &StateIndex, parents: &ParentT
 }
 
 /// Standard inclusive LCA — a state is its own ancestor. Doc 08 §5.1.
+///
+/// Thin adapter over the shared [`fsm_ir::lca_inclusive`] generic (AD-1).
+/// The `u8` `ParentTable` carrier above makes the shared walk produce a
+/// chain `[a, …, ROOT_SENTINEL]` identical to the deleted bespoke loop
+/// (which pushed `ROOT_SENTINEL` exactly once before stopping), so the
+/// returned index is byte-identical for every input.
 pub fn lca_inclusive(a: u8, b: u8, parents: &ParentTable) -> u8 {
-    // Build the ancestor chain of `a` including a itself.
-    let mut chain = Vec::with_capacity(8);
-    let mut cur = a;
-    loop {
-        chain.push(cur);
-        if cur == ROOT_SENTINEL {
-            break;
-        }
-        cur = parents.parents[cur as usize];
-        if cur == ROOT_SENTINEL {
-            chain.push(ROOT_SENTINEL);
-            break;
-        }
-    }
-    // Walk `b`'s chain until we hit a state in `chain`.
-    let mut cur = b;
-    loop {
-        if chain.contains(&cur) {
-            return cur;
-        }
-        if cur == ROOT_SENTINEL {
-            return ROOT_SENTINEL;
-        }
-        cur = parents.parents[cur as usize];
-    }
+    fsm_ir::lca_inclusive(&a, &b, parents)
 }
 
 /// Compute the ordered exit set (innermost first) for a transition.
@@ -267,6 +280,62 @@ mod tests {
         let tt = t("s-running", "s-running", TransitionKind::Internal);
         assert!(exit_path(&tt, &index, &parents).is_empty());
         assert!(entry_path(&tt, &index, &parents).is_empty());
+    }
+
+    /// AD-1 guard: the shared `u8` LCA must agree with a from-scratch
+    /// transcription of the deleted bespoke chain walk on the canonical
+    /// pairs — sibling, nested, external-self, local-self. (No parallel
+    /// here: codegen's `u8` carrier collapses regions so cross-parallel
+    /// reduces to the same parent-index walk; the `fsm-ir`
+    /// `lca_parent_resolver` suite covers the parallel `u8` case.)
+    fn oracle_lca(a: u8, b: u8, parents: &crate::parent_table::ParentTable) -> u8 {
+        let mut chain = Vec::with_capacity(8);
+        let mut cur = a;
+        loop {
+            chain.push(cur);
+            if cur == ROOT_SENTINEL {
+                break;
+            }
+            cur = parents.parents[cur as usize];
+            if cur == ROOT_SENTINEL {
+                chain.push(ROOT_SENTINEL);
+                break;
+            }
+        }
+        let mut cur = b;
+        loop {
+            if chain.contains(&cur) {
+                return cur;
+            }
+            if cur == ROOT_SENTINEL {
+                return ROOT_SENTINEL;
+            }
+            cur = parents.parents[cur as usize];
+        }
+    }
+
+    #[test]
+    fn shared_u8_lca_matches_handrolled_oracle() {
+        let (index, parents) = nested_index();
+        let running = index.lookup("s-running").unwrap();
+        let op = index.lookup("s-op").unwrap();
+        let faulted = index.lookup("s-faulted").unwrap();
+        for (a, b) in [
+            (running, faulted), // nested across composite → ROOT
+            (faulted, running),
+            (running, op),       // ancestor → op
+            (running, running),  // self → running
+            (op, ROOT_SENTINEL), // → ROOT
+        ] {
+            assert_eq!(
+                lca_inclusive(a, b, &parents),
+                oracle_lca(a, b, &parents),
+                "u8 lca mismatch for ({a},{b})"
+            );
+        }
+        // Concrete: Running/Faulted across the Op composite → ROOT.
+        assert_eq!(lca_inclusive(running, faulted, &parents), ROOT_SENTINEL);
+        assert_eq!(lca_inclusive(running, op, &parents), op);
     }
 
     #[test]

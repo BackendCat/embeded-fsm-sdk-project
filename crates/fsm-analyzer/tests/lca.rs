@@ -3,14 +3,14 @@
 //! Each case constructs an IR via `analyze` and walks the machine to
 //! recover the resulting transition kind and effective-LCA.
 
-use fsm_analyzer::{analyze, lca::effective_lca, lca::MachineIndex};
+use fsm_analyzer::{analyze, lca::effective_lca, lca::LcaIndex};
 use fsm_ir::{StateNode, TransitionKind};
 use fsm_parser::parse;
 
-fn machine_index(src: &str) -> (fsm_ir::Ir, MachineIndex) {
+fn machine_index(src: &str) -> (fsm_ir::Ir, LcaIndex) {
     let pr = parse(src);
     let ir = analyze(&pr).ir.unwrap();
-    let idx = MachineIndex::build(&ir.machines[0]);
+    let idx = LcaIndex::build(&ir.machines[0]);
     (ir, idx)
 }
 

@@ -1,5 +1,7 @@
-//! Rich, simulator-specific machine index — extends `fsm_analyzer`'s
-//! parent-only `MachineIndex` with the extra topology the RTC step needs.
+//! Rich, simulator-specific machine index — the simulator's own flattened
+//! topology, far richer than the analyzer's LCA-only `LcaIndex` (with which
+//! it shares the `fsm_ir::ParentResolver` LCA algorithm but nothing else;
+//! AD-1/AD-2 2026-05-15 removed the dead `fsm-analyzer` library dep).
 //!
 //! Beyond LCA, the interpreter must answer:
 //! - "what is the active leaf of region R?" (Doc 08 §6.2, §11)
@@ -16,8 +18,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fsm_ir::{
-    walk_state, DeferDecl, HistoryObject, IrVisitor, MachineObject, RegionObject, StateNode,
-    TimerObject, TransitionObject,
+    walk_state, DeferDecl, HistoryObject, IrVisitor, MachineObject, ParentResolver, RegionObject,
+    StateNode, TimerObject, TransitionObject,
 };
 
 /// One node in the flattened machine tree.
@@ -424,36 +426,18 @@ impl MachineIndex {
     /// Ordered ancestors of a state ID. The state itself is the first
     /// element. Walks state-parent links; intermediate regions appear as
     /// their own IDs. Terminates at the root region.
+    ///
+    /// AD-1 (2026-05-15): the walk itself is the shared
+    /// [`fsm_ir::ancestors`] generic; the per-step "what is the parent"
+    /// rule lives in this type's [`ParentResolver`] impl below and is a
+    /// transcription of the prior hand-rolled loop body. The old loop had
+    /// a `0..1024` defensive cap; the shared walk's repeat-guard
+    /// (terminate the first time a node would recur) subsumes it — a
+    /// cyclic chain stops on first repeat (≪ 1024) and an acyclic chain
+    /// is bounded by tree depth (≪ 1024), so the observable result is
+    /// identical for every input. Pinned by `runtime/lca.rs` tests.
     pub fn ancestors(&self, id: &str) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut cur = id.to_string();
-        // Defensive cap — should never reach this on well-formed IR.
-        for _ in 0..1024 {
-            if out.iter().any(|x: &String| x == &cur) {
-                break;
-            }
-            out.push(cur.clone());
-            // If `cur` is a state, step to its parent_region; if it's a
-            // region, step to its parent_state. Stop at root region.
-            if let Some(node) = self.nodes.get(&cur) {
-                if let Some(region) = &node.parent_region {
-                    cur = region.clone();
-                } else {
-                    break;
-                }
-            } else if let Some(region) = self.regions.get(&cur) {
-                if cur == self.root_region_id {
-                    break;
-                }
-                match &region.parent_state {
-                    Some(s) => cur = s.clone(),
-                    None => break,
-                }
-            } else {
-                break;
-            }
-        }
-        out
+        fsm_ir::ancestors(&id.to_string(), self)
     }
 
     /// Direct parent state of a state. Returns the containing composite /
@@ -477,6 +461,40 @@ impl MachineIndex {
 
     pub fn event_name_by_id(&self, id: &str) -> Option<&str> {
         self.events_by_id.get(id).map(|e| e.name.as_str())
+    }
+}
+
+/// `MachineIndex` is the `String`-id carrier for the shared LCA algorithm.
+///
+/// One `parent(id)` step is a verbatim transcription of the deleted
+/// `ancestors()` loop body, so the alternating state↔region walk and its
+/// termination conditions are byte-identical:
+///
+/// - `id` is a **state node** → step to its `parent_region` (the root's
+///   direct children carry `parent_region = Some(root)`, so this is always
+///   `Some` for indexed states; `None` only for an unknown id).
+/// - `id` is a **region** → terminate at the root region (`None`);
+///   otherwise step to its `parent_state` (`None` for the synthetic
+///   root-region "parent" that does not exist).
+/// - `id` is neither (malformed / unknown) → terminate (`None`).
+///
+/// The shared walk's repeat-guard replaces the old explicit `0..1024`
+/// cap (see `ancestors` doc).
+impl ParentResolver for MachineIndex {
+    type Id = String;
+
+    fn parent(&self, id: &String) -> Option<String> {
+        if let Some(node) = self.nodes.get(id) {
+            node.parent_region.clone()
+        } else if let Some(region) = self.regions.get(id) {
+            if *id == self.root_region_id {
+                None
+            } else {
+                region.parent_state.clone()
+            }
+        } else {
+            None
+        }
     }
 }
 

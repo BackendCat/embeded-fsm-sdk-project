@@ -33,7 +33,7 @@ pub mod scope;
 pub mod symbol_table;
 pub mod util;
 
-pub use lca::{effective_lca, lca_inclusive, MachineIndex};
+pub use lca::{effective_lca, lca_inclusive, LcaIndex};
 pub use lower::{analyze, analyze_with_source, AnalysisResult};
 pub use symbol_table::SymbolTable;
 
