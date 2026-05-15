@@ -30,9 +30,36 @@ use fsm_parser::import_resolver::{resolve_import, ImportError};
 use fsm_parser::{parse, ParseResult};
 
 use crate::cli::CheckArgs;
-use crate::diagnostics;
+use crate::{config, diagnostics};
 
 pub(crate) fn run(args: CheckArgs) -> ExitCode {
+    // Load the project `fsm.toml` once so `[compiler] allow`/`deny`
+    // (Doc 18 §6) can be applied at the diagnostic-finalization point
+    // below, exactly as `cmd::generate` loads it for `[generate]`. The
+    // search starts at the first input file's directory and walks up
+    // (config.rs `load`). A malformed `fsm.toml` is a clean exit-4
+    // config error — identical handling to `cmd::generate` (a file the
+    // user clearly meant to be honoured but cannot be parsed must fail
+    // loud, never be silently skipped). `allow`/`deny` default to empty
+    // when there is no `fsm.toml` or no `[compiler]` block, so behaviour
+    // is byte-identical to pre-FU#67 for every project that does not use
+    // the feature.
+    let search_dir = args
+        .files
+        .first()
+        .and_then(|p| p.parent())
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| Path::new(".").to_path_buf());
+    let compiler_cfg = match config::load(&search_dir) {
+        Ok(Some((_, cfg))) => cfg.compiler,
+        Ok(None) => config::CompilerSection::default(),
+        Err(e) => {
+            eprintln!("error: fsm.toml: {}", e);
+            return ExitCode::from(4);
+        }
+    };
+
     let mut any_error = false;
     let mut all_diags = Vec::new();
     for path in &args.files {
@@ -63,6 +90,20 @@ pub(crate) fn run(args: CheckArgs) -> ExitCode {
         // Surface import-security diagnostics alongside parse/analyze
         // diagnostics — they share the renderer.
         diags.append(&mut import_diags);
+        // Apply `fsm.toml [compiler] allow`/`deny` (Doc 18 §6) at the
+        // SAME finalization stage as `--warn-as-error`: after the full
+        // diagnostic set for this file exists, before it influences the
+        // renderer OR the exit code. `allow` removes suppressed codes;
+        // `deny` elevates listed warnings to errors. An unknown code in
+        // either list is a clean exit-4 config error (never a silent
+        // ignore — the FU#67 cardinal-sin guard) and aborts before any
+        // diagnostic is rendered, so the user sees only the config error.
+        if let Err(e) =
+            diagnostics::apply_allow_deny(&mut diags, &compiler_cfg.allow, &compiler_cfg.deny)
+        {
+            eprintln!("error: {}", e);
+            return ExitCode::from(4);
+        }
         if args.warn_as_error {
             diagnostics::promote_warnings(&mut diags);
         }

@@ -54,13 +54,18 @@ pub(crate) struct MachineSection {
 pub(crate) struct CompilerSection {
     pub(crate) max_errors: Option<u32>,
     pub(crate) warn_as_error: Option<bool>,
-    // Accepted in `fsm.toml` for forward compatibility but not yet consumed
-    // by any code path; the over-broad `pub` previously masked this. Mirrors
-    // the deserialized-not-read serde-field pattern in `cmd::test`.
-    #[allow(dead_code)]
+    /// Diagnostic codes to suppress globally for this project (Doc 18 §6 /
+    /// the `fsm check` `--allow` flag). Consumed by `cmd::check` via
+    /// `diagnostics::apply_allow_deny` — the same post-analysis
+    /// finalization point `warn_as_error` uses. Doc 18 §6.1 specifies
+    /// these arrays *append* across config layers (project + user-global),
+    /// so they are a `Vec`, not a replace-scalar.
     #[serde(default)]
     pub(crate) allow: Vec<String>,
-    #[allow(dead_code)]
+    /// Diagnostic codes to elevate from warning to error for this project
+    /// (Doc 18 §6 / the `fsm check` `--deny` flag). Append-merged like
+    /// `allow` (Doc 18 §6.1). Consumed alongside `allow` in
+    /// `diagnostics::apply_allow_deny`.
     #[serde(default)]
     pub(crate) deny: Vec<String>,
 }

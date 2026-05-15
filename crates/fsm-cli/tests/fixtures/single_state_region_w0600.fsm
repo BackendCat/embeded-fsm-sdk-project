@@ -1,0 +1,49 @@
+// FU#67 §5.4 fixture: deterministically emits EXACTLY ONE diagnostic,
+// FSM-W0600 ("region with single state"), at Warning severity, and
+// NOTHING else — so a `[compiler] allow`/`deny` test can assert the
+// code's presence/absence/severity without any other diagnostic noise.
+//
+// Why W0600: it is the only *warning* the analyzer emits from a small,
+// fully self-contained source (W0101 needs a contrived dead transition;
+// the W05xx codes are not emitted by the analyzer — verified against
+// fsm-analyzer/src/checks). Region `Solo` has one state -> W0600
+// (warning). Region `Other` has two states so it does NOT also trip
+// W0600, and a `done`/`final`-free design keeps the analyzer silent
+// otherwise. Both regions carry `initial` so neither trips E0600.
+language fsm 2.0
+
+feature parallel
+
+machine W {
+    events {
+        TICK
+    }
+
+    initial Operational
+
+    state Operational {
+        on TICK -> Done
+
+        region Solo {
+            initial Only
+
+            state Only {
+                on TICK -> Only
+            }
+        }
+
+        region Other {
+            initial A
+
+            state A {
+                on TICK -> B
+            }
+
+            state B {
+                on TICK -> A
+            }
+        }
+    }
+
+    state Done { }
+}
