@@ -8,7 +8,7 @@
 //! - the IR is `Some` and carries the expected machine name + state count;
 //! - every transition carries a populated `kind` discriminator.
 
-use fsm_analyzer::{analyze, DiagnosticCode, Severity};
+use fsm_analyzer::{analyze, Severity};
 use fsm_diagnostics::Diagnostic;
 use fsm_ir::StateNode;
 use fsm_parser::parse;
@@ -143,5 +143,4 @@ machine M {
             "unexpected completion-guard rejection: {e:?}"
         );
     }
-    let _ = DiagnosticCode::E0100; // anchor the import
 }

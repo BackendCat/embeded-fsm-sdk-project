@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use fsm_ir::{MachineObject, RegionObject, StateNode};
+use fsm_ir::{walk_state, IrVisitor, MachineObject, StateNode};
 
 use crate::emit::EmitError;
 
@@ -155,6 +155,8 @@ pub fn build_state_index(machine: &MachineObject) -> Result<StateIndex, EmitErro
         records: Vec::new(),
         by_ir_id: HashMap::new(),
         used_c_names: HashMap::new(),
+        parent_stack: vec![ROOT_SENTINEL],
+        error: None,
     };
     // Index 0 — synthetic root sentinel.
     builder.push(StateRecord {
@@ -169,7 +171,13 @@ pub fn build_state_index(machine: &MachineObject) -> Result<StateIndex, EmitErro
     // The root region's "initial" is recorded on the root record once its
     // children are indexed.
     let root_initial_target = machine.root.initial.clone();
-    walk_region(&mut builder, &machine.root, ROOT_SENTINEL)?;
+    // R2.1 (2026-05-15): traversal goes through `IrVisitor::walk_region` so
+    // recursion structure lives in `fsm-ir` only. Per-state push logic
+    // stays here; the parent index is threaded via a stack on the builder.
+    builder.visit_region(&machine.root);
+    if let Some(err) = builder.error.take() {
+        return Err(err);
+    }
     // Patch the root sentinel with its `initial_child` now that the target
     // is indexed.
     if let Some(idx) = builder.by_ir_id.get(&root_initial_target).copied() {
@@ -185,6 +193,13 @@ struct IndexBuilder {
     records: Vec<StateRecord>,
     by_ir_id: HashMap<String, u8>,
     used_c_names: HashMap<String, u32>,
+    /// Stack of parent indices threaded by the IrVisitor recursion. Pushed
+    /// before descending into a composite/parallel state's regions, popped
+    /// after. The top is the current parent for newly-pushed records.
+    parent_stack: Vec<u8>,
+    /// First error seen during the visitor walk. The visitor trait returns
+    /// `()`, so we stash on the struct and short-circuit each visit.
+    error: Option<EmitError>,
 }
 
 impl IndexBuilder {
@@ -208,205 +223,255 @@ impl IndexBuilder {
         self.records.push(rec);
         Ok(idx)
     }
-}
 
-fn walk_region(b: &mut IndexBuilder, region: &RegionObject, parent: u8) -> Result<(), EmitError> {
-    for state in &region.states {
-        walk_state(b, state, parent)?;
+    fn current_parent(&self) -> u8 {
+        *self.parent_stack.last().unwrap_or(&ROOT_SENTINEL)
     }
-    Ok(())
 }
 
-fn walk_state(b: &mut IndexBuilder, state: &StateNode, parent: u8) -> Result<(), EmitError> {
-    match state {
-        StateNode::Simple(s) => {
-            b.push(StateRecord {
-                c_name: c_ident(&s.name),
-                ir_id: s.id.clone(),
-                dsl_name: s.name.clone(),
-                parent,
-                kind: StateRecordKind::Simple,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
+impl IrVisitor for IndexBuilder {
+    fn visit_state(&mut self, s: &StateNode) {
+        if self.error.is_some() {
+            return;
         }
-        StateNode::Composite(c) => {
-            let idx = b.push(StateRecord {
-                c_name: c_ident(&c.name),
-                ir_id: c.id.clone(),
-                dsl_name: c.name.clone(),
-                parent,
-                kind: StateRecordKind::Composite,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-            for region in &c.regions {
-                walk_region(b, region, idx)?;
-            }
-            // After children are indexed, patch the initial child + history
-            // pseudo if applicable.
-            if let Some(region) = c.regions.first() {
-                if let Some(init_idx) = b.by_ir_id.get(&region.initial).copied() {
-                    b.records[idx as usize].initial_child = Some(init_idx);
+        let parent = self.current_parent();
+        // The per-variant push is the only place codegen needs per-state
+        // bookkeeping (initial-child + history patching for Composite).
+        // R2.1: traversal — i.e. *which* states get visited — moves to
+        // `walk_state` (fsm-ir/visitor.rs); the per-variant emit logic
+        // stays here.
+        match s {
+            StateNode::Simple(ss) => {
+                if let Err(e) = self.push(StateRecord {
+                    c_name: c_ident(&ss.name),
+                    ir_id: ss.id.clone(),
+                    dsl_name: ss.name.clone(),
+                    parent,
+                    kind: StateRecordKind::Simple,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(e);
                 }
             }
-            if let Some(h) = &c.history {
-                // The history pseudo-state is normally a member of the
-                // composite's inner region. Ensure it's indexed.
-                let h_idx = match b.by_ir_id.get(&h.id).copied() {
-                    Some(i) => i,
-                    None => b.push(StateRecord {
-                        c_name: c_ident(&format!("{}_History", c.name)),
-                        ir_id: h.id.clone(),
-                        dsl_name: format!("{}.History", c.name),
-                        parent: idx,
-                        kind: StateRecordKind::History,
-                        initial_child: None,
-                        history_pseudo: None,
-                    })?,
+            StateNode::Composite(c) => {
+                let idx = match self.push(StateRecord {
+                    c_name: c_ident(&c.name),
+                    ir_id: c.id.clone(),
+                    dsl_name: c.name.clone(),
+                    parent,
+                    kind: StateRecordKind::Composite,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    Ok(idx) => idx,
+                    Err(e) => {
+                        self.error = Some(e);
+                        return;
+                    }
                 };
-                b.records[idx as usize].history_pseudo = Some(h_idx);
+                self.parent_stack.push(idx);
+                walk_state(self, s);
+                self.parent_stack.pop();
+                if self.error.is_some() {
+                    return;
+                }
+                // After children are indexed, patch the initial child +
+                // history pseudo if applicable.
+                if let Some(region) = c.regions.first() {
+                    if let Some(init_idx) = self.by_ir_id.get(&region.initial).copied() {
+                        self.records[idx as usize].initial_child = Some(init_idx);
+                    }
+                }
+                if let Some(h) = &c.history {
+                    // The history pseudo-state is normally a member of the
+                    // composite's inner region. Ensure it's indexed.
+                    let h_idx = match self.by_ir_id.get(&h.id).copied() {
+                        Some(i) => i,
+                        None => match self.push(StateRecord {
+                            c_name: c_ident(&format!("{}_History", c.name)),
+                            ir_id: h.id.clone(),
+                            dsl_name: format!("{}.History", c.name),
+                            parent: idx,
+                            kind: StateRecordKind::History,
+                            initial_child: None,
+                            history_pseudo: None,
+                        }) {
+                            Ok(i) => i,
+                            Err(e) => {
+                                self.error = Some(e);
+                                return;
+                            }
+                        },
+                    };
+                    self.records[idx as usize].history_pseudo = Some(h_idx);
+                }
             }
-        }
-        StateNode::Parallel(p) => {
-            let idx = b.push(StateRecord {
-                c_name: c_ident(&p.name),
-                ir_id: p.id.clone(),
-                dsl_name: p.name.clone(),
-                parent,
-                kind: StateRecordKind::Parallel,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-            for region in &p.regions {
-                walk_region(b, region, idx)?;
+            StateNode::Parallel(p) => {
+                let idx = match self.push(StateRecord {
+                    c_name: c_ident(&p.name),
+                    ir_id: p.id.clone(),
+                    dsl_name: p.name.clone(),
+                    parent,
+                    kind: StateRecordKind::Parallel,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    Ok(idx) => idx,
+                    Err(e) => {
+                        self.error = Some(e);
+                        return;
+                    }
+                };
+                self.parent_stack.push(idx);
+                walk_state(self, s);
+                self.parent_stack.pop();
             }
-        }
-        StateNode::Initial(i) => {
-            b.push(StateRecord {
-                c_name: c_ident("Initial"),
-                ir_id: i.id.clone(),
-                dsl_name: "<initial>".into(),
-                parent,
-                kind: StateRecordKind::Initial,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-        }
-        StateNode::Final(f) => {
-            // Prefer the DSL name (`final PaymentFinal` -> `PaymentFinal`).
-            // Older fixtures that pre-date `FinalState.name` fall back to a
-            // generic `Final` identifier, which is still unique-ified by
-            // `IndexBuilder::push` (suffix `_N` on collision).
-            let base = if f.name.is_empty() {
-                "Final"
-            } else {
-                f.name.as_str()
-            };
-            b.push(StateRecord {
-                c_name: c_ident(base),
-                ir_id: f.id.clone(),
-                dsl_name: if f.name.is_empty() {
-                    "<final>".into()
+            StateNode::Initial(i) => {
+                if let Err(e) = self.push(StateRecord {
+                    c_name: c_ident("Initial"),
+                    ir_id: i.id.clone(),
+                    dsl_name: "<initial>".into(),
+                    parent,
+                    kind: StateRecordKind::Initial,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(e);
+                }
+            }
+            StateNode::Final(f) => {
+                // Prefer the DSL name (`final PaymentFinal` -> `PaymentFinal`).
+                // Older fixtures that pre-date `FinalState.name` fall back to
+                // a generic `Final` identifier, which is still unique-ified
+                // by `IndexBuilder::push` (suffix `_N` on collision).
+                let base = if f.name.is_empty() {
+                    "Final"
                 } else {
-                    f.name.clone()
-                },
-                parent,
-                kind: StateRecordKind::Final,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-        }
-        StateNode::Choice(c) => {
-            b.push(StateRecord {
-                c_name: c_ident("Choice"),
-                ir_id: c.id.clone(),
-                dsl_name: "<choice>".into(),
-                parent,
-                kind: StateRecordKind::Choice,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-        }
-        StateNode::Junction(j) => {
-            b.push(StateRecord {
-                c_name: c_ident("Junction"),
-                ir_id: j.id.clone(),
-                dsl_name: "<junction>".into(),
-                parent,
-                kind: StateRecordKind::Junction,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-        }
-        StateNode::History(h) => {
-            b.push(StateRecord {
-                c_name: c_ident("History"),
-                ir_id: h.id.clone(),
-                dsl_name: "<history>".into(),
-                parent,
-                kind: StateRecordKind::History,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-        }
-        StateNode::Fork(f) => {
-            b.push(StateRecord {
-                c_name: c_ident("Fork"),
-                ir_id: f.id.clone(),
-                dsl_name: "<fork>".into(),
-                parent,
-                kind: StateRecordKind::Fork,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-        }
-        StateNode::Join(j) => {
-            b.push(StateRecord {
-                c_name: c_ident("Join"),
-                ir_id: j.id.clone(),
-                dsl_name: "<join>".into(),
-                parent,
-                kind: StateRecordKind::Join,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-        }
-        StateNode::Submachine(s) => {
-            b.push(StateRecord {
-                c_name: c_ident(&s.name),
-                ir_id: s.id.clone(),
-                dsl_name: s.name.clone(),
-                parent,
-                kind: StateRecordKind::Submachine,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-        }
-        StateNode::EntryPoint(e) => {
-            b.push(StateRecord {
-                c_name: c_ident(&format!("EntryPoint_{}", e.name)),
-                ir_id: e.id.clone(),
-                dsl_name: e.name.clone(),
-                parent,
-                kind: StateRecordKind::EntryPoint,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
-        }
-        StateNode::ExitPoint(e) => {
-            b.push(StateRecord {
-                c_name: c_ident(&format!("ExitPoint_{}", e.name)),
-                ir_id: e.id.clone(),
-                dsl_name: e.name.clone(),
-                parent,
-                kind: StateRecordKind::ExitPoint,
-                initial_child: None,
-                history_pseudo: None,
-            })?;
+                    f.name.as_str()
+                };
+                if let Err(e) = self.push(StateRecord {
+                    c_name: c_ident(base),
+                    ir_id: f.id.clone(),
+                    dsl_name: if f.name.is_empty() {
+                        "<final>".into()
+                    } else {
+                        f.name.clone()
+                    },
+                    parent,
+                    kind: StateRecordKind::Final,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(e);
+                }
+            }
+            StateNode::Choice(c) => {
+                if let Err(e) = self.push(StateRecord {
+                    c_name: c_ident("Choice"),
+                    ir_id: c.id.clone(),
+                    dsl_name: "<choice>".into(),
+                    parent,
+                    kind: StateRecordKind::Choice,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(e);
+                }
+            }
+            StateNode::Junction(j) => {
+                if let Err(e) = self.push(StateRecord {
+                    c_name: c_ident("Junction"),
+                    ir_id: j.id.clone(),
+                    dsl_name: "<junction>".into(),
+                    parent,
+                    kind: StateRecordKind::Junction,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(e);
+                }
+            }
+            StateNode::History(h) => {
+                if let Err(e) = self.push(StateRecord {
+                    c_name: c_ident("History"),
+                    ir_id: h.id.clone(),
+                    dsl_name: "<history>".into(),
+                    parent,
+                    kind: StateRecordKind::History,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(e);
+                }
+            }
+            StateNode::Fork(f) => {
+                if let Err(e) = self.push(StateRecord {
+                    c_name: c_ident("Fork"),
+                    ir_id: f.id.clone(),
+                    dsl_name: "<fork>".into(),
+                    parent,
+                    kind: StateRecordKind::Fork,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(e);
+                }
+            }
+            StateNode::Join(j) => {
+                if let Err(e) = self.push(StateRecord {
+                    c_name: c_ident("Join"),
+                    ir_id: j.id.clone(),
+                    dsl_name: "<join>".into(),
+                    parent,
+                    kind: StateRecordKind::Join,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(e);
+                }
+            }
+            StateNode::Submachine(s) => {
+                if let Err(e) = self.push(StateRecord {
+                    c_name: c_ident(&s.name),
+                    ir_id: s.id.clone(),
+                    dsl_name: s.name.clone(),
+                    parent,
+                    kind: StateRecordKind::Submachine,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(e);
+                }
+            }
+            StateNode::EntryPoint(e) => {
+                if let Err(err) = self.push(StateRecord {
+                    c_name: c_ident(&format!("EntryPoint_{}", e.name)),
+                    ir_id: e.id.clone(),
+                    dsl_name: e.name.clone(),
+                    parent,
+                    kind: StateRecordKind::EntryPoint,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(err);
+                }
+            }
+            StateNode::ExitPoint(e) => {
+                if let Err(err) = self.push(StateRecord {
+                    c_name: c_ident(&format!("ExitPoint_{}", e.name)),
+                    ir_id: e.id.clone(),
+                    dsl_name: e.name.clone(),
+                    parent,
+                    kind: StateRecordKind::ExitPoint,
+                    initial_child: None,
+                    history_pseudo: None,
+                }) {
+                    self.error = Some(err);
+                }
+            }
         }
     }
-    Ok(())
 }
 
 /// Convert a DSL name into a C-safe identifier fragment. Per Doc 11 §4:
@@ -584,5 +649,110 @@ mod tests {
         let a = idx.lookup("s-idle-1").unwrap();
         let b = idx.lookup("s-idle-2").unwrap();
         assert_ne!(idx.get(a).c_name, idx.get(b).c_name);
+    }
+
+    /// R2.1 behaviour-equivalence guard (2026-05-15).
+    ///
+    /// Indexes a composite-with-inner-region fixture; verifies that
+    /// (1) parents are threaded down by the IrVisitor `parent_stack`,
+    /// (2) `initial_child` is patched after children index, and
+    /// (3) document order is preserved.
+    ///
+    /// Pre-refactor this fixture exercised mutual recursion between
+    /// `walk_region` and `walk_state`; post-refactor it exercises the
+    /// IrVisitor's `walk_state` default and the stack-encoded parent.
+    /// Any divergence in parent or ordering would be caught here.
+    #[test]
+    fn composite_initial_child_and_parent_thread_through_visitor() {
+        use fsm_ir::{CompositeState, ContextSchema, QueueConfig, SimpleState};
+
+        let m = MachineObject {
+            id: "m".into(),
+            stable_id: "M".into(),
+            name: "M".into(),
+            context: ContextSchema::default(),
+            events: vec![],
+            externs: vec![],
+            root: RegionObject {
+                id: "r-root".into(),
+                stable_id: None,
+                name: "__root".into(),
+                initial: "ps-root-init".into(),
+                states: vec![
+                    StateNode::Initial(InitialPseudo {
+                        id: "ps-root-init".into(),
+                        target: "s-outer".into(),
+                        loc: loc(),
+                    }),
+                    StateNode::Composite(CompositeState {
+                        id: "s-outer".into(),
+                        stable_id: "M:state:Outer".into(),
+                        name: "Outer".into(),
+                        entry: vec![],
+                        exit: vec![],
+                        transitions: vec![],
+                        timers: vec![],
+                        defers: vec![],
+                        regions: vec![RegionObject {
+                            id: "r-outer".into(),
+                            stable_id: None,
+                            name: "__r_outer".into(),
+                            initial: "ps-outer-init".into(),
+                            states: vec![
+                                StateNode::Initial(InitialPseudo {
+                                    id: "ps-outer-init".into(),
+                                    target: "s-inner".into(),
+                                    loc: loc(),
+                                }),
+                                StateNode::Simple(SimpleState {
+                                    id: "s-inner".into(),
+                                    stable_id: "M:state:Inner".into(),
+                                    name: "Inner".into(),
+                                    entry: vec![],
+                                    exit: vec![],
+                                    transitions: vec![],
+                                    timers: vec![],
+                                    defers: vec![],
+                                    loc: loc(),
+                                }),
+                            ],
+                            priority: 0,
+                            loc: loc(),
+                        }],
+                        history: None,
+                        loc: loc(),
+                    }),
+                ],
+                priority: 0,
+                loc: loc(),
+            },
+            submachines: vec![],
+            consts: vec![],
+            imports: vec![],
+            features: vec![],
+            queue: QueueConfig::default(),
+            targets: vec![],
+            loc: loc(),
+        };
+        let idx = build_state_index(&m).expect("composite fixture should index");
+        // 5 records: root sentinel + ps-root-init + Outer + ps-outer-init + Inner
+        assert_eq!(idx.count(), 5);
+        let root = idx.get(ROOT_SENTINEL);
+        assert_eq!(root.parent, ROOT_SENTINEL);
+        let outer_idx = idx.lookup("s-outer").expect("outer indexed");
+        let inner_idx = idx.lookup("s-inner").expect("inner indexed");
+        // Outer's parent is the root sentinel.
+        assert_eq!(idx.get(outer_idx).parent, ROOT_SENTINEL);
+        // Inner's parent is Outer (parent threaded through visitor stack).
+        assert_eq!(idx.get(inner_idx).parent, outer_idx);
+        // The composite's initial_child is the inner-region's initial pseudo.
+        let outer_init_idx = idx.lookup("ps-outer-init").unwrap();
+        assert_eq!(idx.get(outer_idx).initial_child, Some(outer_init_idx));
+        // Document order: ROOT, ps-root-init, Outer, ps-outer-init, Inner.
+        assert_eq!(idx.records[0].kind, StateRecordKind::Root);
+        assert_eq!(idx.records[1].kind, StateRecordKind::Initial);
+        assert_eq!(idx.records[2].kind, StateRecordKind::Composite);
+        assert_eq!(idx.records[3].kind, StateRecordKind::Initial);
+        assert_eq!(idx.records[4].kind, StateRecordKind::Simple);
     }
 }

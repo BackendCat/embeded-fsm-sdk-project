@@ -15,7 +15,6 @@ use super::{
 
 pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
     let stem = ctx.file_stem();
-    let macro_prefix = ctx.macro_prefix();
     let header = header_block(
         ctx.config,
         Some(&format!("{}.fsm (translation unit)", stem)),
@@ -74,10 +73,6 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
     body.push_str(&emit_init(ctx));
     body.push_str("\n");
     body.push_str(&emit_current_state(ctx));
-
-    // Reference the macro_prefix to silence unused warnings when no enums
-    // referenced it directly.
-    let _ = macro_prefix;
 
     EmittedFile {
         path: format!("{}.c", stem),

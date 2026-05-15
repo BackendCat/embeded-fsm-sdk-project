@@ -186,8 +186,7 @@ fn emit_context_block(w: &mut FormatWriter, node: &SyntaxNode) {
     let max_name = parts.iter().map(|p| p.name.len()).max().unwrap_or(0);
     let max_type = parts.iter().map(|p| p.ty.len()).max().unwrap_or(0);
 
-    for (i, p) in parts.iter().enumerate() {
-        let _ = i;
+    for p in parts.iter() {
         // `name: type = default` (no trailing `;` — Doc 04 §4.1 EBNF
         // never specifies one; Doc 19 §5 inserts one but VALIDATION_REPORT
         // flagged that as a Doc 19 vs grammar disagreement).
@@ -252,7 +251,6 @@ fn render_field(field: &SyntaxNode) -> FieldRender {
 // ─── Events ─────────────────────────────────────────────────────────────
 
 fn emit_events_block(w: &mut FormatWriter, node: &SyntaxNode, opts: &FormatOptions) {
-    let _ = opts;
     w.write("events {");
     let events: Vec<SyntaxNode> = node
         .children()

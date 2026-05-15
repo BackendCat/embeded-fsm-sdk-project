@@ -143,7 +143,6 @@ pub fn emit_handle_completion(ctx: &MachineEmitCtx<'_>) -> String {
 /// unconditionally; the body becomes a trivial `(void)` no-op.
 pub fn emit_all_regions_final_helper(ctx: &MachineEmitCtx<'_>) -> String {
     let prefix = ctx.type_prefix();
-    let macro_prefix = ctx.macro_prefix();
     let mut s = String::new();
     s.push_str(&format!(
         "static bool {prefix}_all_regions_final(const {prefix}_t *m, {prefix}_StateId_t parallel_state) {{\n",
@@ -162,11 +161,10 @@ pub fn emit_all_regions_final_helper(ctx: &MachineEmitCtx<'_>) -> String {
     if !any_parallel {
         s.push_str("    return false; /* no parallel states in this machine */\n");
         s.push_str("}\n");
-        let _ = macro_prefix;
         return s;
     }
     s.push_str("    switch (parallel_state) {\n");
-    for (parallel_idx, rec) in ctx.index.records.iter().enumerate() {
+    for rec in ctx.index.records.iter() {
         if rec.kind != StateRecordKind::Parallel {
             continue;
         }
@@ -229,7 +227,6 @@ pub fn emit_all_regions_final_helper(ctx: &MachineEmitCtx<'_>) -> String {
             }
             s.push_str("        return true;\n");
         }
-        let _ = parallel_idx;
     }
     s.push_str("    default: return false;\n");
     s.push_str("    }\n");

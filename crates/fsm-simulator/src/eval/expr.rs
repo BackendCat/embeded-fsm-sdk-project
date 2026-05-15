@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use fsm_ir::{BinaryOp, CmpOp, Expr, FieldRef, GuardExpr, GuardOperand, UnaryOp};
+use fsm_ir::{BinaryOp, Expr, FieldRef, GuardExpr, GuardOperand};
 use thiserror::Error;
 
 use super::arith::{apply_binary, apply_compare, apply_unary, literal_to_value};
@@ -142,6 +142,3 @@ pub fn eval_guard(g: &GuardExpr, ctx: &EvalCtx) -> Result<bool, EvalError> {
 
 /// Apply a unary operator (re-export for stmt evaluator convenience).
 pub use super::arith::{apply_binary as apply_binary_expr, apply_unary as apply_unary_expr};
-
-#[allow(dead_code)]
-fn unused_anchor(_: UnaryOp, _: CmpOp) {}

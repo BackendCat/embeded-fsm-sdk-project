@@ -21,9 +21,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
-use fsm_ir::{
-    HistoryKind, Ir, MachineObject, TimerKind, TransitionKind, TransitionObject, Trigger,
-};
+use fsm_ir::{HistoryKind, Ir, TimerKind, TransitionKind, TransitionObject, Trigger};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -32,9 +30,8 @@ use crate::eval::{
     StmtError,
 };
 use crate::runtime::{
-    check_and_enqueue_completion, effective_lca, EventKind, EventQueue, InterpreterSnapshot,
-    MachineIndex, NodeKind, NodeRef, QueueError, QueuedEvent, RuntimeState, Timer, TimerFire,
-    TimerSet, Value,
+    check_and_enqueue_completion, effective_lca, EventKind, InterpreterSnapshot, MachineIndex,
+    NodeKind, QueueError, QueuedEvent, RuntimeState, Timer, TimerFire, TimerSet, Value,
 };
 use crate::trace::{EventReceivedRecord, StepKind, StepRecord, TransitionTakenRecord};
 
@@ -1350,6 +1347,3 @@ fn dot_path(rt: &RuntimeState, state_id: &str) -> String {
     names.reverse();
     names.join(".")
 }
-
-#[allow(dead_code)]
-fn touch(_m: &MachineObject, _n: &NodeRef, _q: &EventQueue) {}

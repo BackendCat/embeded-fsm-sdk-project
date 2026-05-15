@@ -18,13 +18,13 @@ use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
 
 use crate::symbol_table::SymbolTable;
-use crate::util::span_of;
+use crate::util::{span_of, walk_all_states};
 
 /// Run defer-related checks.
 pub fn check(file: &ast::File, _st: &SymbolTable, out: &mut Vec<Diagnostic>) {
     for machine in file.machines() {
         // E0310 — defer-vs-transition conflict per state.
-        for state in walk_states(&machine) {
+        for state in walk_all_states(&machine) {
             check_state_defer_conflicts(&state, out);
         }
         // E0903 — defer is not yet supported in v1.0 (audit P0-5
@@ -33,7 +33,7 @@ pub fn check(file: &ast::File, _st: &SymbolTable, out: &mut Vec<Diagnostic>) {
         // older "too many event types for defer bitmask" trigger is
         // subsumed: with zero supported defers, the >256-event capacity
         // check is moot.
-        for state in walk_states(&machine) {
+        for state in walk_all_states(&machine) {
             for d in state.defers() {
                 let event = d.event().unwrap_or_else(|| "<unknown>".to_string());
                 out.push(
@@ -102,32 +102,5 @@ fn check_state_defer_conflicts(state: &ast::StateDecl, out: &mut Vec<Diagnostic>
     }
 }
 
-/// Yield every `StateDecl` reachable from a machine (top-level + nested +
-/// region states).
-fn walk_states(m: &ast::MachineDecl) -> Vec<ast::StateDecl> {
-    let mut out = Vec::new();
-    for s in m.states() {
-        out.push(s.clone());
-        collect_nested(&s, &mut out);
-    }
-    for r in m.regions() {
-        for s in r.states() {
-            out.push(s.clone());
-            collect_nested(&s, &mut out);
-        }
-    }
-    out
-}
-
-fn collect_nested(s: &ast::StateDecl, out: &mut Vec<ast::StateDecl>) {
-    for nested in s.nested_states() {
-        out.push(nested.clone());
-        collect_nested(&nested, out);
-    }
-    for r in s.regions() {
-        for child in r.states() {
-            out.push(child.clone());
-            collect_nested(&child, out);
-        }
-    }
-}
+// Walker logic moved to `crate::util::walk_all_states` (R2.1 dedup,
+// 2026-05-15).

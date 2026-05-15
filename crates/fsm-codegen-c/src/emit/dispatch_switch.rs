@@ -8,7 +8,7 @@
 //!    leaf-to-root using the parent table (collect-then-execute over
 //!    `_active[]`).
 
-use fsm_ir::{StateNode, TransitionObject};
+use fsm_ir::{walk_state, IrVisitor, StateNode, TransitionObject};
 
 use super::MachineEmitCtx;
 
@@ -51,7 +51,6 @@ fn emit_parent_table(ctx: &MachineEmitCtx<'_>) -> String {
 
 fn emit_per_state_helpers(ctx: &MachineEmitCtx<'_>) -> String {
     let prefix = ctx.type_prefix();
-    let macro_prefix = ctx.macro_prefix();
     let mut s = String::new();
     s.push_str(&format!(
         "/* Per-state transition try function. Returns true if a transition fired. */\n",
@@ -62,21 +61,49 @@ fn emit_per_state_helpers(ctx: &MachineEmitCtx<'_>) -> String {
     ));
     s.push_str("    switch (s) {\n");
 
-    // Walk every state in the machine; emit a case for any state that has
-    // transitions.
-    fn walk_state(state: &StateNode, ctx: &MachineEmitCtx<'_>, out: &mut String) {
-        let (id, transitions, recurse) = match state {
-            StateNode::Simple(s) => (&s.id, &s.transitions, None),
-            StateNode::Composite(c) => (&c.id, &c.transitions, Some(c.regions.as_slice())),
-            StateNode::Parallel(p) => (&p.id, &p.transitions, Some(p.regions.as_slice())),
-            _ => return,
+    // R2.1 (2026-05-15): traversal delegated to `IrVisitor::walk_state` so
+    // adding a new pseudo-state variant only requires editing
+    // `fsm-ir/src/visitor.rs`. Per-variant emit logic stays here. We start
+    // at the root region (not the machine) because the switch dispatch
+    // emits cases for *this* machine only; submachines (Doc 09 §4.11)
+    // emit their own switch.
+    let mut emitter = SwitchEmitter { ctx, out: &mut s };
+    emitter.visit_region(&ctx.machine.root);
+    s.push_str("    default: break;\n");
+    s.push_str("    }\n");
+    s.push_str("    return false;\n");
+    s.push_str("}\n");
+    s
+}
+
+/// Per-state-case emitter for the switch-strategy dispatch. Implemented as
+/// an `IrVisitor` so traversal lives in `fsm-ir` (R2.1). The traversal-only
+/// concern (visit every state recursively) is the trait default; this struct
+/// supplies the per-state emit body.
+struct SwitchEmitter<'a, 'm> {
+    ctx: &'a MachineEmitCtx<'m>,
+    out: &'a mut String,
+}
+
+impl<'a, 'm> IrVisitor for SwitchEmitter<'a, 'm> {
+    fn visit_state(&mut self, s: &StateNode) {
+        let (id, transitions) = match s {
+            StateNode::Simple(ss) => (&ss.id, &ss.transitions),
+            StateNode::Composite(c) => (&c.id, &c.transitions),
+            StateNode::Parallel(p) => (&p.id, &p.transitions),
+            _ => {
+                // Pseudo-states have no per-state switch case. Still descend
+                // so any future regions inside (currently none) are visited.
+                walk_state(self, s);
+                return;
+            }
         };
         if !transitions.is_empty() {
-            let idx = ctx.index.must_lookup(id);
-            let rec = ctx.index.get(idx);
-            out.push_str(&format!(
+            let idx = self.ctx.index.must_lookup(id);
+            let rec = self.ctx.index.get(idx);
+            self.out.push_str(&format!(
                 "    case {macro}_STATE_{name}: /* {dsl} */\n",
-                macro = ctx.macro_prefix(),
+                macro = self.ctx.macro_prefix(),
                 name = rec.c_name,
                 dsl = rec.dsl_name,
             ));
@@ -87,31 +114,16 @@ fn emit_per_state_helpers(ctx: &MachineEmitCtx<'_>) -> String {
             let mut sorted: Vec<&TransitionObject> = transitions.iter().collect();
             sorted.sort_by(|a, b| a.priority.cmp(&b.priority));
             // Group cases by trigger id for cleaner switch output.
-            out.push_str("        switch (ev->id) {\n");
+            self.out.push_str("        switch (ev->id) {\n");
             for t in &sorted {
-                emit_one_case(t, ctx, out);
+                emit_one_case(t, self.ctx, self.out);
             }
-            out.push_str("        default: break;\n");
-            out.push_str("        }\n");
-            out.push_str("        break;\n");
+            self.out.push_str("        default: break;\n");
+            self.out.push_str("        }\n");
+            self.out.push_str("        break;\n");
         }
-        if let Some(regions) = recurse {
-            for r in regions {
-                for s in &r.states {
-                    walk_state(s, ctx, out);
-                }
-            }
-        }
+        walk_state(self, s);
     }
-    for state in &ctx.machine.root.states {
-        walk_state(state, ctx, &mut s);
-    }
-    s.push_str("    default: break;\n");
-    s.push_str("    }\n");
-    s.push_str("    return false;\n");
-    s.push_str("}\n");
-    let _ = macro_prefix;
-    s
 }
 
 fn emit_one_case(t: &TransitionObject, ctx: &MachineEmitCtx<'_>, out: &mut String) {

@@ -204,8 +204,6 @@ impl SymbolTable {
                         stable_id: None,
                     });
                     st.file_extern_pure.push(is_pure);
-                    // mirror name -> stable_id none for now
-                    let _ = name; // silence unused warn pattern
                 }
             }
         }

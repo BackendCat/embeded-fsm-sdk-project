@@ -33,7 +33,6 @@ use crate::expr::{parse_expr, parse_type_ref};
 use crate::parser::{ExprContext, Parser};
 use crate::token_set::TokenSet;
 
-use super::state::parse_state_item;
 use super::top_level::{parse_extern_decl, try_parse_stable_id};
 
 /// Sync set used inside the machine body when a `machine_item` parse blows
@@ -267,11 +266,4 @@ pub fn parse_initial_decl(p: &mut Parser) {
     p.bump(); // initial
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
     p.finish_node();
-}
-
-#[allow(dead_code)]
-fn _unused_silence(_p: &mut Parser, _: TokenSet) {
-    // Suppress unused-import warning on TokenSet for now; remove when the
-    // unused symbol gets a real consumer.
-    let _ = parse_state_item;
 }
