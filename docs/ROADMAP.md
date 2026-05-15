@@ -79,6 +79,24 @@ Adoption-blocking items first; UML completeness second.
 
 ---
 
+## v1.1 retrospective (post-tag, 2026-05-15)
+
+Codified post-release step (this section's own "How the roadmap evolves" rule). Metrics snapshot: `docs/metrics/2026-05-15-v1.1.0.json` (v1.0→v1.1 deltas, D.8 contract).
+
+- **The §5.4 behavioural-acceptance mandate was the single highest-ROI process change of the sprint.** Requiring every behaviour-touching wave to gcc-compile *and RUN* the generated C and assert observable behaviour surfaced **four pre-existing P0/P0-class defects** that ~600+ symbol-presence-era tests had passed straight over: **OB1** opaque-extern silent-drop (Doc 00 §11.23), **W7-FU-1** guard-disambiguated dispatch broken on *both* strategies (§11.26), **W7-FU-2** default-priority spec divergence `0` vs `100` (§11.27), **SEC-P0-1** import-header G-02 containment bypass (§11.28). These were latent in shipped code; nothing structural would have caught them. `.contains("Motor_init")` proves a name exists, not that the machine *does* anything — the mandate is now the project's load-bearing correctness guard (26 gcc-RUN acceptance files concentrated on exactly the risk surface).
+
+- **`verify-status-claims-vs-code` is symmetric (§11.29).** The pre-tag REL-P1-1 finding ("nested submachine emits non-compilable C") was a *stale pessimistic audit claim* — the auditor traced an older pre-P1-2 doc; current code rejects that case cleanly at analysis with `FSM-E0502`. Blindly applying the recommendation would have regressed the release record into a falsehood. **An audit finding is a claim; code at HEAD is ground truth.** The same rigor that catches optimistic overstatement must catch a pessimistic stale audit, or the record drifts the other way.
+
+- **The 3-lens pre-tag gate is well-calibrated.** Across a 15-wave surface it caught **exactly one** real P0 (SEC-P0-1) — **0 P0 arch, 0 P0 correctness, 0 overstated Doc-00 rows**. It neither over-fires (didn't manufacture blockers) nor under-fires (caught the one real security regression on a new file-read surface). Keep the 3-lens gate as-is for v1.2.
+
+- **Infra/disk pattern validated — no provisioning needed.** The §7 warm-cache sawtooth sustained 15 build-heavy waves on a shared 78G box (steady ~7–9G target, never runaway). The §11.22 release gate's mandatory **cold** quad fit via the conventional CI-cache approach: `cargo clean -p` the 9 first-party crates (drops every first-party + test binary, including stale `-wt-`-tainted ones) while **keeping the content-addressed registry dep cache** (Cargo-fingerprint path-independent). Cold quad ran 673/0 with `-wt-` stale-path = 0; disk stayed ≥3.4G throughout. This is the recorded validated pattern — do not provision disk for a cold release quad; clean first-party-from-source, keep registry deps.
+
+- **Feed-forward to v1.2 (recommendation — the orchestrator decides):**
+  - **(a) Run a dedicated cleanup wave BEFORE v1.2 features.** Both pre-tag audits flagged the same two accumulating debts as the standing v1.2 gate: `pub` over-exposure (only a small fraction used cross-crate; `fsm-parser` is the dominant offender at ~230–280 public items — add `unreachable_pub` + `missing_docs` lints and a `pub→pub(crate)` sweep) and analyzer→parser-CST coupling (~15 sites reaching into `cst::*` instead of typed AST — extend AST accessors, strip the imports). Both are non-behavioural and ship-acceptable *now*, but they compound: every v1.2 feature built on the over-wide surface makes the eventual narrowing harder. Sequence the cleanup wave first; it is bounded and has no feature risk.
+  - **(b) Sequencing opinion for the v1.2 feature set — LSP-first over C++17 codegen.** Both are in v1.2 scope. **Recommendation: do the LSP server (Doc 14) first.** Rationale: LSP is the *required substrate* for both the VS Code extension and the future Web IDE — it unlocks two downstream deliverables, so an early LSP de-risks the largest chunk of v1.2+v1.3 dependency. C++17 codegen (Doc 12) is self-contained (it wraps the already-correct C emitter with `extern "C"` + a CRTP shell — no new pipeline semantics, low coupling), so it can land *in parallel* or *after* without blocking anything and carries little integration risk. Front-loading the high-fan-out item (LSP) and trailing the isolated one (C++17) maximises critical-path progress. This is a reasoned recommendation, not a decree — the orchestrator owns the call.
+
+---
+
 ## v1.2 — Developer tooling
 
 **Theme: Editor & IDE experience.**
