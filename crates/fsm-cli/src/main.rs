@@ -5,6 +5,8 @@
 //! follows Doc 18 §3 (0 ok, 1 user/diagnostic errors, 2 tool error /
 //! invalid args, 3 not found, 4 config error).
 
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
 use clap::Parser;
