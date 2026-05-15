@@ -87,8 +87,32 @@ fn parse_action_block_inner(p: &mut Parser) {
 
 /// `true` if the current token signals the end of an action block — used to
 /// stop the statement loop without requiring an explicit closing token.
+///
+/// v1.1-W4: a brace-less action list (`on E : stmt; stmt`) is terminated by
+/// the next state-item start. A `likely`/`rare`-prefixed transition is such
+/// a start, but its first token is the *contextual* `Ident` `likely`/`rare`
+/// (no `Kw*` — by design, for back-compat), so the static
+/// `ACTION_BLOCK_TERMINATORS` token set cannot see it. Without this gate the
+/// action parser would swallow the next transition's `likely`/`rare` keyword
+/// as a bare-call statement (`STMT_CALL rare`). We therefore additionally
+/// terminate when the current token is `likely`/`rare` AND the token after
+/// it begins a transition (`on`/`after`/`every`/`done`) — the exact same
+/// contextual condition `grammar/state.rs::next_starts_transition` uses, so
+/// the two stay consistent. A genuine bare-call to a user extern literally
+/// named `likely`/`rare` is unaffected: it is only treated as a terminator
+/// when immediately followed by a transition keyword (a call statement is
+/// followed by `(` / `;` / a terminator, never by `on`/`done`/…).
 fn at_action_terminator(p: &Parser) -> bool {
-    p.at_any_of(ACTION_BLOCK_TERMINATORS) || p.at(TokenKind::Eof)
+    if p.at_any_of(ACTION_BLOCK_TERMINATORS) || p.at(TokenKind::Eof) {
+        return true;
+    }
+    if p.at(TokenKind::Ident) && matches!(p.current_text(), "likely" | "rare") {
+        return matches!(
+            p.peek_n(1),
+            TokenKind::KwOn | TokenKind::KwAfter | TokenKind::KwEvery | TokenKind::KwDone
+        );
+    }
+    false
 }
 
 /// Dispatch one statement. Statements end at `;` or an action-block

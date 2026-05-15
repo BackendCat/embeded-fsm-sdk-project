@@ -14,7 +14,7 @@
 //!    the target. If the target is a composite or parallel, the entry
 //!    set is extended with the initial-chain expansion of the substates.
 
-use fsm_ir::{StateNode, TransitionKind, TransitionObject};
+use fsm_ir::{BranchHint, StateNode, TransitionKind, TransitionObject};
 
 use crate::expr::emit_guard;
 use crate::state_index::StateRecordKind;
@@ -42,12 +42,29 @@ pub fn emit_transition_body(
 
     // Guard check (if any). Emitted up front per Doc 08 §4.3: guards
     // are evaluated exactly once per candidate transition.
+    //
+    // v1.1-W4: a `likely`/`rare` transition prefix wraps this guard
+    // condition in the portable `<PREFIX>_LIKELY`/`_UNLIKELY` macro
+    // (`__builtin_expect` on GNU/clang, plain `(x)` fallback — see
+    // header.rs::emit_branch_hint_macros). `likely` ⇒ the guard is
+    // expected to HOLD (the transition is the hot path) ⇒ `_LIKELY(cond)`;
+    // `rare` ⇒ expected to FAIL ⇒ `_UNLIKELY(cond)`. Unhinted ⇒ the bare
+    // `cond` exactly as before this wave (byte-identical generated C).
+    // This is a pure instruction-layout hint: it never changes whether the
+    // guard passes, only the compiler's hot/cold block placement, so the
+    // runtime behaviour and the simulator stay in lock-step (sim ignores
+    // the hint entirely).
     if let Some(g) = &t.guard {
         let cond = emit_guard(g, "m->context", payload_prefix);
+        let hinted = match t.hint {
+            Some(BranchHint::Likely) => format!("{}_LIKELY({})", ctx.macro_prefix(), cond),
+            Some(BranchHint::Rare) => format!("{}_UNLIKELY({})", ctx.macro_prefix(), cond),
+            None => cond,
+        };
         out.push_str(&format!(
             "{pad}if (!{cond}) {fail}\n",
             pad = pad,
-            cond = cond,
+            cond = hinted,
             fail = on_guard_fail,
         ));
     }

@@ -68,6 +68,7 @@ fn autofire_ir() -> Ir {
         priority: 0,
         kind: TransitionKind::Completion,
         internal: false,
+        hint: None,
         loc: loc(),
     };
     #[allow(deprecated)]
@@ -85,6 +86,7 @@ fn autofire_ir() -> Ir {
         priority: 0,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     };
     let start = SimpleState {

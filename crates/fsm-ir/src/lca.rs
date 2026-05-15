@@ -201,6 +201,7 @@ mod tests {
             priority: 0,
             kind,
             internal: matches!(kind, TransitionKind::Internal),
+            hint: None,
             loc: crate::SourceLocation::new("t.fsm", crate::Span::new(0, 1), 1, 1),
         }
     }

@@ -245,6 +245,7 @@ mod tests {
                     priority: 100,
                     kind: TransitionKind::External,
                     internal: false,
+                    hint: None,
                     loc: loc(),
                 }],
                 timers: vec![],

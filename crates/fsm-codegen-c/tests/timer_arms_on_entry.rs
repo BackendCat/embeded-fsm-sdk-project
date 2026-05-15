@@ -55,6 +55,7 @@ fn ir_with_after_in_running() -> Ir {
         priority: 0,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     };
     let idle_to_running = TransitionObject {
@@ -71,6 +72,7 @@ fn ir_with_after_in_running() -> Ir {
         priority: 100,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     };
     let running_timer = TimerObject {

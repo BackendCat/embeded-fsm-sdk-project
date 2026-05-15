@@ -70,6 +70,7 @@ mod tests {
             priority: 0,
             kind,
             internal: matches!(kind, TransitionKind::Internal),
+            hint: None,
             loc: loc(),
         }
     }

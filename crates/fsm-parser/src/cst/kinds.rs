@@ -85,8 +85,14 @@ pub enum SyntaxKind {
     KwU64,
     // Contextual keywords that the lexer emits as `Ident` but the parser
     // distinguishes by position: `entry`, `exit`, `events`, `queue`,
-    // `if`, `while`, `for`, `entry_point`, `exit_point`, `fsm`. They have no
+    // `if`, `while`, `for`, `entry_point`, `exit_point`, `fsm`, and
+    // (v1.1-W4) the transition-prefix hints `likely` / `rare`. They have no
     // dedicated TokenKind, so they round-trip as `Ident` in the CST.
+    // Keeping `likely`/`rare` contextual (vs. reserved `Kw*`) is a
+    // deliberate back-compat choice: an existing `.fsm` that uses `likely`
+    // or `rare` as a state / event / field / extern name keeps parsing,
+    // because they are only special in transition-prefix position (see
+    // grammar/state.rs `parse_state_item` + grammar/transition.rs).
 
     // Operators / delimiters.
     Arrow,        // ->
@@ -272,6 +278,15 @@ pub enum SyntaxKind {
     /// preserved (rowan round-trip property) but the surrounding analyzer
     /// can use this as a "skip subtree" hint.
     ERROR_NODE,
+
+    /// v1.1-W4: optional `likely` / `rare` prefix on a transition. Modelled
+    /// as an optional child node of the transition node (mirroring how
+    /// GUARD_CLAUSE / SUBMACHINE_REF are optional children) rather than a
+    /// bare token, so the AST exposes a typed `branch_hint()` accessor and
+    /// the rowan round-trip preserves the prefix verbatim. Wraps the single
+    /// `likely`/`rare` ident token. Appended last (before `__LAST`) so all
+    /// existing discriminants are unchanged (rowan persistence stability).
+    BRANCH_HINT,
 
     /// MUST be the last variant. Counts variants for compile-time bound.
     __LAST,
@@ -519,6 +534,7 @@ const fn all_kinds() -> [SyntaxKind; SyntaxKind::__LAST as usize] {
         TYPE_REF,
         OPAQUE_TYPE_REF,
         ERROR_NODE,
+        BRANCH_HINT,
         // __LAST not in table (we only need indexes 0..__LAST).
     ]
 }

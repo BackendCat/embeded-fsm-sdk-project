@@ -46,6 +46,7 @@ fn ir() -> Ir {
         priority: 0,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     };
     let stop_t = TransitionObject {
@@ -62,6 +63,7 @@ fn ir() -> Ir {
         priority: 100,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     };
     let idle_to_running = TransitionObject {
@@ -78,6 +80,7 @@ fn ir() -> Ir {
         priority: 100,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     };
     let timer = TimerObject {

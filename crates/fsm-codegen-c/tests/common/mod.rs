@@ -40,6 +40,7 @@ pub fn motor_transition(
         priority,
         kind,
         internal: false,
+        hint: None,
         loc: loc(),
     }
 }

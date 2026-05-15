@@ -1020,4 +1020,89 @@ generated code with a POSIX HAL implementation and verifies the state sequence
 
 ---
 
+# 28. Branch-Prediction Hint Codegen — *v1.1 addition*
+
+> **Added in v1.1** (ROADMAP v1.1 W4). Surface syntax: Doc 04 §8.8. IR:
+> Doc 09 `TransitionObject.hint` (`likely` | `rare`, optional). This
+> section is the **normative codegen contract** for that construct.
+
+A transition's optional `likely` / `rare` prefix lowers to a portable
+branch-prediction hint wrapping the transition's **guard condition**. It is
+a **pure instruction-layout optimization with ZERO semantic effect**: the
+generated machine takes exactly the same transitions in exactly the same
+order as an unhinted one — only the C compiler's hot/cold basic-block
+placement differs. The simulator ignores the hint, so `sim ≡ codegen`
+(Doc 08) is unaffected.
+
+## 28.1 The portable macro pair
+
+Every generated public header (`<Machine>.h`) emits, before the
+`extern "C"` block:
+
+```c
+/* ── Branch-prediction hints (v1.1-W4, Doc 11 §28) ──────────────── */
+#if !defined(MOTOR_NO_BUILTIN_EXPECT) && (defined(__GNUC__) || defined(__clang__))
+#  define MOTOR_LIKELY(x)   (__builtin_expect(!!(x), 1))
+#  define MOTOR_UNLIKELY(x) (__builtin_expect(!!(x), 0))
+#else
+#  define MOTOR_LIKELY(x)   (x)
+#  define MOTOR_UNLIKELY(x) (x)
+#endif
+```
+
+Normative requirements:
+
+- `__builtin_expect` is a **GCC/Clang extension, not ISO C**. The `#else`
+  arm is mandatory so the generated firmware still builds on **any
+  conforming C99 compiler** (Design Goal §1.2 — Portable C99; §17
+  heap-free / no-extension discipline). The fallback is `(x)` — a pure
+  no-op that changes neither value nor evaluation order.
+- The `!!(x)` double-negation normalises any scalar to `0`/`1`
+  (`__builtin_expect`'s parameters are `long`). The `!!` + outer-paren
+  form is the standard `-Wpedantic`-safe idiom and MUST compile clean
+  under `gcc -std=c99 -Wall -Wextra -Wpedantic -Werror` (Design Goal §1.2).
+- `<MACRO_PREFIX>_NO_BUILTIN_EXPECT`, if defined before including the
+  header, forces the portable fallback even on GCC/Clang (escape hatch for
+  exotic toolchains / measurement). The macros are emitted
+  **unconditionally** for every machine; a machine with no hint simply
+  never references them (a few unused object-like `#define`s — zero
+  codegen / behaviour impact, the rest of the generated `.c` is
+  byte-identical to the pre-v1.1 output).
+
+## 28.2 Where the hint is applied
+
+The hint wraps the per-transition **guard condition** emitted by the
+shared transition body, used by **both** the `switch` (§8.1) and `table`
+(§8.2) dispatch strategies — so a hinted transition behaves identically
+under either strategy:
+
+| IR `hint`        | Emitted guard check                              |
+|------------------|--------------------------------------------------|
+| `Some(Likely)`   | `if (!MOTOR_LIKELY(<cond>)) <fail>`              |
+| `Some(Rare)`     | `if (!MOTOR_UNLIKELY(<cond>)) <fail>`            |
+| `None` (default) | `if (!<cond>) <fail>` — bare, exactly as in v1.0 |
+
+`likely` ⇒ the guard is expected to **hold** (the transition is the hot
+path); `rare` ⇒ expected to **fail** (cold path). The wrapper is applied
+to the guard expression only; it never alters control flow, so the
+transition still fires iff the guard holds.
+
+A hinted transition with **no guard** carries `hint` in the IR but emits
+**no** `__builtin_expect` — there is no condition to wrap (a `switch`-case
+label / table trigger-match is not an expression). The hint is advisory in
+that case (no codegen effect, schema-valid, simulator-ignored).
+
+## 28.3 Acceptance
+
+Per SUBAGENT_CONVENTIONS §5.4 the contract is proven end-to-end in
+`crates/fsm-codegen-c/tests/branch_hints_codegen.rs`: an IR with
+`Likely`/`Rare`/`None` transitions is emitted, compiled with
+`gcc -std=c99 -Wall -Wextra -Wpedantic -Werror`, **executed**, and
+asserted to drive an identical state path regardless of the hints, for
+both dispatch strategies, plus a forced-fallback
+(`-D<PREFIX>_NO_BUILTIN_EXPECT`) build+run proving the non-GNU path is
+also correct.
+
+---
+
 *End of FSM-SPEC-GEN-C v1.0.0*

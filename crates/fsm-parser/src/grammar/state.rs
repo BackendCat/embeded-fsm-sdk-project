@@ -144,6 +144,16 @@ pub fn parse_state_item(p: &mut Parser) {
             "exit" => parse_exit_decl(p),
             "entry_point" => parse_entry_point_decl(p),
             "exit_point" => parse_exit_point_decl(p),
+            // v1.1-W4: optional `likely` / `rare` transition-prefix hint.
+            // Contextual (the lexer emits these as `Ident`): only a hint
+            // when the next significant token actually starts a transition
+            // (`on` / `after` / `every` / `done`). Otherwise `likely`/`rare`
+            // is an ordinary identifier used elsewhere — fall through to the
+            // generic "unexpected ident" recovery exactly as before this
+            // wave (back-compat: a state body never legally begins a
+            // *non-transition* item with a bare ident, so the only behaviour
+            // change is the new hint form).
+            "likely" | "rare" if next_starts_transition(p) => parse_hinted_transition(p),
             _ => {
                 p.error_until(
                     STATE_ITEM_STARTS,
@@ -158,6 +168,65 @@ pub fn parse_state_item(p: &mut Parser) {
                 DiagnosticCode::E0010,
                 format!("unexpected '{}' in state body", p.current()),
             );
+        }
+    }
+}
+
+// ─── v1.1-W4 branch hints (likely / rare) ────────────────────────────────
+
+/// `true` when the token after the current `likely`/`rare` ident begins a
+/// transition (`on` / `after` / `every` / `done`). Used to keep
+/// `likely`/`rare` contextual — only a hint in transition-prefix position,
+/// otherwise an ordinary identifier (back-compat). `peek_n` skips trivia, so
+/// `likely   on TICK …` (any whitespace/comment between) resolves correctly.
+fn next_starts_transition(p: &Parser) -> bool {
+    matches!(
+        p.peek_n(1),
+        TokenKind::KwOn | TokenKind::KwAfter | TokenKind::KwEvery | TokenKind::KwDone
+    )
+}
+
+/// Parse a `likely` / `rare` prefixed transition. The hint is wrapped in a
+/// `BRANCH_HINT` node which becomes the FIRST child of the transition node:
+/// we take the checkpoint *before* emitting BRANCH_HINT and hand it to the
+/// underlying transition parser's `start_node_at`, so `likely on E -> T`
+/// produces `TRANSITION_DECL [ BRANCH_HINT [likely] , E , T ]`. This mirrors
+/// how SUBMACHINE_REF / GUARD_CLAUSE are optional children of their owning
+/// node (the analyzer reads it as a typed child, never token-scans).
+///
+/// At most one hint prefix is admitted (the grammar has no production for a
+/// second), so `likely rare on …` parses the first as the hint and the
+/// second `rare` as the (then-unexpected) trigger position — a clean
+/// FSM-E0010, never a both-hints IR.
+fn parse_hinted_transition(p: &mut Parser) {
+    let cp = p.checkpoint();
+    // The hint node wraps exactly the `likely` / `rare` ident token.
+    p.start_node(SyntaxKind::BRANCH_HINT);
+    p.bump(); // `likely` | `rare` (ident)
+    p.finish_node();
+
+    match p.current() {
+        TokenKind::KwOn => {
+            super::transition::parse_transition_from_on_at(p, Some(cp));
+        }
+        TokenKind::KwAfter => parse_after_decl_at(p, Some(cp)),
+        TokenKind::KwEvery => parse_every_decl_at(p, Some(cp)),
+        TokenKind::KwDone => parse_completion_decl_at(p, Some(cp)),
+        _ => {
+            // Unreachable in practice: the caller gated on
+            // `next_starts_transition`. Defensive recovery keeps the parser
+            // total — wrap whatever follows so the hint token is not
+            // orphaned and recovery does not spin.
+            p.start_node_at(cp, SyntaxKind::TRANSITION_DECL);
+            p.error(
+                DiagnosticCode::E0010,
+                format!(
+                    "expected a transition after '{}' hint, found '{}'",
+                    "likely/rare",
+                    p.current()
+                ),
+            );
+            p.finish_node();
         }
     }
 }
@@ -400,7 +469,14 @@ pub fn parse_join_decl(p: &mut Parser) {
 ///
 /// Per Doc 00 §B-07, guards on completion transitions ARE permitted.
 fn parse_completion_decl(p: &mut Parser) {
-    p.start_node(SyntaxKind::COMPLETION_DECL);
+    parse_completion_decl_at(p, None);
+}
+
+/// As [`parse_completion_decl`]; `outer_cp` (v1.1-W4) lets a preceding
+/// `BRANCH_HINT` node be enclosed as the COMPLETION_DECL's first child.
+/// `None` ⇒ checkpoint here ⇒ byte-identical CST to pre-W4.
+fn parse_completion_decl_at(p: &mut Parser, outer_cp: Option<rowan::Checkpoint>) {
+    let cp = outer_cp.unwrap_or_else(|| p.checkpoint());
     p.bump(); // done
     if p.at(TokenKind::LBracket) {
         parse_guard_clause(p);
@@ -408,6 +484,7 @@ fn parse_completion_decl(p: &mut Parser) {
     if p.at(TokenKind::KwPriority) {
         parse_priority_clause(p);
     }
+    p.start_node_at(cp, SyntaxKind::COMPLETION_DECL);
     p.expect(TokenKind::Arrow, DiagnosticCode::E0010);
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
     if p.eat(TokenKind::Colon) {
@@ -418,12 +495,19 @@ fn parse_completion_decl(p: &mut Parser) {
 
 /// `after_decl = "after" , const_expr , "ms" , "->" , identifier , [ ":" , action_list ] ;`
 fn parse_after_decl(p: &mut Parser) {
-    p.start_node(SyntaxKind::AFTER_DECL);
+    parse_after_decl_at(p, None);
+}
+
+/// As [`parse_after_decl`]; `outer_cp` (v1.1-W4) encloses a preceding
+/// `BRANCH_HINT` as the AFTER_DECL's first child. `None` ⇒ pre-W4 shape.
+fn parse_after_decl_at(p: &mut Parser, outer_cp: Option<rowan::Checkpoint>) {
+    let cp = outer_cp.unwrap_or_else(|| p.checkpoint());
     p.bump(); // after
     p.start_node(SyntaxKind::CONST_EXPR);
     parse_expr(p, 0, ExprContext::Action);
     p.finish_node();
     p.expect(TokenKind::KwMs, DiagnosticCode::E0010);
+    p.start_node_at(cp, SyntaxKind::AFTER_DECL);
     p.expect(TokenKind::Arrow, DiagnosticCode::E0010);
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
     if p.eat(TokenKind::Colon) {
@@ -437,7 +521,14 @@ fn parse_after_decl(p: &mut Parser) {
 ///
 /// Distinguish by looking at what comes after the `ms` keyword.
 fn parse_every_decl(p: &mut Parser) {
-    let cp = p.checkpoint();
+    parse_every_decl_at(p, None);
+}
+
+/// As [`parse_every_decl`]; `outer_cp` (v1.1-W4) encloses a preceding
+/// `BRANCH_HINT` as the EVERY_DECL / EVERY_INTERNAL_DECL first child.
+/// `None` ⇒ checkpoint taken here ⇒ byte-identical pre-W4 CST.
+fn parse_every_decl_at(p: &mut Parser, outer_cp: Option<rowan::Checkpoint>) {
+    let cp = outer_cp.unwrap_or_else(|| p.checkpoint());
     p.bump(); // every
     p.start_node(SyntaxKind::CONST_EXPR);
     parse_expr(p, 0, ExprContext::Action);

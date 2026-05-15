@@ -9,12 +9,12 @@
 //! ids, locs, transition order) is byte-identical pre/post.
 
 use fsm_ir::{
-    ChoiceBranch as IrChoiceBranch, ChoiceState, CompositeState, DeferDecl as IrDeferDecl,
-    FinalState, ForkPseudo, GuardExpr, HistoryKind, HistoryObject, InitialPseudo, JoinPseudo,
-    JunctionState, ParallelState, RegionObject, SimpleState, StateNode, Statement, SubmachineRef,
-    TimerKind, TimerObject, TransitionKind, TransitionObject, Trigger,
+    BranchHint, ChoiceBranch as IrChoiceBranch, ChoiceState, CompositeState,
+    DeferDecl as IrDeferDecl, FinalState, ForkPseudo, GuardExpr, HistoryKind, HistoryObject,
+    InitialPseudo, JoinPseudo, JunctionState, ParallelState, RegionObject, SimpleState, StateNode,
+    Statement, SubmachineRef, TimerKind, TimerObject, TransitionKind, TransitionObject, Trigger,
 };
-use fsm_parser::ast::{self, AstNode};
+use fsm_parser::ast::{self, AstNode, BranchHint as AstBranchHint};
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use super::expr::{lower_action_block, lower_guard_clause};
@@ -459,6 +459,7 @@ fn lower_external(
         priority,
         guard,
         actions,
+        lower_branch_hint(t.branch_hint()),
         t.syntax(),
         source_name,
     ))
@@ -494,6 +495,7 @@ fn lower_internal(
         priority,
         guard,
         actions,
+        lower_branch_hint(t.branch_hint()),
         t.syntax(),
         "",
     ))
@@ -530,6 +532,7 @@ fn lower_local(
         priority,
         guard,
         actions,
+        lower_branch_hint(t.branch_hint()),
         t.syntax(),
         "",
     ))
@@ -561,9 +564,22 @@ fn lower_completion(
         priority,
         guard,
         actions,
+        lower_branch_hint(c.branch_hint()),
         c.syntax(),
         "",
     ))
+}
+
+/// v1.1-W4: map the parser-side AST hint enum to the IR enum. Kept here
+/// (in the analyzer, the AST→IR boundary) so `fsm-parser` need not depend on
+/// `fsm-ir`. A no-op lift — there is no diagnostic: a hint is always
+/// syntactically valid and the grammar admits at most one prefix per
+/// transition, so `Likely`/`Rare` are the only inputs.
+fn lower_branch_hint(h: Option<AstBranchHint>) -> Option<BranchHint> {
+    h.map(|h| match h {
+        AstBranchHint::Likely => BranchHint::Likely,
+        AstBranchHint::Rare => BranchHint::Rare,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -577,6 +593,7 @@ fn build_transition(
     priority: i64,
     guard: Option<GuardExpr>,
     actions: Vec<Statement>,
+    hint: Option<BranchHint>,
     node: &SyntaxNode,
     _source_name: &str,
 ) -> TransitionObject {
@@ -593,6 +610,7 @@ fn build_transition(
         priority: priority.clamp(0, u16::MAX as i64) as u16,
         kind,
         internal: matches!(kind, TransitionKind::Internal),
+        hint,
         loc: locs.loc(node),
     }
 }
@@ -634,6 +652,7 @@ fn lower_timers(
                     0,
                     None,
                     actions.clone(),
+                    lower_branch_hint(a.branch_hint()),
                     a.syntax(),
                     "",
                 ));
@@ -672,6 +691,7 @@ fn lower_timers(
                     0,
                     None,
                     actions.clone(),
+                    lower_branch_hint(e.branch_hint()),
                     e.syntax(),
                     "",
                 ));
@@ -715,6 +735,14 @@ fn lower_timers(
                 0,
                 None,
                 actions.clone(),
+                // `every_internal` is action-only — no `->` target, no
+                // condition to wrap, so a hint is meaningless here. The
+                // grammar still admits `likely every N ms : ...` (the
+                // dispatcher gates on `KwEvery`); we deliberately drop the
+                // hint for the no-target internal form (nothing to lower
+                // it onto). EVERY_DECL (targeted) carries it; this does
+                // not.
+                None,
                 e.syntax(),
                 "",
             ));

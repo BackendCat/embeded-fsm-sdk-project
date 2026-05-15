@@ -154,6 +154,7 @@ mod tests {
             priority: 100,
             kind,
             internal: false,
+            hint: None,
             loc: loc(),
         }
     }

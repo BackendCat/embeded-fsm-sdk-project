@@ -32,9 +32,22 @@ fn motor_emits_guard_call_for_can_start() {
         c.contains("can_start"),
         "Motor.c must reference the `can_start` guard extern; got:\n{c}"
     );
+    // P0-1 intent: the guard must lower to a REAL conditional, not a no-op.
+    // v1.1-W4: motor.fsm now prefixes this transition with `likely`, so the
+    // condition is wrapped in the portable `MOTOR_LIKELY(...)` macro
+    // (`__builtin_expect` on GNU/clang, `(x)` fallback elsewhere). That
+    // wrapper is *semantically transparent* — it never changes whether the
+    // guard holds, only the compiler's hot/cold block placement — so the
+    // P0-1 guarantee (a real branch on `can_start()`, never a dropped
+    // guard) is unchanged. Accept either the bare or the hint-wrapped form
+    // so the anti-regression assertion is robust to the W4 prefix while
+    // still failing loudly if the guard ever degrades to a no-op again.
+    let bare = c.contains("if (!can_start())");
+    let hinted = c.contains("if (!MOTOR_LIKELY(can_start()))");
     assert!(
-        c.contains("if (!can_start())"),
-        "guard must lower to a real conditional, not a no-op:\n{c}"
+        bare || hinted,
+        "guard must lower to a real conditional (bare or W4 hint-wrapped), \
+         not a no-op:\n{c}"
     );
 }
 

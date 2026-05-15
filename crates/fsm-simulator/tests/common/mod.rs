@@ -141,6 +141,7 @@ pub fn transition(
         priority: 100,
         kind,
         internal: matches!(kind, TransitionKind::Internal),
+        hint: None,
         loc: loc(),
     }
 }
@@ -185,6 +186,7 @@ pub fn timer_transition_with_id(
         priority: 100,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     }
 }
@@ -227,6 +229,7 @@ pub fn completion_transition(id: &str, source: &str, target: &str) -> Transition
         priority: 100,
         kind: TransitionKind::Completion,
         internal: false,
+        hint: None,
         loc: loc(),
     }
 }

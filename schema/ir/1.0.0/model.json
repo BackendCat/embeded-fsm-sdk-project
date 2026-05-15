@@ -494,6 +494,11 @@
           "type": "boolean",
           "description": "Deprecated alias retained one cycle (B-06). Consumers MUST treat `kind === \"internal\"` as authoritative."
         },
+        "hint": {
+          "type": "string",
+          "enum": ["likely", "rare"],
+          "description": "v1.1-W4 optional branch-prediction hint (Doc 04 §8.8, Doc 11 §10). `likely`/`rare` from the DSL transition prefix. Pure codegen layout optimization wrapping the guard condition in __builtin_expect — zero semantic effect (simulator ignores it). Optional; absent === no hint === plain condition. Pre-W4 IR omits the key."
+        },
         "loc": { "$ref": "#/$defs/SourceLocation" }
       }
     },

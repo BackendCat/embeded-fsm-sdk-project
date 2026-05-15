@@ -272,6 +272,7 @@ fn vending_with_bool_default_ir() -> Ir {
             priority: 100,
             kind: fsm_ir::TransitionKind::External,
             internal: false,
+            hint: None,
             loc: loc(),
         });
     } else {

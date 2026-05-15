@@ -196,6 +196,7 @@ fn ir_with_one_region_parallel() -> Ir {
             priority: 100,
             kind: TransitionKind::External,
             internal: false,
+            hint: None,
             loc: loc(),
         }],
         timers: vec![],

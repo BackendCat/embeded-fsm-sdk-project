@@ -90,6 +90,7 @@ fn motor_three_states_round_trip() {
                 priority: 100,
                 kind: TransitionKind::External,
                 internal: false,
+                hint: None,
                 loc: loc(),
             }],
             timers: vec![],
@@ -405,6 +406,7 @@ fn enum_variant_in_guard_round_trip() {
         priority: 100,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     };
     let mut m = empty_machine("M");

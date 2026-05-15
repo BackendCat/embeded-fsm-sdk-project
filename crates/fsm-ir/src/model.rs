@@ -484,7 +484,36 @@ pub struct TransitionObject {
     #[deprecated(note = "derive from `kind`")]
     #[serde(default)]
     pub internal: bool,
+    /// Optional branch-prediction hint (v1.1-W4 — Doc 04 §8.8, Doc 11 §28).
+    /// `Some(Likely)` / `Some(Rare)` lower to a `__builtin_expect`-backed
+    /// `<MACRO>_LIKELY` / `<MACRO>_UNLIKELY` wrapper around the transition's
+    /// guard condition in the generated C; `None` (the default) emits the
+    /// plain condition. This is a **pure codegen layout optimization with
+    /// zero semantic effect**: it never changes which transition fires, only
+    /// the hot/cold instruction placement the C compiler chooses. The
+    /// simulator therefore accepts and ignores it. `#[serde(default)]` so
+    /// pre-W4 IR JSON (no `hint` key) deserializes unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<BranchHint>,
     pub loc: SourceLocation,
+}
+
+/// Branch-prediction hint on a transition (v1.1-W4). Surface syntax is the
+/// optional `likely` / `rare` prefix on any transition trigger form
+/// (`likely on EVT …`, `rare after N ms …`, `rare done …`, `likely … ~> …`).
+/// Lowered verbatim from the AST; the analyzer adds no diagnostic (a hint is
+/// always syntactically valid and the parser admits at most one prefix).
+///
+/// Semantically inert — see [`TransitionObject::hint`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BranchHint {
+    /// `likely` — the transition's guard is expected to hold (hot path).
+    /// Lowers to `__builtin_expect((cond), 1)` (via the `_LIKELY` macro).
+    Likely,
+    /// `rare` — the transition's guard is expected to fail (cold path).
+    /// Lowers to `__builtin_expect((cond), 0)` (via the `_UNLIKELY` macro).
+    Rare,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

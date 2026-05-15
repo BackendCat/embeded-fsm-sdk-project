@@ -9,6 +9,10 @@
 //! The form is determined after parsing the optional guard + priority and
 //! peeking at `->` / `~>` / `:`. We use the `Parser::checkpoint` mechanism
 //! so the wrapping syntax-kind node can be picked retroactively.
+//!
+//! v1.1-W4: an optional `likely` / `rare` BRANCH_HINT child may precede the
+//! `on` keyword (parsed by the state-item dispatcher, which passes its
+//! pre-hint checkpoint so the wrapping transition node encloses the hint).
 
 use fsm_diagnostics::DiagnosticCode;
 use fsm_lexer::TokenKind;
@@ -21,9 +25,17 @@ use super::state::parse_priority_clause;
 use super::stmt::parse_action_block;
 
 /// Entry point: called when the current token is `on`. Consumes one
-/// transition.
+/// transition. `outer_cp` lets the caller (the branch-hint dispatcher)
+/// supply a checkpoint taken *before* a preceding `BRANCH_HINT` node so the
+/// resulting transition node encloses the hint as its first child; when
+/// `None` the checkpoint is taken here (the ordinary, hint-free path —
+/// byte-identical CST to pre-W4).
 pub fn parse_transition_from_on(p: &mut Parser) {
-    let cp = p.checkpoint();
+    parse_transition_from_on_at(p, None);
+}
+
+pub fn parse_transition_from_on_at(p: &mut Parser, outer_cp: Option<rowan::Checkpoint>) {
+    let cp = outer_cp.unwrap_or_else(|| p.checkpoint());
     p.bump(); // on
     p.expect(TokenKind::Ident, DiagnosticCode::E0010);
 

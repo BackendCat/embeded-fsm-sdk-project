@@ -67,6 +67,7 @@ fn transition(id: &str, source: &str, target: &str, event_id: &str) -> Transitio
         priority: 100,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     }
 }

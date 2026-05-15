@@ -212,11 +212,21 @@ impl AfterDecl {
     pub fn target(&self) -> Option<String> {
         first_ident(&self.0)
     }
+    /// v1.1-W4 optional `likely`/`rare` prefix (e.g. `rare after 5000 ms ->
+    /// Fault`). `None` ⇒ unhinted. Typed optional child.
+    pub fn branch_hint(&self) -> Option<crate::ast::BranchHint> {
+        super::child::<crate::ast::BranchHintNode>(&self.0).and_then(|h| h.kind())
+    }
 }
 
 impl EveryDecl {
     pub fn target(&self) -> Option<String> {
         first_ident(&self.0)
+    }
+    /// v1.1-W4 optional `likely`/`rare` prefix (e.g. `likely every 100 ms ->
+    /// Poll`). `None` ⇒ unhinted. Typed optional child.
+    pub fn branch_hint(&self) -> Option<crate::ast::BranchHint> {
+        super::child::<crate::ast::BranchHintNode>(&self.0).and_then(|h| h.kind())
     }
 }
 

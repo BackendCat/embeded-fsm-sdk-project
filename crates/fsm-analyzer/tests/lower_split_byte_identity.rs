@@ -117,7 +117,19 @@ fn ir_fingerprint(rel_fsm: &str) -> String {
 
 // Captured from `main` (pre-AD-3, the monolithic `lower.rs`). These pin the
 // canonical `to_json` serialization of each example's lowered IR.
-const MOTOR_IR_SHA: &str = "0e9a7b1cfa074e1d45e4b3b09c50d32fe4518f00c3cb9ccec0a8be5cd492560e";
+//
+// MOTOR_IR_SHA updated 2026-05-15 for v1.1-W4 (likely/rare branch hints).
+// This is a DELIBERATE, REVIEWED semantic change, not a refactor (the
+// docstring's bar): `examples/motor/motor.fsm` gained `likely on START
+// [can_start]` + `rare on FAULT` to exercise the new construct. The IR
+// delta was proven to be *exactly and only* the new optional `hint` field
+// on those two transitions — verified by diffing the canonical generated
+// C of motor with vs. without the prefixes: the *sole* `Motor.c`
+// difference is `if (!can_start())` → `if (!MOTOR_LIKELY(can_start()))`,
+// and `Motor.h` is byte-identical. No traversal/id/loc/order perturbation
+// (the AD-3 regression class this guard exists for). Pre-W4 sha was
+// 0e9a7b1cfa074e1d45e4b3b09c50d32fe4518f00c3cb9ccec0a8be5cd492560e.
+const MOTOR_IR_SHA: &str = "fa1b7aefc7f2d5242288c446a054573808c0e5e0d8800becbf6bb23a63b7322a";
 
 #[test]
 fn motor_example_ir_unchanged() {

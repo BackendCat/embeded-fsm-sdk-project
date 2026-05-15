@@ -178,6 +178,7 @@ fn emit_does_not_panic_on_unknown_state_id_reference() {
         priority: 0,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     };
     let real = SimpleState {

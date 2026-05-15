@@ -59,6 +59,7 @@ fn trans(source: &str, target: &str, kind: TransitionKind) -> TransitionObject {
         priority: 0,
         kind,
         internal: matches!(kind, TransitionKind::Internal),
+        hint: None,
         loc: SourceLocation::new("t.fsm", Span::new(0, 1), 1, 1),
     }
 }

@@ -34,6 +34,15 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
             }
         }
     }
+    // v1.1-W4: portable branch-prediction macros. Emitted before the
+    // `extern "C"` block (macros have no linkage) so the dispatch code in
+    // the `.c` can wrap hinted transition conditions. A machine with no
+    // `likely`/`rare` hint still emits these (a few unused object-like
+    // #defines, zero codegen/behaviour impact on existing FSMs — the
+    // generated `.c` is byte-identical except at intended hint sites
+    // because the dispatch only references the macro when a hint is set).
+    body.push_str(&emit_branch_hint_macros(ctx));
+
     body.push_str("\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
 
     body.push_str(&emit_state_enum(ctx));
@@ -56,6 +65,42 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
         role: FileRole::Header,
         content: format!("{}\n{}", header, body),
     }
+}
+
+/// v1.1-W4 — emit the portable `<PREFIX>_LIKELY` / `<PREFIX>_UNLIKELY`
+/// branch-prediction macros (Doc 11 §28).
+///
+/// `__builtin_expect` is a GCC/Clang extension, not ISO C. To keep the
+/// generated firmware portable (the heap-free / no-extension discipline —
+/// it must build on any conforming C99 compiler), the macros expand to
+/// `__builtin_expect` only under `__GNUC__` / `__clang__` and fall back to
+/// the bare condition elsewhere. The `!!(x)` double-negation normalises any
+/// scalar to `0`/`1` (`__builtin_expect`'s args are `long`) and is the
+/// standard `-Wpedantic`-safe idiom — it compiles clean under
+/// `gcc -std=c99 -Wall -Wextra -Wpedantic -Werror`. Semantics are identical
+/// in both arms (the macro never changes the value of `x`, only the
+/// optimiser's block-placement hint), so behaviour is unchanged on non-GNU
+/// toolchains — only the hot/cold layout differs.
+fn emit_branch_hint_macros(ctx: &MachineEmitCtx<'_>) -> String {
+    let p = ctx.macro_prefix();
+    format!(
+        r#"/* ── Branch-prediction hints (v1.1-W4, Doc 11 §28) ──────────────────────
+ * `likely`/`rare` transition prefixes lower to these. __builtin_expect is
+ * a GCC/Clang extension; the #else keeps generated firmware buildable on
+ * any conforming C99 compiler (the (x) fallback is a pure no-op hint).
+ * Define {p}_NO_BUILTIN_EXPECT before including this header to force the
+ * portable fallback even on GCC/Clang (exotic toolchains / measurement).
+ * Pure layout optimization — ZERO semantic effect. */
+#if !defined({p}_NO_BUILTIN_EXPECT) && (defined(__GNUC__) || defined(__clang__))
+#  define {p}_LIKELY(x)   (__builtin_expect(!!(x), 1))
+#  define {p}_UNLIKELY(x) (__builtin_expect(!!(x), 0))
+#else
+#  define {p}_LIKELY(x)   (x)
+#  define {p}_UNLIKELY(x) (x)
+#endif
+"#,
+        p = p,
+    )
 }
 
 fn emit_state_enum(ctx: &MachineEmitCtx<'_>) -> String {

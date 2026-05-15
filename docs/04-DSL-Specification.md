@@ -93,6 +93,17 @@ u16         u32             u64
 The `as` keyword is reserved for explicit type casting (see §3.1).
 The `submachine` keyword is reserved for submachine syntax (see §15).
 
+> **Contextual keywords (NOT in the reserved list above).** A small set of
+> words are keywords *only in a specific syntactic position* and remain
+> ordinary identifiers everywhere else, so they are deliberately **absent**
+> from the reserved list (adding them there would be a breaking change):
+> `entry`, `exit`, `entry_point`, `exit_point`, `events`, `queue`, `if`,
+> `while`, `for`, and — *added in v1.1* — the transition branch-prefix
+> hints **`likely`** and **`rare`** (§8.8). `likely`/`rare` are special
+> only immediately before a transition trigger; a state/event/extern named
+> `likely` or `rare` is still valid. This contextual treatment is the
+> backward-compatibility guarantee for the v1.1 W4 addition.
+
 ## 1.6 Operators and Delimiters
 
 ```
@@ -842,6 +853,59 @@ declared `extern` function may be called.
 - **Payload field writes:** `payload.field = expr` is forbidden. Payload fields are
   **read-only** in all action blocks. Writing to a payload field is `FSM-E0006`.
   Payload fields may only be read (e.g., `ctx.speed = payload.target_speed`).
+
+## 8.8 Branch Hints (`likely` / `rare`) — *v1.1 addition*
+
+> **Added in v1.1** (ROADMAP v1.1 W4). An *optional* annotation; absent ⇒
+> no hint ⇒ behaviour and generated code are exactly as in v1.0.
+
+A transition may be prefixed with `likely` or `rare` to advise the C code
+generator which branch is the hot path. This is a **pure
+instruction-layout optimization with ZERO semantic effect**: it never
+changes whether or which transition fires, the simulator ignores it
+entirely, and `sim ≡ codegen` is unaffected. It exists only so the C
+compiler can place the cold path out-of-line for a better instruction
+cache footprint on tight embedded loops.
+
+The prefix is permitted on **every** transition trigger form — external
+(`->`), internal (`on E :`), local (`~>`), completion (`done`), and timed
+(`after` / `every`):
+
+```
+state Running {
+    likely on TICK  -> Running          // hot path
+    rare   on FAULT -> Faulted          // cold path
+    on STOP -> Idle                     // unhinted (default — no hint)
+}
+```
+
+Grammar — an optional `branch_hint` precedes the trigger keyword of any of
+the §8.1–§8.4 / §9 transition productions:
+
+```ebnf
+branch_hint = "likely" | "rare" ;
+
+(* Each of transition_decl / internal_decl / local_decl /
+   completion_decl / the timed transition forms gains a leading
+   [ branch_hint ] immediately before its "on" / "done" / "after" /
+   "every" keyword. At most ONE prefix per transition — there is no
+   production for a second. *)
+```
+
+`likely` / `rare` are **contextual keywords** (see §1.5): they are special
+**only** in transition-prefix position. An identifier named `likely` or
+`rare` used anywhere else — a state name, event name, `extern` name,
+target name — keeps its v1.0 meaning and parses unchanged. This is a
+deliberate backward-compatibility guarantee: no existing `.fsm` is broken
+by this addition.
+
+Lowering: `likely` ⇒ the transition's guard is expected to **hold**
+(the transition is the hot path); `rare` ⇒ expected to **fail**. The
+codegen contract — the portable `__builtin_expect`-backed macro and its
+non-GNU fallback — is normatively specified in **Doc 11 §28**. A hinted
+transition with no guard carries the hint in the IR (Doc 09
+`TransitionObject.hint`) but emits no `__builtin_expect` (there is no
+condition to wrap); the hint is advisory in that case.
 
 ---
 

@@ -93,6 +93,7 @@ fn ev_transition(
         priority: 0,
         kind: TransitionKind::External,
         internal: false,
+        hint: None,
         loc: loc(),
     }
 }
@@ -112,6 +113,7 @@ fn done_transition(machine: &str, idx: usize, source: &str, target: &str) -> Tra
         priority: 0,
         kind: TransitionKind::Completion,
         internal: false,
+        hint: None,
         loc: loc(),
     }
 }
