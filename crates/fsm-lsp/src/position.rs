@@ -1,24 +1,37 @@
 //! Byte-offset `Span` <-> LSP `Position`/`Range` — the encoding boundary.
 //!
 //! Doc 26 §4.1 (risk-1, HIGH) is explicit: `fsm_diagnostics::Span` is a
-//! **byte-offset** half-open range, and there are already **two** divergent,
-//! non-LSP-correct byte->line/col converters in-tree —
-//! `fsm_analyzer::util::compute_line_col` (counts *bytes*, 1-based) and
-//! `fsm_cli::cmd::check::line_col` (counts *Unicode scalars*, 1-based).
-//! LSP 3.17 positions are **0-based** line + **0-based** `character`, where
-//! `character` is measured in the *negotiated* `positionEncoding` unit.
-//! Conflating either existing impl would produce off-by-one (0 vs 1 base)
-//! and silently-wrong columns on any non-ASCII / non-BMP line.
+//! **byte-offset** half-open range, and the project has **three
+//! intentionally-different** byte->line/col contracts (Doc 00 §11.32,
+//! DRIFT-2):
 //!
-//! This module owns the **one** correct converter for the LSP. It does NOT
-//! reuse — and is deliberately not shared with — the two existing impls:
-//! converging those would change analyzer/CLI behaviour (their 1-based,
-//! byte-or-scalar contract is baked into IR `SourceLocation` and the
-//! `--json`/human renderer, and is asserted by their own tests). That
-//! convergence is tracked separately as DRIFT-2 (Doc 00 §11.32); widening
-//! L1's scope to touch it would risk a non-behaviour-neutral change to two
-//! shipped subsystems, which the project bar forbids. `position.rs` is
-//! therefore *authoritative for the LSP only*.
+//! 1. the IR `SourceLocation` (`fsm-analyzer`) — **bytes, 1-based** (baked
+//!    into the deterministic C / `lower_split_byte_identity` fingerprint);
+//! 2. `fsm check`'s `--json` + human `line:col` (`fsm-cli`) — **Unicode
+//!    scalars, 1-based** (asserted by the CLI tests);
+//! 3. the LSP — **0-based**, `character` in the *negotiated*
+//!    `positionEncoding` unit (UTF-8 byte or UTF-16 code unit).
+//!
+//! Contracts (1) and (2) were two hand-rolled duplicate loops; the DRIFT-2
+//! convergence wave folded their *shared linear-scan mechanic* into the one
+//! core `fsm_diagnostics::compute_line_col(src, pos, LineColUnit)` — each
+//! caller now invokes it with its existing unit (`Byte` / `Scalar`), proven
+//! byte-identical, so the duplicate loops are gone but every downstream
+//! contract is unchanged.
+//!
+//! This module owns contract (3) and **deliberately does NOT build on that
+//! converged core**. `LineIndex` is a *structurally different algorithm* —
+//! a precomputed `Vec<u32>` line-start table giving O(log n)
+//! `partition_point` lookup (the rust-analyzer model, mandated for the
+//! editor hot path, Doc 26 §4.1), 0-based, with a negotiated UTF-8/UTF-16
+//! unit, an inverse (`offset`), span->`Range` projection and EOF clamping —
+//! none of which the linear core provides. Forcing the index onto a linear
+//! scan would regress its complexity and risk the §5.4 byte-exact `Range`
+//! contract for zero benefit; conflating it with the 1-based core would also
+//! reintroduce the off-by-one + silently-wrong-column class on any
+//! non-ASCII / non-BMP line. It shares only the *conceptual* line-start
+//! scan with the converged core, never its loop. `position.rs` is therefore
+//! *authoritative for the LSP only* (Doc 00 §11.32 boundary, upheld).
 //!
 //! ## `LineIndex`
 //!

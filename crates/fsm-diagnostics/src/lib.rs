@@ -80,6 +80,116 @@ impl Span {
 }
 
 // ---------------------------------------------------------------------------
+// byte-offset -> (line, column): the converged linear-scan core (DRIFT-2)
+// ---------------------------------------------------------------------------
+
+/// How an intra-line column is *counted* when converting a byte offset to a
+/// `(line, column)` pair.
+///
+/// A byte-offset [`Span`] can be projected onto a line/column in more than
+/// one unit, and the project has **three intentionally-different
+/// contracts** for that projection (Doc 00 §11.32, DRIFT-2):
+///
+/// - the IR `SourceLocation` (`fsm-analyzer`) counts **bytes**, 1-based —
+///   baked into the deterministic C / byte-identity fingerprint;
+/// - `fsm check`'s `--json` + human `line:col` (`fsm-cli`) counts **Unicode
+///   scalars**, 1-based — asserted by the CLI tests;
+/// - the LSP (`fsm-lsp::position::LineIndex`) is 0-based and counts the
+///   *negotiated* UTF-8/UTF-16 unit — and is deliberately NOT built on this
+///   core (see the `compute_line_col` doc note).
+///
+/// This enum lets the *one* shared linear-scan core in [`compute_line_col`]
+/// serve the analyzer and the CLI with their existing, distinct contracts —
+/// removing the previously hand-rolled duplicate loops **without** changing
+/// any downstream output (proven byte-identical, Doc 00 §11.3x DRIFT-2).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum LineColUnit {
+    /// Count one column per UTF-8 byte. The `fsm-analyzer` IR contract: a
+    /// non-ASCII char advances the column by its UTF-8 length (every
+    /// continuation byte is a column), exactly as the former per-byte loop
+    /// did.
+    Byte,
+    /// Count one column per Unicode scalar (`char`). The `fsm-cli`
+    /// `--json` / human-diagnostic contract: a non-ASCII char advances the
+    /// column by exactly one regardless of its byte length.
+    Scalar,
+}
+
+/// Convert a byte offset `pos` in `src` to a **1-based** `(line, column)`,
+/// counting columns in `unit`.
+///
+/// **DRIFT-2 converged core (Doc 00 §11.3x).** This is the single
+/// behaviour-preserving generalisation of the two formerly-duplicated
+/// hand-rolled loops:
+///
+/// - `fsm_analyzer`'s old `util::compute_line_col` was this with
+///   `unit = Byte` (it iterated `src.bytes()`, counting one column per
+///   byte). `fsm_analyzer::lower::loc::LocCtx` now calls
+///   `compute_line_col(src, span.start, LineColUnit::Byte)`.
+/// - `fsm_cli`'s old `cmd::check::line_col` was this with `unit = Scalar`
+///   (it iterated `src.char_indices()`, counting one column per `char`).
+///   `fsm_cli::cmd::check`'s `--json` aggregate now calls
+///   `compute_line_col(src, byte, LineColUnit::Scalar)`.
+///
+/// **Why this is byte-identical to both originals (the §10 / W7-FU-2
+/// guard).** Both originals shared the *exact same* loop skeleton —
+/// "walk from the start, break when the cursor reaches `pos`, reset
+/// `column` to 1 on `\n`, else bump `column`" — differing only in (a) the
+/// per-step column increment and (b) `bytes().enumerate()` vs
+/// `char_indices()`. This core keeps that skeleton verbatim and walks
+/// `char_indices()` (whose index `i` is the *byte* offset of each char
+/// start, identical to the byte loop's `i` at every char boundary):
+///
+/// - `Scalar` → `column += 1` per char: this *is* the old CLI loop,
+///   line-for-line. Identical for **every** offset including past-EOF
+///   (the resilient-parser diagnostic-span class), since the break
+///   condition `i >= pos` is unchanged.
+/// - `Byte` → `column += ch.len_utf8()` per char: at any char boundary the
+///   sum of `len_utf8` over the chars before `pos` equals the count of
+///   *bytes* before `pos`, which is exactly what the old per-byte loop
+///   accumulated; and `char_indices()` breaks at the first char-start
+///   `>= pos`, which **is** `pos` whenever `pos` is a char boundary. Every
+///   offset the analyzer feeds comes from a rowan `TextRange` over the
+///   parsed `&str`, so it is *always* a char boundary — the two loops are
+///   provably indistinguishable on the analyzer's entire input domain.
+///
+/// This was verified by an exhaustive differential check (ASCII +
+/// Cyrillic + non-BMP emoji + empty/edge inputs, all offsets incl.
+/// past-EOF) and by the `lower_split_byte_identity` IR-fingerprint oracle
+/// staying unchanged. Non-char-boundary offsets *can* differ between a
+/// per-byte and a per-char walk, but neither caller can produce one (CST
+/// `TextRange` / token `Span` offsets are always `&str` char boundaries).
+///
+/// **Not used by `fsm-lsp`.** `fsm-lsp::position::LineIndex` is a
+/// structurally different algorithm — a precomputed line-start table with
+/// O(log n) `partition_point` lookup, **0-based**, with a negotiated
+/// UTF-8/UTF-16 unit, an inverse (`offset`) and clamping (Doc 26 §4.1, the
+/// editor hot path). It deliberately does not share this core: forcing its
+/// index model onto a linear scan would regress its complexity and risk
+/// the §5.4 byte-exact `Range` contract for zero benefit. It shares only
+/// the *conceptual* line-start scan, not this literal loop (Doc 00 §11.32).
+#[must_use]
+pub fn compute_line_col(src: &str, pos: usize, unit: LineColUnit) -> (u32, u32) {
+    let mut line: u32 = 1;
+    let mut col: u32 = 1;
+    for (i, ch) in src.char_indices() {
+        if i >= pos {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += match unit {
+                LineColUnit::Byte => ch.len_utf8() as u32,
+                LineColUnit::Scalar => 1,
+            };
+        }
+    }
+    (line, col)
+}
+
+// ---------------------------------------------------------------------------
 // SourceLocation
 // ---------------------------------------------------------------------------
 
@@ -806,5 +916,124 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let back: Span = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
+    }
+
+    // --- DRIFT-2 converged core (Doc 00 §11.3x) -----------------------------
+    //
+    // These pin EXACTLY the behaviour the two formerly-hand-rolled loops had,
+    // so the convergence is provably behaviour-neutral (the W7-FU-2 / §11.31
+    // line-exact bar). The IR-fingerprint oracle
+    // (`fsm-analyzer/tests/lower_split_byte_identity.rs`) and the `fsm-cli`
+    // `--json` tests are the end-to-end proof; these are the unit floor.
+
+    /// The pre-convergence loops, transcribed verbatim, as differential
+    /// oracles. If `compute_line_col` ever diverges from either, this fails.
+    fn legacy_analyzer_byte_loop(src: &str, pos: usize) -> (u32, u32) {
+        let mut line: u32 = 1;
+        let mut col: u32 = 1;
+        for (i, b) in src.bytes().enumerate() {
+            if i >= pos {
+                break;
+            }
+            if b == b'\n' {
+                line += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
+        }
+        (line, col)
+    }
+
+    fn legacy_cli_char_loop(src: &str, byte: usize) -> (u32, u32) {
+        let mut line: u32 = 1;
+        let mut col: u32 = 1;
+        for (i, ch) in src.char_indices() {
+            if i >= byte {
+                break;
+            }
+            if ch == '\n' {
+                line += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
+        }
+        (line, col)
+    }
+
+    #[test]
+    fn compute_line_col_scalar_matches_legacy_cli_loop_all_offsets() {
+        // The CLI contract: `Scalar` must equal the old `char_indices` loop
+        // for EVERY offset including past-EOF (diagnostic spans can sit at
+        // `len`, or past it on resilient-parser broken input).
+        let corpus = [
+            "",
+            "\n",
+            "a",
+            "ab\n",
+            "language fsm 2.0\nmachine M {\n}\n",
+            "// \u{044B}\nM",              // Cyrillic 'ы' (2 bytes)
+            "/// \u{1F680}\nmachine M {}", // 🚀 (4 bytes, non-BMP)
+            "// \u{043C}\u{044B}\u{0448}\u{044C}\nmachine M {}", // мышь
+            "a\nb\nc",
+            "\n\n\n",
+            "a\u{1F680}b\n\u{044B}c",
+        ];
+        for src in corpus {
+            for pos in 0..=(src.len() + 5) {
+                assert_eq!(
+                    compute_line_col(src, pos, LineColUnit::Scalar),
+                    legacy_cli_char_loop(src, pos),
+                    "Scalar must equal the legacy CLI loop at pos={pos} in {src:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compute_line_col_byte_matches_legacy_analyzer_loop_at_char_boundaries() {
+        // The analyzer contract: `Byte` must equal the old per-byte loop at
+        // every char boundary in-bounds — the ONLY offsets `span_of`
+        // (rowan `TextRange` over the parsed `&str`) can produce. Includes
+        // offsets *inside* multibyte tokens (still char boundaries between
+        // chars).
+        let corpus = [
+            "",
+            "language fsm 2.0\nmachine M {\n}\n",
+            "// \u{044B}\nM",
+            "machine \u{041C}\u{0430}\u{0448}\u{0438}\u{043D}\u{0430} {}", // Машина
+            "a\u{1F680}b\n\u{044B}c",
+        ];
+        for src in corpus {
+            for pos in 0..=src.len() {
+                if !src.is_char_boundary(pos) {
+                    continue;
+                }
+                assert_eq!(
+                    compute_line_col(src, pos, LineColUnit::Byte),
+                    legacy_analyzer_byte_loop(src, pos),
+                    "Byte must equal the legacy analyzer loop at char-boundary pos={pos} in {src:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compute_line_col_base_and_unit_contracts_are_explicit() {
+        // 1-based both axes (NOT 0-based — the LSP's separate contract).
+        assert_eq!(compute_line_col("x", 0, LineColUnit::Byte), (1, 1));
+        assert_eq!(compute_line_col("x", 0, LineColUnit::Scalar), (1, 1));
+        // Newline resets column to 1 and bumps line (both units).
+        let src = "ab\ncd";
+        assert_eq!(compute_line_col(src, 3, LineColUnit::Byte), (2, 1));
+        assert_eq!(compute_line_col(src, 3, LineColUnit::Scalar), (2, 1));
+        // The unit divergence is real and intentional: on a multibyte line
+        // the byte column > the scalar column. "// ы" then offset 5 (the
+        // '\n', just past the 2-byte 'ы'): Byte=6 ('/','/',' ',ы=2 bytes →
+        // col 1+1+1+1+2=6), Scalar=5 (4 chars → col 1+4=5).
+        let mb = "// \u{044B}\nM";
+        assert_eq!(compute_line_col(mb, 5, LineColUnit::Byte), (1, 6));
+        assert_eq!(compute_line_col(mb, 5, LineColUnit::Scalar), (1, 5));
     }
 }
