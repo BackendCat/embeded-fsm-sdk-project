@@ -20,6 +20,7 @@ use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 use super::expr::{lower_action_block, lower_guard_clause};
 use super::ids::IdMinter;
 use super::loc::LocCtx;
+use crate::util::submachine_ref_is_nested;
 
 /// Lower the direct children of `parent` (a machine or a state) into a
 /// list of [`StateNode`]s. Returns the produced state list and the
@@ -126,7 +127,34 @@ fn lower_state(ids: &mut IdMinter, locs: &LocCtx, state: &ast::StateDecl) -> Sta
     // FSM-E0502 are emitted by `checks::submachine` against the same name —
     // when unresolved we still emit a structurally-valid SubmachineRef
     // (partial-IR principle, Doc 09 §1) so downstream stays schema-valid.
-    if let Some(sref) = state.submachine_ref() {
+    //
+    // **P1-2 defence-in-depth:** ONLY a *top-level* ref lowers to
+    // `StateNode::Submachine`. A ref nested inside a composite/parallel
+    // state is rejected at analysis (`checks::submachine` emits an
+    // error-severity E0502, so `fsm check`/`fsm generate` already abort
+    // before codegen). Belt-and-suspenders, the lowerer additionally
+    // refuses to produce a `StateNode::Submachine` for a nested ref —
+    // codegen's `collect_sub_refs` walks only the root region, so a nested
+    // `StateNode::Submachine` would be emitted as a leaf whose
+    // entry_/exit_ are called but whose prototypes are suppressed →
+    // non-compilable C. By falling through to the normal structural
+    // lowering (Simple/Composite/Parallel from the state's own children) we
+    // *guarantee* the IR can never carry a nested `StateNode::Submachine`,
+    // independent of whether the diagnostic gate is bypassed (e.g. a
+    // future caller that lowers despite errors). Nested-submachine *support*
+    // is the tracked SUB-FU-2 follow-up.
+    //
+    // Guard-clause form: enter the submachine path ONLY for a ref that is
+    // both present AND top-level. A nested ref falls through (the `is`
+    // binding is treated as absent for the rejected position) to the normal
+    // structural lowering below — its user-visible error is the E0502
+    // diagnostic from `checks::submachine`; this branch only keeps the
+    // partial IR structurally safe for any downstream that lowers despite
+    // errors.
+    if let Some(sref) = state
+        .submachine_ref()
+        .filter(|s| !submachine_ref_is_nested(s.syntax()))
+    {
         let sub_name = sref.name().unwrap_or_default();
         return StateNode::Submachine(SubmachineRef {
             id,

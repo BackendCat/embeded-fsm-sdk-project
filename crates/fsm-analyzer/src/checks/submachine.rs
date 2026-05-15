@@ -24,7 +24,21 @@
 //!    nothing can drive that completion (Doc 08 §12.3).
 //!  - **FSM-E0502** "submachine instantiation cycle detected" — submachine A
 //!    references B and B (transitively) references A (Doc 10 §9;
-//!    recoverable: No).
+//!    recoverable: No). **Also reused (with an overriding message) to reject
+//!    a submachine reference nested inside a composite/parallel state** —
+//!    phase-audit P1-2. Rationale: Doc 10 §9 reserves no code for the
+//!    positional constraint and adding a new `DiagnosticCode` variant is out
+//!    of this wave's scope; among the existing submachine-family codes
+//!    E0502 is the only one whose semantics ("this submachine
+//!    *instantiation structure* is not permitted") and recoverability
+//!    (recoverable: **No** — code generation is *blocked*, so no broken C is
+//!    produced) match. E0500/E0501 are recoverable: Yes (compilation
+//!    continues, emitting the broken C this fix exists to prevent) and would
+//!    be the wrong semantics. This mirrors the retired-E0903 / defer
+//!    precedent: a not-yet-implemented construct is cleanly *rejected* with
+//!    an actionable, version-scoped message rather than silently
+//!    miscompiled. Nested-submachine *support* remains the tracked SUB-FU-2
+//!    follow-up; this only makes the limitation honest and safe.
 
 use std::collections::{HashMap, HashSet};
 
@@ -33,7 +47,7 @@ use fsm_parser::ast::{self, AstNode};
 use fsm_parser::cst::SyntaxKind;
 
 use crate::symbol_table::SymbolTable;
-use crate::util::span_of;
+use crate::util::{span_of, submachine_ref_is_nested};
 
 /// `feature submachines` declared at file scope (Doc 04 §2.2). Feature flags
 /// are file-level only — an in-`machine`-body `feature` is a parse error
@@ -88,6 +102,37 @@ pub fn check(file: &ast::File, st: &SymbolTable, out: &mut Vec<Diagnostic>) {
             // the missing name (W2a recovery); nothing to resolve here.
             continue;
         };
+
+        // -- P1-2: reject a submachine ref nested in a composite/parallel --
+        //
+        // A top-level `state X is Sub` is fully supported (W2a–W2d). A ref
+        // that is a *descendant* of a composite/parallel state is NOT yet
+        // implemented and currently makes codegen emit prototype-less
+        // entry_/exit_ calls → C that fails the project's own mandated
+        // `gcc -Werror`. We reject it at analysis (error-severity, code
+        // generation blocked) so codegen never receives it — clean
+        // rejection beats broken output (the retired-E0903 / defer
+        // precedent). Emitted independently of name resolution and the
+        // entry/exit/cycle checks below (cumulative diagnostics, Doc 09 §1);
+        // the lowerer additionally refuses to lower a nested ref to
+        // `StateNode::Submachine` (defence-in-depth — see
+        // `lower::state::lower_state`).
+        if submachine_ref_is_nested(&sref_node) {
+            out.push(
+                Diagnostic::new(DiagnosticCode::E0502, span_of(&sref_node)).with_message(format!(
+                    "submachine reference `is {ref_name}` is only supported on a top-level \
+                     state in v1.1; nesting it inside a composite or parallel state is not \
+                     yet implemented (tracked SUB-FU-2) — move the `state … is {ref_name}` \
+                     to the machine's top level"
+                )),
+            );
+            // Skip the entry/exit-point checks for this ref: they describe
+            // the *template*, which is irrelevant while the *position* is
+            // rejected, and would be noise on an already-rejected site.
+            // E0502's recoverable:No nature means one decisive marker per
+            // culprit is the house style (see `check_instantiation_cycles`).
+            continue;
+        }
 
         let Some(target) = st.resolve_submachine(&ref_name) else {
             out.push(

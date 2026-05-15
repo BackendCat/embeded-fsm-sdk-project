@@ -1,0 +1,36 @@
+language fsm 2.0
+// Phase-audit P1-2 fixture: a submachine reference (`state Inner is Sub`)
+// nested inside the composite state `Outer`. On `main` this `fsm check`s
+// clean and `fsm generate` emits C that fails the project's own mandated
+// `gcc -std=c99 -Wall -Wextra -Wpedantic -Werror` (prototype-less
+// Host_entry_INNER / Host_exit_INNER calls). After the fix the analyzer
+// rejects it with FSM-E0502 so `fsm check`/`fsm generate` exit non-zero and
+// codegen never runs — no broken C can be produced. A top-level
+// `state X is Sub` (the supported W2a–W2d path) is unaffected; the canonical
+// example examples/submachine/submachine.fsm still generates + compiles.
+// (Comment kept *after* `language` — a comment before it trips a
+// pre-existing parser panic unrelated to P1-2; see the wave report.)
+
+feature submachines
+
+submachine Sub {
+    events { GO DONE_EV }
+    initial SubIdle
+    state SubIdle { on GO -> SubBusy }
+    state SubBusy { on DONE_EV -> SubFinal }
+    final SubFinal
+}
+
+machine Host {
+    events { GO DONE_EV LEAVE }
+    initial Outer
+    state Outer {
+        initial Inner
+        state Inner is Sub {
+            done -> Leftover
+        }
+        state Leftover {
+            on LEAVE -> Outer
+        }
+    }
+}

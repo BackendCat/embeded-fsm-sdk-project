@@ -2,7 +2,7 @@
 
 use fsm_diagnostics::{SourceLocation, Span};
 use fsm_parser::ast;
-use fsm_parser::cst::SyntaxNode;
+use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 /// Yield every [`ast::StateDecl`] reachable from `m` — top-level states,
 /// region states, and every transitive nested state — in pre-order
@@ -99,6 +99,48 @@ pub fn parse_int_literal_i128(text: &str) -> Option<i128> {
         return i128::from_str_radix(rest, 2).ok();
     }
     cleaned.parse::<i128>().ok()
+}
+
+/// Is this `SUBMACHINE_REF` nested inside a composite or parallel state
+/// (i.e. NOT a direct child of the machine/submachine root region)?
+///
+/// **v1.1 phase-audit P1-2.** A top-level `state X is Sub` is fully
+/// implemented end-to-end (W2a–W2d, gcc+sim≡codegen verified). A `state X
+/// is Sub` that appears as a *descendant* of a composite/parallel state is
+/// NOT yet implemented: W2d's `collect_sub_refs` walks only the root region,
+/// so a nested ref reaches codegen as a leaf whose `entry_/exit_` are called
+/// but whose prototypes are suppressed → dangling calls → C that fails the
+/// project's own mandated `gcc -std=c99 -Wall -Wextra -Wpedantic -Werror`.
+///
+/// The CST shape (W2a) makes the test exact: a `SUBMACHINE_REF` is a child
+/// of a `STATE_DECL`; that `STATE_DECL` is *top-level* iff its parent is
+/// directly a `MACHINE_DECL` or `SUBMACHINE_DECL` (the root region body —
+/// `MachineDecl::states()`/`SubmachineDecl::states()` are direct children,
+/// no body wrapper node). It is *nested* iff any ancestor between it and the
+/// enclosing machine/submachine is another `STATE_DECL` (composite) or a
+/// `REGION_DECL` (parallel region).
+///
+/// Shared by [`crate::checks::submachine`] (which emits the rejecting
+/// diagnostic) and the lowerer (which, as defence-in-depth, refuses to lower
+/// a nested ref to `StateNode::Submachine`) so the reject-site and the
+/// don't-lower-site can never drift apart.
+pub fn submachine_ref_is_nested(sref_node: &SyntaxNode) -> bool {
+    debug_assert_eq!(sref_node.kind(), SyntaxKind::SUBMACHINE_REF);
+    let Some(state_decl) = sref_node.parent() else {
+        return false;
+    };
+    // Walk strictly *above* the enclosing STATE_DECL. If we meet another
+    // STATE_DECL or a REGION_DECL before the machine/submachine boundary,
+    // the ref is a descendant of a composite/parallel state.
+    let mut cur = state_decl.parent();
+    while let Some(node) = cur {
+        match node.kind() {
+            SyntaxKind::STATE_DECL | SyntaxKind::REGION_DECL => return true,
+            SyntaxKind::MACHINE_DECL | SyntaxKind::SUBMACHINE_DECL => return false,
+            _ => cur = node.parent(),
+        }
+    }
+    false
 }
 
 /// Convert a rowan `TextRange` on `node` to the half-open byte [`Span`] used
