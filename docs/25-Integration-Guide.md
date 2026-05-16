@@ -384,3 +384,111 @@ conformance suite running both).
   C++ consumes the C ABI via `extern "C"` as in §2).
 - [`examples/integration/`](../examples/integration/) — the four worked,
   genuinely-building projects this guide documents.
+
+---
+
+## 9. Verification in CI / factory pipelines
+
+The full **verify → generate → check → baseline** workflow is usable
+**headless** from a CI / Make / factory build step: every command is
+non-interactive, has **zero UI / language-server / network / daemon
+dependency**, emits **deterministic machine-readable `--json`**, and is
+keyed on a documented **exit-code contract**. A factory CI calls `fsm
+verify` exactly the way it calls `fsm check` / `fsm generate`.
+
+The complete runnable recipe — a CI-shaped shell script wiring the whole
+loop with zero gaps, plus a determinism harness — lives at
+[`examples/verify/README.md`](../examples/verify/README.md) with two
+worked machines (`clean.fsm` verifies clean; `deadlocks.fsm` is caught
+with a counterexample witness). This section is the **contract reference**
+a factory integrator needs.
+
+### 9.1 The `fsm verify` / `fsm baseline` exit-code family
+
+`fsm verify` and `fsm baseline` layer a **verification-verdict** contract
+on top of Doc 18 §3's process-exit buckets. Both use the **same
+`0/1/2/3/4` family** with subcommand-specific verdict meanings (the two
+contracts are deliberately symmetric — `fsm baseline` mirrors `fsm
+verify`):
+
+| Exit | `fsm verify` | `fsm baseline` |
+|---|---|---|
+| **0** | `verified` — all properties hold (deadlock-free; if exhaustive, no unreachable state) | `no-drift` — every replay matched the frozen baseline (or `--record` wrote the corpus) |
+| **1** | `property-violated` — a reachable deadlock (with counterexample witness) or a proven `FSM-E0400` | `drift` — at least one FSM diverged; the first-mismatch is reported |
+| **2** | `inconclusive` — a bound was hit; the space was **not** fully explored. **NOT a pass.** | `inconclusive` — the corpus is absent / unreadable / wrong-schema. **NOT a pass.** |
+| **3** | input not found / unreadable | IO error (suite dir missing, corpus unwritable, corpus file unreadable) |
+| **4** | the model does not parse/analyze (kept distinct from a verdict) | out-of-scope — a suite `.fsm` won't compile, or a driver is malformed |
+
+> **Exit 2 is the honest-bound verdict, not a tool crash.** Doc 18 §3 —
+> the single authoritative *process-exit* table — maps exit `2` to "tool
+> error / invalid args" for the general CLI surface, and `clap` still
+> emits exit 2 for its own usage errors *before* these subcommands run (no
+> collision). For `fsm verify` / `fsm baseline`, exit `2` is the
+> first-class **INCONCLUSIVE** verdict: the safety property is *not
+> proven* (bound hit) / drift *cannot be decided* (corpus absent). A CI
+> gate MUST treat exit 2 as a failure-to-prove (fail, or widen
+> `--max-states`/`--max-steps` and re-run; or re-record the corpus),
+> **never** as a pass and never as a transient tool error to blindly
+> retry. This per-subcommand verdict superset is the owner-mandated design
+> (Doc 30 §4.2-W4 / §5.2 explicitly reject a generic `0/1`); it is
+> authoritatively documented in Doc 18 §3 so it is discoverable from the
+> normative CLI spec alone.
+
+For every other subcommand (`fsm check`, `fsm generate`, `fsm fmt`,
+`fsm test`, …) the plain Doc 18 §3 table applies unchanged.
+
+### 9.2 `--json` schema-versioning policy (the durable factory contract)
+
+Three machine-readable surfaces carry an explicit `schema` field — the
+stability marker a factory pins against:
+
+- `fsm verify --json` → `fsm-verify/v1`
+- `fsm baseline --record/--check --json` → `fsm-trace-diff/v1`
+- the persisted baseline corpus file → `fsm-trace/v1`
+
+One coherent rule governs all three:
+
+- **Additive change → same major** (`…/v1`): a new key under an existing
+  object, or a new element kind in an existing array. A consumer reading
+  only the keys it knows is unaffected (JSON readers ignore unknown keys).
+- **Breaking change → major bump** (`…/v2`): the meaning / type / shape of
+  an existing key changes, a key is removed/renamed, or an exit-code
+  meaning changes.
+- The **exit-code family is part of the versioned surface** and is held
+  stable across additive revisions.
+
+Branch on the **major** (`schema` prefix) and tolerate unknown keys; do
+not pin an exact byte shape.
+
+### 9.3 Determinism
+
+`fsm verify --json` and `fsm baseline --json` emit a single JSON object
+with sorted keys (`BTreeMap`) and stable array order by construction;
+re-running the same command on the same build against the same input
+yields **byte-identical** stdout (the corpus files are likewise
+byte-stable). The only field that legitimately varies is a provenance
+echo of a caller-chosen input (e.g. `baseline`'s `.corpus` echoes the
+`--corpus` path verbatim) — payload fields (`.verdict`, `.schema`,
+`.fsms`, `.properties`, `.bound`) are byte-stable. The
+`examples/verify/README.md` determinism harness demonstrates this by
+running the whole loop twice and `cmp`-ing the JSON.
+
+### 9.4 Minimal CI gate
+
+```sh
+FSM=./target/debug/fsm
+"$FSM" verify --json model.fsm > v.json || {
+    case $? in
+      1) echo "UNSAFE: $(jq -r .verdict v.json)"; exit 1 ;;
+      2) echo "NOT PROVEN (bound hit) — widen --max-states or fail"; exit 1 ;;
+      3) echo "model.fsm not found"; exit 1 ;;
+      4) echo "model.fsm does not compile"; exit 1 ;;
+    esac
+}
+[ "$(jq -r .verdict v.json)" = verified ] || { echo "not verified"; exit 1; }
+"$FSM" generate --target c99 --emit-ir model.fsm --out gen/   # exit 0 on success
+```
+
+See [`examples/verify/README.md`](../examples/verify/README.md) §3 for the
+full gate (including the negative case that proves the gate fails when it
+must, and the regression-oracle `fsm baseline` step).

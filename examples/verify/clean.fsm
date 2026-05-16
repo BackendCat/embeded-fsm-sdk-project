@@ -1,0 +1,69 @@
+// `examples/verify/clean.fsm` — the SOUND machine in the v1.4 worked
+// verification recipe. `fsm verify` must prove it deadlock-free with every
+// declared state reachable and the bounded search exhaustive (exit 0,
+// verdict "verified").
+//
+// Why this shape proves the property end-to-end (hand-checked against
+// Doc 08 §3.1/§9.1 + Doc 30 §4.1's deadlock definition):
+//
+//   • `Idle`            — `on START -> Heating`. Reachable (the initial
+//                          configuration). Has an enabled declared-event
+//                          transition ⇒ not a deadlock.
+//   • `Heating`         — its ONLY exit is `after 1000 ms -> Running`. A
+//                          naive "no enabled event ⇒ deadlock" rule would
+//                          false-positive this; the W2 explorer drives the
+//                          timer-fire edge via `Interpreter::advance_clock`,
+//                          so `Heating` always progresses ⇒ not a deadlock
+//                          (Doc 08 §13 timer foot-gun guard).
+//   • `Running`         — `on STOP -> Cooling` AND `on FAULT -> Cooling`.
+//                          Two always-enabled declared-event exits ⇒ not a
+//                          deadlock; both events are declared so the
+//                          explorer dispatches them.
+//   • `Cooling`         — its ONLY exit is `after 1000 ms -> Idle`, closing
+//                          the cycle (another timer-driven progress edge,
+//                          never wedged).
+//
+// There is no guarded transition anywhere, so no statically-unsatisfiable
+// guard can trap a state (contrast `deadlocks.fsm`). Every state has either
+// an always-enabled declared-event transition or a firing one-shot timer,
+// so NO reachable configuration is a non-final no-progress sink. The
+// machine has no `final` state and the cycle is bounded: the clock-origin
+// normalization makes the timer-cycle converge to a finite reachable
+// config×context space, so the bounded search EXHAUSTS (StopReason
+// "exhausted") rather than hitting a ceiling ⇒ "verified", not
+// "inconclusive". Every state (`Idle`, `Heating`, `Running`, `Cooling`) is
+// on the reachable cycle ⇒ no FSM-E0400.
+//
+// It is also self-contained (no `extern`, no `import`), so `fsm generate
+// --target c99 --emit-ir` compiles it to a C unit set + HAL + IR with zero
+// extra flags — the recipe's generate step.
+language fsm 2.0
+
+feature timers
+
+machine ThermalController {
+    events {
+        START
+        STOP
+        FAULT
+    }
+
+    initial Idle
+
+    state Idle {
+        on START -> Heating
+    }
+
+    state Heating {
+        after 1000 ms -> Running
+    }
+
+    state Running {
+        on STOP  -> Cooling
+        on FAULT -> Cooling
+    }
+
+    state Cooling {
+        after 1000 ms -> Idle
+    }
+}

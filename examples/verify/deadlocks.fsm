@@ -1,0 +1,59 @@
+// `examples/verify/deadlocks.fsm` — the GENUINELY DEADLOCKING machine in
+// the v1.4 worked verification recipe. `fsm verify` must report a
+// reachable deadlock with a non-empty counterexample witness (exit 1,
+// verdict "property-violated", `properties.deadlockFree.result ==
+// "violated"`, a non-empty `.counterexample.witness`).
+//
+// Shape: the canonical reachable-guard-trap deadlock (the same technique
+// the W2 acceptance fixture `crates/fsm-verify/tests/fixtures/
+// deadlock_guard_trap.fsm` cross-checks against a direct Interpreter run).
+//
+// Hand-verified against Doc 08 (the SPEC, not just "the simulator said
+// so") + Doc 30 §4.1's deadlock definition:
+//
+//   • `ctx.armed` defaults to 0 and is NEVER assigned by any entry/exit
+//     action or transition action anywhere in the machine, so on EVERY
+//     reachable path `ctx.armed == 0`.
+//   • `Latched` is reachable: `Idle --ARM--> Latched` (Doc 08 §1: source
+//     ∈ C ∧ trigger matches ∧ no guard ⇒ enabled; witness = [ARM]).
+//   • `Latched`'s ONLY outgoing transition is `on RELEASE [ctx.armed == 1]
+//     -> Idle`. Its guard is statically unsatisfiable on the reachable
+//     context (armed ≡ 0). Per Doc 08 §1 the transition is NOT enabled
+//     from `{Latched}` for `RELEASE`; no other declared event (`ARM`) has
+//     a source in `{Latched}`. So `select_transitions({Latched}, *) = ∅`.
+//   • Per Doc 08 §3.1: `select_transitions = ∅` ⇒ the RTC step returns,
+//     the configuration is unchanged.
+//   • Per Doc 08 §9.1: `Latched` is `simple`, not `final`; entering it
+//     enqueues a completion event, but `Latched` has no completion
+//     (`done ->`) transition, so the completion is discarded and the
+//     configuration is still `{Latched}` after the interpreter's drain. No
+//     pending completion remains. There is no timer (no `feature timers`,
+//     no `after`), so no timer-fire edge can rescue it either.
+//   ⇒ `{Latched}` is a reachable, non-final, no-progress configuration
+//     with no enabled transition for ANY declared event and no pending
+//     timer/completion = a DEADLOCK. Counterexample witness: [ARM].
+language fsm 2.0
+
+machine SafetyLatch {
+    context {
+        armed: u8 = 0
+    }
+
+    events {
+        ARM
+        RELEASE
+    }
+
+    initial Idle
+
+    state Idle {
+        on ARM -> Latched
+    }
+
+    // The sink. Reachable (via ARM), not final, and its single guarded
+    // exit can never be taken on the reachable context (armed is never
+    // set to 1 anywhere) ⇒ a genuine, witnessed deadlock.
+    state Latched {
+        on RELEASE [ctx.armed == 1] -> Idle
+    }
+}
