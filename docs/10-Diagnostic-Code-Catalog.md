@@ -728,6 +728,19 @@ every RETRY_MS ms : tick   // FSM-E0410: const folds to 0
 
 ### FSM-E0903 — `defer` not yet supported in v1.0 (or: too many event types for defer bitmask)
 
+> _Status: **Deprecated** (2026-05-15, v1.1). Retired when the `defer
+> EVENT` runtime shipped: the v1.0 stopgap below — the analyzer rejecting
+> every `defer` declaration (audit P0-5 option-b downgrade) — is gone, a
+> real defer-buffer runtime now ships in `codegen-c` + the simulator
+> (Doc 08 §10), so condition (a) no longer fires. Moved to
+> `fsm_diagnostics::deprecated::DeprecatedCode::E0903`; per Doc 10 §14 the
+> code number is retained and the wire form still parses in `allow`/`deny`
+> and suppression annotations so a project that pinned `FSM-E0903` does
+> not start failing (`DiagnosticCode::from_str("FSM-E0903")` returns
+> `None`; `DeprecatedCode::from_str` round-trips it — test-pinned). The
+> prose below is preserved as the historical record of the v1.0/v1.1
+> mechanism; it does not describe a currently-emitted diagnostic._
+
 > _Added 2026-05-14 in v1.0 doc reconciliation per Doc 00 §11.7 (option-b
 > downgrade) and §G-08._
 
