@@ -1,0 +1,7 @@
+{
+  "init": { "machineName": "Composite" },
+  "steps": [
+    { "action": "dispatch", "event": "TICK" },
+    { "action": "dispatch", "event": "RESET" }
+  ]
+}

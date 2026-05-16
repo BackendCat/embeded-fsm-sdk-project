@@ -1,0 +1,19 @@
+{
+  "init": {
+    "machineName": "Device"
+  },
+  "steps": [
+    {
+      "action": "dispatch",
+      "event": "CONNECT"
+    },
+    {
+      "action": "dispatch",
+      "event": "ACK"
+    },
+    {
+      "action": "dispatch",
+      "event": "ESTABLISHED"
+    }
+  ]
+}

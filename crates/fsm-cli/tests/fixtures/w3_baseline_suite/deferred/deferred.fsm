@@ -1,0 +1,33 @@
+language fsm 2.0
+
+feature deferred
+
+machine Printer {
+    events {
+        PRINT_JOB
+        START_MAINT
+        MAINT_DONE
+        JOB_DONE
+    }
+
+    initial Idle
+
+    state Idle {
+        on PRINT_JOB   -> Printing
+        on START_MAINT -> Maintenance
+    }
+
+    state Printing {
+        on JOB_DONE -> Idle
+    }
+
+    state Maintenance {
+        // A PRINT_JOB that arrives while the printer is in Maintenance is
+        // not lost: Maintenance defers it (UML 2.5.1 §14.2.3.9.1). On
+        // MAINT_DONE the machine returns to Idle and the held PRINT_JOB is
+        // released to the front of the queue and reprocessed there, where
+        // Idle —PRINT_JOB→ Printing finally consumes it.
+        defer PRINT_JOB
+        on MAINT_DONE -> Idle
+    }
+}

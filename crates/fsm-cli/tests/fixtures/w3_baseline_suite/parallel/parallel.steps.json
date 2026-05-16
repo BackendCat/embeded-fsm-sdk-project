@@ -1,0 +1,7 @@
+{
+  "init": { "machineName": "ParallelCompletion" },
+  "steps": [
+    { "action": "dispatch", "event": "A_DONE" },
+    { "action": "dispatch", "event": "B_DONE" }
+  ]
+}

@@ -57,6 +57,14 @@ pub(crate) enum Command {
     /// semantic oracle). v1.4-W2: composite / parallel / history / timer /
     /// submachine FSMs (W1 was flat single-machine only).
     Verify(VerifyArgs),
+
+    /// Trace differential replay (v1.4-W3): capture execution traces of a
+    /// suite's FSMs into a frozen `fsm-trace/v1` baseline corpus
+    /// (`--record`), then on later builds re-run and report any semantic
+    /// drift from that baseline (`--check`). The regression oracle that
+    /// makes a refactor that silently changes runtime semantics fail. Drives
+    /// the shipped interpreter via `execute_trace` — it forks no semantics.
+    Baseline(BaselineArgs),
 }
 
 #[derive(Args, Debug)]
@@ -201,4 +209,35 @@ pub(crate) struct VerifyArgs {
     /// Input .fsm file.
     #[arg(required = true)]
     pub(crate) file: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct BaselineArgs {
+    /// Capture every FSM under the suite into the baseline corpus directory
+    /// (`--corpus`), overwriting it. Use this once on a known-good build to
+    /// freeze the regression oracle. Mutually exclusive with `--check`.
+    #[arg(long, conflicts_with = "check")]
+    pub(crate) record: bool,
+    /// Re-run every FSM under the suite and compare against the frozen
+    /// baseline corpus, reporting any semantic drift with a precise
+    /// first-mismatch report. This is the default mode when neither
+    /// `--record` nor `--check` is given.
+    #[arg(long)]
+    pub(crate) check: bool,
+    /// Baseline corpus directory (the persisted `fsm-trace/v1` artifact).
+    /// Defaults to `<suite>/baselines`.
+    #[arg(long)]
+    pub(crate) corpus: Option<PathBuf>,
+    /// Emit a deterministic, schema-versioned (`fsm-trace-diff/v1`) JSON
+    /// result on stdout instead of the human summary. The contract a CI /
+    /// Make / factory step parses; on drift it carries the first-mismatch
+    /// payload (which FSM, the step index, expected-vs-actual record).
+    #[arg(long)]
+    pub(crate) json: bool,
+    /// The suite root: a directory of `.fsm` files (walked recursively).
+    /// Each FSM is driven through the shipped interpreter via a recorded
+    /// `.steps.json` trace placed beside it, or — absent one — its
+    /// initialization step alone (still a real, drift-sensitive capture).
+    #[arg(required = true)]
+    pub(crate) suite: PathBuf,
 }

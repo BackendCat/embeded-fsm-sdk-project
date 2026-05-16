@@ -1,0 +1,51 @@
+{
+  "init": {
+    "machineName": "Motor",
+    "externReturns": {
+      "can_start": {
+        "type": "bool",
+        "value": true
+      }
+    }
+  },
+  "steps": [
+    {
+      "action": "dispatch",
+      "event": "START"
+    },
+    {
+      "action": "dispatch",
+      "event": "STOP"
+    },
+    {
+      "action": "dispatch",
+      "event": "START"
+    },
+    {
+      "action": "advance_clock",
+      "deltaMs": 5001
+    },
+    {
+      "action": "dispatch",
+      "event": "RESET"
+    },
+    {
+      "action": "dispatch",
+      "event": "START"
+    },
+    {
+      "action": "dispatch",
+      "event": "FAULT",
+      "payload": {
+        "code": {
+          "type": "u8",
+          "value": 7
+        }
+      }
+    },
+    {
+      "action": "dispatch",
+      "event": "RESET"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "init": {
+    "machineName": "TrafficLight"
+  },
+  "steps": [
+    {
+      "action": "advance_clock",
+      "deltaMs": 2001
+    },
+    {
+      "action": "advance_clock",
+      "deltaMs": 2001
+    },
+    {
+      "action": "advance_clock",
+      "deltaMs": 30001
+    },
+    {
+      "action": "advance_clock",
+      "deltaMs": 5001
+    },
+    {
+      "action": "dispatch",
+      "event": "OVERRIDE"
+    },
+    {
+      "action": "dispatch",
+      "event": "RESUME"
+    }
+  ]
+}

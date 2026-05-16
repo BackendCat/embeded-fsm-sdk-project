@@ -1,0 +1,31 @@
+{
+  "init": {
+    "machineName": "Printer"
+  },
+  "steps": [
+    {
+      "action": "dispatch",
+      "event": "PRINT_JOB"
+    },
+    {
+      "action": "dispatch",
+      "event": "JOB_DONE"
+    },
+    {
+      "action": "dispatch",
+      "event": "START_MAINT"
+    },
+    {
+      "action": "dispatch",
+      "event": "PRINT_JOB"
+    },
+    {
+      "action": "dispatch",
+      "event": "MAINT_DONE"
+    },
+    {
+      "action": "dispatch",
+      "event": "JOB_DONE"
+    }
+  ]
+}

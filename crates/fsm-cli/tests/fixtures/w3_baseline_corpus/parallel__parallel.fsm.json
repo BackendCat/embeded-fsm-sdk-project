@@ -1,0 +1,164 @@
+{
+  "schema": "fsm-trace/v1",
+  "fsm": "parallel/parallel.fsm",
+  "machine": "ParallelCompletion",
+  "trace": {
+    "init": {
+      "virtualClockStartMs": 0,
+      "machineName": "ParallelCompletion"
+    },
+    "steps": [
+      {
+        "action": "dispatch",
+        "event": "A_DONE"
+      },
+      {
+        "action": "dispatch",
+        "event": "B_DONE"
+      }
+    ],
+    "expected": [
+      {
+        "traceId": 0,
+        "kind": "init",
+        "virtualClockMs": 0,
+        "enteredStates": [
+          "s-ParallelCompletion-Working",
+          "s-ParallelCompletion-A1",
+          "s-ParallelCompletion-B1"
+        ],
+        "configBefore": [],
+        "configAfter": [
+          "s-ParallelCompletion-A1",
+          "s-ParallelCompletion-B1"
+        ]
+      },
+      {
+        "traceId": 1,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "A_DONE",
+          "stableId": "M:ParallelCompletion:event:A_DONE"
+        },
+        "transitionTaken": {
+          "stableId": "M:ParallelCompletion:transition:t-ParallelCompletion-0",
+          "source": "s-ParallelCompletion-A1",
+          "target": "s-ParallelCompletion-A2"
+        },
+        "exitedStates": [
+          "s-ParallelCompletion-A1"
+        ],
+        "enteredStates": [
+          "s-ParallelCompletion-A2"
+        ],
+        "configBefore": [
+          "s-ParallelCompletion-A1",
+          "s-ParallelCompletion-B1"
+        ],
+        "configAfter": [
+          "s-ParallelCompletion-B1",
+          "s-ParallelCompletion-A2"
+        ]
+      },
+      {
+        "traceId": 2,
+        "kind": "completion",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "__completion__:s-ParallelCompletion-A2"
+        },
+        "transitionTaken": {
+          "stableId": "M:ParallelCompletion:transition:t-ParallelCompletion-1",
+          "source": "s-ParallelCompletion-A2",
+          "target": "s-ParallelCompletion-AFinal"
+        },
+        "exitedStates": [
+          "s-ParallelCompletion-A2"
+        ],
+        "enteredStates": [
+          "s-ParallelCompletion-AFinal"
+        ],
+        "configBefore": [
+          "s-ParallelCompletion-B1",
+          "s-ParallelCompletion-A2"
+        ],
+        "configAfter": [
+          "s-ParallelCompletion-B1",
+          "s-ParallelCompletion-AFinal"
+        ]
+      },
+      {
+        "traceId": 3,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "B_DONE",
+          "stableId": "M:ParallelCompletion:event:B_DONE"
+        },
+        "transitionTaken": {
+          "stableId": "M:ParallelCompletion:transition:t-ParallelCompletion-2",
+          "source": "s-ParallelCompletion-B1",
+          "target": "s-ParallelCompletion-B2"
+        },
+        "exitedStates": [
+          "s-ParallelCompletion-B1"
+        ],
+        "enteredStates": [
+          "s-ParallelCompletion-B2"
+        ],
+        "configBefore": [
+          "s-ParallelCompletion-B1",
+          "s-ParallelCompletion-AFinal"
+        ],
+        "configAfter": [
+          "s-ParallelCompletion-AFinal",
+          "s-ParallelCompletion-B2"
+        ]
+      },
+      {
+        "traceId": 4,
+        "kind": "completion",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "__completion__:s-ParallelCompletion-B2"
+        },
+        "transitionTaken": {
+          "stableId": "M:ParallelCompletion:transition:t-ParallelCompletion-3",
+          "source": "s-ParallelCompletion-B2",
+          "target": "s-ParallelCompletion-BFinal"
+        },
+        "exitedStates": [
+          "s-ParallelCompletion-B2"
+        ],
+        "enteredStates": [
+          "s-ParallelCompletion-BFinal"
+        ],
+        "configBefore": [
+          "s-ParallelCompletion-AFinal",
+          "s-ParallelCompletion-B2"
+        ],
+        "configAfter": [
+          "s-ParallelCompletion-AFinal",
+          "s-ParallelCompletion-BFinal"
+        ]
+      },
+      {
+        "traceId": 5,
+        "kind": "completion",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "__completion__:s-ParallelCompletion-Working"
+        },
+        "configBefore": [
+          "s-ParallelCompletion-AFinal",
+          "s-ParallelCompletion-BFinal"
+        ],
+        "configAfter": [
+          "s-ParallelCompletion-AFinal",
+          "s-ParallelCompletion-BFinal"
+        ]
+      }
+    ]
+  }
+}

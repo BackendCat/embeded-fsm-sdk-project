@@ -1,0 +1,222 @@
+{
+  "schema": "fsm-trace/v1",
+  "fsm": "deferred/deferred.fsm",
+  "machine": "Printer",
+  "trace": {
+    "init": {
+      "virtualClockStartMs": 0,
+      "machineName": "Printer"
+    },
+    "steps": [
+      {
+        "action": "dispatch",
+        "event": "PRINT_JOB"
+      },
+      {
+        "action": "dispatch",
+        "event": "JOB_DONE"
+      },
+      {
+        "action": "dispatch",
+        "event": "START_MAINT"
+      },
+      {
+        "action": "dispatch",
+        "event": "PRINT_JOB"
+      },
+      {
+        "action": "dispatch",
+        "event": "MAINT_DONE"
+      },
+      {
+        "action": "dispatch",
+        "event": "JOB_DONE"
+      }
+    ],
+    "expected": [
+      {
+        "traceId": 0,
+        "kind": "init",
+        "virtualClockMs": 0,
+        "enteredStates": [
+          "s-Printer-Idle"
+        ],
+        "configBefore": [],
+        "configAfter": [
+          "s-Printer-Idle"
+        ]
+      },
+      {
+        "traceId": 1,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "PRINT_JOB",
+          "stableId": "M:Printer:event:PRINT_JOB"
+        },
+        "transitionTaken": {
+          "stableId": "M:Printer:transition:t-Printer-0",
+          "source": "s-Printer-Idle",
+          "target": "s-Printer-Printing"
+        },
+        "exitedStates": [
+          "s-Printer-Idle"
+        ],
+        "enteredStates": [
+          "s-Printer-Printing"
+        ],
+        "configBefore": [
+          "s-Printer-Idle"
+        ],
+        "configAfter": [
+          "s-Printer-Printing"
+        ]
+      },
+      {
+        "traceId": 2,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "JOB_DONE",
+          "stableId": "M:Printer:event:JOB_DONE"
+        },
+        "transitionTaken": {
+          "stableId": "M:Printer:transition:t-Printer-2",
+          "source": "s-Printer-Printing",
+          "target": "s-Printer-Idle"
+        },
+        "exitedStates": [
+          "s-Printer-Printing"
+        ],
+        "enteredStates": [
+          "s-Printer-Idle"
+        ],
+        "configBefore": [
+          "s-Printer-Printing"
+        ],
+        "configAfter": [
+          "s-Printer-Idle"
+        ]
+      },
+      {
+        "traceId": 3,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "START_MAINT",
+          "stableId": "M:Printer:event:START_MAINT"
+        },
+        "transitionTaken": {
+          "stableId": "M:Printer:transition:t-Printer-1",
+          "source": "s-Printer-Idle",
+          "target": "s-Printer-Maintenance"
+        },
+        "exitedStates": [
+          "s-Printer-Idle"
+        ],
+        "enteredStates": [
+          "s-Printer-Maintenance"
+        ],
+        "configBefore": [
+          "s-Printer-Idle"
+        ],
+        "configAfter": [
+          "s-Printer-Maintenance"
+        ]
+      },
+      {
+        "traceId": 4,
+        "kind": "event_deferred",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "PRINT_JOB",
+          "stableId": "M:Printer:event:PRINT_JOB"
+        },
+        "configBefore": [
+          "s-Printer-Maintenance"
+        ],
+        "configAfter": [
+          "s-Printer-Maintenance"
+        ]
+      },
+      {
+        "traceId": 5,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "MAINT_DONE",
+          "stableId": "M:Printer:event:MAINT_DONE"
+        },
+        "transitionTaken": {
+          "stableId": "M:Printer:transition:t-Printer-3",
+          "source": "s-Printer-Maintenance",
+          "target": "s-Printer-Idle"
+        },
+        "exitedStates": [
+          "s-Printer-Maintenance"
+        ],
+        "enteredStates": [
+          "s-Printer-Idle"
+        ],
+        "configBefore": [
+          "s-Printer-Maintenance"
+        ],
+        "configAfter": [
+          "s-Printer-Idle"
+        ]
+      },
+      {
+        "traceId": 6,
+        "kind": "event_redispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "PRINT_JOB",
+          "stableId": "M:Printer:event:PRINT_JOB"
+        },
+        "transitionTaken": {
+          "stableId": "M:Printer:transition:t-Printer-0",
+          "source": "s-Printer-Idle",
+          "target": "s-Printer-Printing"
+        },
+        "exitedStates": [
+          "s-Printer-Idle"
+        ],
+        "enteredStates": [
+          "s-Printer-Printing"
+        ],
+        "configBefore": [
+          "s-Printer-Idle"
+        ],
+        "configAfter": [
+          "s-Printer-Printing"
+        ]
+      },
+      {
+        "traceId": 7,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "JOB_DONE",
+          "stableId": "M:Printer:event:JOB_DONE"
+        },
+        "transitionTaken": {
+          "stableId": "M:Printer:transition:t-Printer-2",
+          "source": "s-Printer-Printing",
+          "target": "s-Printer-Idle"
+        },
+        "exitedStates": [
+          "s-Printer-Printing"
+        ],
+        "enteredStates": [
+          "s-Printer-Idle"
+        ],
+        "configBefore": [
+          "s-Printer-Printing"
+        ],
+        "configAfter": [
+          "s-Printer-Idle"
+        ]
+      }
+    ]
+  }
+}

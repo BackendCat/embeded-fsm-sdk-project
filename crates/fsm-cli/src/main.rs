@@ -36,5 +36,6 @@ fn main() -> ExitCode {
         Command::Decompile(args) => cmd::decompile::run(args),
         Command::Init(args) => cmd::init::run(args),
         Command::Verify(args) => cmd::verify::run(args),
+        Command::Baseline(args) => cmd::baseline::run(args),
     }
 }

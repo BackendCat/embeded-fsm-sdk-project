@@ -1,0 +1,89 @@
+{
+  "schema": "fsm-trace/v1",
+  "fsm": "composite/composite.fsm",
+  "machine": "Composite",
+  "trace": {
+    "init": {
+      "virtualClockStartMs": 0,
+      "machineName": "Composite"
+    },
+    "steps": [
+      {
+        "action": "dispatch",
+        "event": "TICK"
+      },
+      {
+        "action": "dispatch",
+        "event": "RESET"
+      }
+    ],
+    "expected": [
+      {
+        "traceId": 0,
+        "kind": "init",
+        "virtualClockMs": 0,
+        "enteredStates": [
+          "s-Composite-Outer",
+          "s-Composite-Inner"
+        ],
+        "configBefore": [],
+        "configAfter": [
+          "s-Composite-Inner"
+        ]
+      },
+      {
+        "traceId": 1,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "TICK",
+          "stableId": "M:Composite:event:TICK"
+        },
+        "transitionTaken": {
+          "stableId": "M:Composite:transition:t-Composite-1",
+          "source": "s-Composite-Inner",
+          "target": "s-Composite-Inner2"
+        },
+        "exitedStates": [
+          "s-Composite-Inner"
+        ],
+        "enteredStates": [
+          "s-Composite-Inner2"
+        ],
+        "configBefore": [
+          "s-Composite-Inner"
+        ],
+        "configAfter": [
+          "s-Composite-Inner2"
+        ]
+      },
+      {
+        "traceId": 2,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "RESET",
+          "stableId": "M:Composite:event:RESET"
+        },
+        "transitionTaken": {
+          "stableId": "M:Composite:transition:t-Composite-0",
+          "source": "s-Composite-Outer",
+          "target": "s-Composite-Done"
+        },
+        "exitedStates": [
+          "s-Composite-Inner2",
+          "s-Composite-Outer"
+        ],
+        "enteredStates": [
+          "s-Composite-Done"
+        ],
+        "configBefore": [
+          "s-Composite-Inner2"
+        ],
+        "configAfter": [
+          "s-Composite-Done"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,281 @@
+{
+  "schema": "fsm-trace/v1",
+  "fsm": "submachine/submachine.fsm",
+  "machine": "Device",
+  "trace": {
+    "init": {
+      "virtualClockStartMs": 0,
+      "machineName": "Device"
+    },
+    "steps": [
+      {
+        "action": "dispatch",
+        "event": "CONNECT"
+      },
+      {
+        "action": "dispatch",
+        "event": "ACK"
+      },
+      {
+        "action": "dispatch",
+        "event": "ESTABLISHED"
+      }
+    ],
+    "expected": [
+      {
+        "traceId": 0,
+        "kind": "init",
+        "virtualClockMs": 0,
+        "enteredStates": [
+          "s-Device-Connecting"
+        ],
+        "configBefore": [],
+        "configAfter": [
+          "s-Device-Connecting"
+        ]
+      },
+      {
+        "traceId": 1,
+        "kind": "submachine_entered",
+        "virtualClockMs": 0,
+        "configBefore": [
+          "s-Device-Connecting"
+        ],
+        "configAfter": [
+          "s-Device-Connecting"
+        ],
+        "submachine": {
+          "refStateId": "s-Device-Connecting",
+          "subConfigAfter": [
+            "s-Connection-Idle"
+          ]
+        }
+      },
+      {
+        "traceId": 2,
+        "kind": "submachine_event_delegated",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "CONNECT",
+          "stableId": "M:Device:event:CONNECT"
+        },
+        "configBefore": [
+          "s-Device-Connecting"
+        ],
+        "configAfter": [
+          "s-Device-Connecting"
+        ],
+        "submachine": {
+          "refStateId": "s-Device-Connecting",
+          "subConfigBefore": [
+            "s-Connection-Idle"
+          ],
+          "subConfigAfter": [
+            "s-Connection-Handshake"
+          ],
+          "delegatedEvent": "CONNECT"
+        }
+      },
+      {
+        "traceId": 3,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "CONNECT",
+          "stableId": "M:Connection:event:CONNECT"
+        },
+        "transitionTaken": {
+          "stableId": "M:Connection:transition:t-Connection-0",
+          "source": "s-Connection-Idle",
+          "target": "s-Connection-Handshake"
+        },
+        "exitedStates": [
+          "s-Connection-Idle"
+        ],
+        "enteredStates": [
+          "s-Connection-Handshake"
+        ],
+        "configBefore": [
+          "s-Connection-Idle"
+        ],
+        "configAfter": [
+          "s-Connection-Handshake"
+        ],
+        "submachine": {
+          "refStateId": "s-Device-Connecting",
+          "subConfigBefore": [
+            "s-Connection-Idle"
+          ],
+          "subConfigAfter": [
+            "s-Connection-Handshake"
+          ]
+        }
+      },
+      {
+        "traceId": 4,
+        "kind": "submachine_event_delegated",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "ACK",
+          "stableId": "M:Device:event:ACK"
+        },
+        "configBefore": [
+          "s-Device-Connecting"
+        ],
+        "configAfter": [
+          "s-Device-Connecting"
+        ],
+        "submachine": {
+          "refStateId": "s-Device-Connecting",
+          "subConfigBefore": [
+            "s-Connection-Handshake"
+          ],
+          "subConfigAfter": [
+            "s-Connection-Established"
+          ],
+          "delegatedEvent": "ACK"
+        }
+      },
+      {
+        "traceId": 5,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "ACK",
+          "stableId": "M:Connection:event:ACK"
+        },
+        "transitionTaken": {
+          "stableId": "M:Connection:transition:t-Connection-1",
+          "source": "s-Connection-Handshake",
+          "target": "s-Connection-Established"
+        },
+        "exitedStates": [
+          "s-Connection-Handshake"
+        ],
+        "enteredStates": [
+          "s-Connection-Established"
+        ],
+        "configBefore": [
+          "s-Connection-Handshake"
+        ],
+        "configAfter": [
+          "s-Connection-Established"
+        ],
+        "submachine": {
+          "refStateId": "s-Device-Connecting",
+          "subConfigBefore": [
+            "s-Connection-Handshake"
+          ],
+          "subConfigAfter": [
+            "s-Connection-Established"
+          ]
+        }
+      },
+      {
+        "traceId": 6,
+        "kind": "submachine_event_delegated",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "ESTABLISHED",
+          "stableId": "M:Device:event:ESTABLISHED"
+        },
+        "configBefore": [
+          "s-Device-Connecting"
+        ],
+        "configAfter": [
+          "s-Device-Connecting"
+        ],
+        "submachine": {
+          "refStateId": "s-Device-Connecting",
+          "subConfigBefore": [
+            "s-Connection-Established"
+          ],
+          "subConfigAfter": [
+            "s-Connection-Done"
+          ],
+          "delegatedEvent": "ESTABLISHED"
+        }
+      },
+      {
+        "traceId": 7,
+        "kind": "dispatched",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "ESTABLISHED",
+          "stableId": "M:Connection:event:ESTABLISHED"
+        },
+        "transitionTaken": {
+          "stableId": "M:Connection:transition:t-Connection-2",
+          "source": "s-Connection-Established",
+          "target": "s-Connection-Done"
+        },
+        "exitedStates": [
+          "s-Connection-Established"
+        ],
+        "enteredStates": [
+          "s-Connection-Done"
+        ],
+        "configBefore": [
+          "s-Connection-Established"
+        ],
+        "configAfter": [
+          "s-Connection-Done"
+        ],
+        "submachine": {
+          "refStateId": "s-Device-Connecting",
+          "subConfigBefore": [
+            "s-Connection-Established"
+          ],
+          "subConfigAfter": [
+            "s-Connection-Done"
+          ]
+        }
+      },
+      {
+        "traceId": 8,
+        "kind": "submachine_completed",
+        "virtualClockMs": 0,
+        "configBefore": [
+          "s-Device-Connecting"
+        ],
+        "configAfter": [
+          "s-Device-Connecting"
+        ],
+        "submachine": {
+          "refStateId": "s-Device-Connecting",
+          "subConfigBefore": [
+            "s-Connection-Done"
+          ],
+          "subConfigAfter": [
+            "s-Connection-Done"
+          ]
+        }
+      },
+      {
+        "traceId": 9,
+        "kind": "completion",
+        "virtualClockMs": 0,
+        "eventReceived": {
+          "name": "__completion__:s-Device-Connecting"
+        },
+        "transitionTaken": {
+          "stableId": "M:Device:transition:t-Device-1",
+          "source": "s-Device-Connecting",
+          "target": "s-Device-Online"
+        },
+        "exitedStates": [
+          "s-Device-Connecting"
+        ],
+        "enteredStates": [
+          "s-Device-Online"
+        ],
+        "configBefore": [
+          "s-Device-Connecting"
+        ],
+        "configAfter": [
+          "s-Device-Online"
+        ]
+      }
+    ]
+  }
+}
