@@ -775,6 +775,7 @@ every RETRY_MS ms : tick   // FSM-E0410: const folds to 0
 | **Description** | A `while` or `for` statement was found in an action block. Loops are permitted but may obscure bounded-execution analysis. |
 | **Message** | `Loop in action block. Consider extracting to a named extern function for bounded-execution analysis.` |
 | **Fix** | Extract the loop body to an `extern` function, or suppress with `// fsm-lint:disable FSM-W0200`. |
+| **Emitted by** | `fsm-analyzer` (`checks/action_lint.rs`) — one per `while`/`for` whose ancestor chain contains an action block (transition `:` action, state `entry:`/`exit:`). Implemented in v1.2-FU-DEAD-CODES per Doc 02 §9.2 / Doc 04 §8.7.2 / Doc 11 §18. |
 
 ---
 
@@ -818,6 +819,22 @@ after 999999999ms -> Timeout   // FSM-W0401: ~11.5 days — verify units
 ---
 
 ### FSM-W0500 — Extern declared but never used
+
+> _Status: **Deprecated** (2026-05-16, v1.2-FU-DEAD-CODES). Retired as
+> vestigial / over-catalogued: this entry was only ever a bare title — no
+> Severity/Description/Fix was specified (contrast the W0501 sibling and
+> every emitted W-code), and no normative document states the compiler
+> emits it (contrast `FSM-W0200`, which Doc 02 §9.2 / Doc 04 §8.7.2 /
+> Doc 11 §18 all mandate and which the same wave IMPLEMENTed). It had zero
+> emission sites; the one module that considered it (`fsm-analyzer`'s
+> import check) explicitly judged "`FSM-W0500` is not quite right" and
+> declined it; and its whole "unused declaration" family (including
+> `FSM-W0501`) was never built. Per Doc 10 §14 the code number is retained
+> and the wire form still parses in `allow`/`deny` and suppression
+> annotations (`fsm_diagnostics::deprecated::DeprecatedCode::W0500`) so a
+> project that pinned `FSM-W0500` does not start failing. "Unused extern"
+> may be reconsidered as a coherently-specified lint in a future minor;
+> it would receive a NEW code, never this one._
 
 ---
 

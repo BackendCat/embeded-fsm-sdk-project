@@ -2,19 +2,37 @@
 
 Evidence for MVP gate **G7** (Doc 00 §5.1: "≥ 1 test per diagnostic code").
 
-The table below lists every variant of `fsm_diagnostics::DiagnosticCode`
-(75 in v1.0.0) and the test location(s) that exercise it. A row marked
-`UNTESTED` is a Phase 2.3 follow-up: the catalog entry exists in
-`crates/fsm-diagnostics/src/lib.rs` but no emitter test asserts the code.
-G7 closes when this column is empty.
+The table below lists every **live** variant of
+`fsm_diagnostics::DiagnosticCode` and the test location(s) that exercise
+it. A row marked `UNTESTED` is a Phase 2.3 follow-up: the catalog entry
+exists in `crates/fsm-diagnostics/src/lib.rs` but no emitter test asserts
+the code. G7 closes when this column is empty.
+
+The live enum is **73** codes (the `all_codes_matches_expected_count`
+lock test in `fsm-diagnostics`). It was 75 in v1.0.0; `FSM-E0903` was
+retired to `deprecated::DeprecatedCode` in v1.1 (defer runtime shipped)
+and `FSM-W0500` in v1.2-FU-DEAD-CODES (vestigial, never emitted), each
+−1. Retired codes are not live variants and so are not rows here; their
+numbers are permanent and they still parse in suppression / `allow`
+contexts (Doc 10 §14). _Note: the `FSM-E0903` row below is a pre-existing
+v1.1 drift — it was retired but the row was never removed; left as-is,
+out of this wave's scope, flagged for the next coverage-map pass._
 
 ## Summary
 
+Row counts over the table below (75 rows total): the table carries one
+struck `~~FSM-W0500~~` RETIRED marker and one stale `FSM-E0903` row (the
+pre-existing v1.1 drift noted above), so **live enum = 75 − W0500 − E0903
+= 73** (matches the `all_codes_matches_expected_count` lock test). G7
+"≥1 test per code" is judged over live codes only; the W0200 IMPLEMENT
+moved it Tested→ and added formal conformance coverage.
+
 | Status      | Count |
 | ----------- | ----- |
-| Tested      |    36 |
-| **UNTESTED**|    39 |
-| **Total**   |    75 |
+| Tested (rows with a test path) | 40 |
+| **UNTESTED** | 34 |
+| RETIRED marker (`~~FSM-W0500~~`, not a live code) | 1 |
+| **Total rows** | 75 |
 
 ## Per-code map
 
@@ -74,11 +92,11 @@ G7 closes when this column is empty.
 | FSM-E0903 | Error | `crates/fsm-analyzer/src/checks/defer.rs` (unit test inside checker) |
 | FSM-W0100 | Warning | **UNTESTED** — history-no-stored-no-default emission missing test |
 | FSM-W0101 | Warning | `crates/fsm-analyzer/tests/negative.rs::w0101_completion_after_else` |
-| FSM-W0200 | Warning | **UNTESTED** — loop-in-action emission missing test |
+| FSM-W0200 | Warning | `crates/fsm-analyzer/tests/negative.rs::w0200_while_loop_in_transition_action_block`, `::w0200_for_loop_in_entry_action_block`, `::w0200_not_emitted_for_loop_free_action_block` (control), `tests/conformance/semantic/neg/004_loop_in_action/` |
 | FSM-W0201 | Warning | **UNTESTED** — action-block complexity emission missing test |
 | FSM-W0300 | Warning | `crates/fsm-analyzer/tests/negative.rs::w0300_priority_resolved_conflict` |
 | FSM-W0401 | Warning | **UNTESTED** — large-timer-duration emission missing test |
-| FSM-W0500 | Warning | **UNTESTED** — unused-extern emission missing test |
+| ~~FSM-W0500~~ | — | **RETIRED** v1.2-FU-DEAD-CODES → `deprecated::DeprecatedCode::W0500` (vestigial; never emitted; no normative spec). Not a live variant — excluded from the G7 live count. `crates/fsm-diagnostics/src/lib.rs::tests::deprecated_codes_display_and_parse` proves it still parses in suppression / `allow`; `crates/fsm-analyzer/tests/negative.rs::unused_extern_is_clean_w0500_retired_no_substitute_diagnostic` proves the would-trigger input is now clean. |
 | FSM-W0501 | Warning | **UNTESTED** — unused-event emission missing test |
 | FSM-W0600 | Warning | `crates/fsm-analyzer/tests/negative.rs::w0600_region_with_one_state` |
 | FSM-W0601 | Warning | `crates/fsm-analyzer/tests/negative.rs::w0601_timer_exceeds_24_hours` |

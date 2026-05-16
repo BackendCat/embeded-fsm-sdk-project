@@ -3,7 +3,8 @@
 //! Each `pub mod` underneath this file owns one check family — name
 //! resolution, type checking, determinism analysis, completion semantics,
 //! history defaults, timer literals, parallel-region structure, submachine
-//! references, defer bitmask limits, import sanity.
+//! references, defer bitmask limits, import sanity, action-block style
+//! lint (`FSM-W0200`).
 //!
 //! The orchestrator runs them in dependency order: name resolution first
 //! (so subsequent passes know whether a reference resolves), then type
@@ -15,6 +16,7 @@ use fsm_parser::ast::File;
 
 use crate::symbol_table::SymbolTable;
 
+pub mod action_lint;
 pub mod completion;
 pub mod defer;
 pub mod determinism;
@@ -40,4 +42,5 @@ pub fn run_all(file: &File, st: &SymbolTable, out: &mut Vec<Diagnostic>) {
     completion::check(file, st, out);
     determinism::check(file, st, out);
     import::check(file, st, out);
+    action_lint::check(file, st, out);
 }

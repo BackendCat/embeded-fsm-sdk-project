@@ -1,0 +1,13 @@
+language fsm 2.0
+
+machine M {
+    context { n : u8 = 3 }
+
+    events { E }
+
+    initial S
+
+    state S {
+        on E -> S : while (ctx.n) { ctx.n = ctx.n - 1 }
+    }
+}
