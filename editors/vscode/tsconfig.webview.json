@@ -1,0 +1,34 @@
+// V4 — strict typecheck for the diagram Webview script (Doc 28 §3-V4).
+//
+// WHY a SEPARATE tsconfig (not the main one): `src/diagram/webview/
+// diagramWebview.ts` runs in a BROWSER context (the VS Code Webview), not
+// Node — it uses `document`/`window`/`SVGElement`, which require the `DOM`
+// lib. The main `tsconfig.json` is a NODE program (`lib: ["ES2022"]`,
+// emits Node `.js` to `out/` for the Extension-Host test) and the Webview
+// is bundled SEPARATELY by esbuild for the browser (`platform: "browser"`
+// → `dist/webview/`), so it is correctly EXCLUDED from the Node program.
+// This config keeps the Webview FULLY type-checked (Zero-Legacy — no
+// untyped code) under the same strict flags + the `DOM` lib it genuinely
+// targets. `noEmit` — esbuild owns the actual bundling; this is a
+// type-safety gate only, wired into `npm run typecheck` / `pretest`.
+
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "rootDir": "src/diagram/webview",
+    "noEmit": true,
+    "sourceMap": false,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/diagram/webview/**/*.ts"]
+}

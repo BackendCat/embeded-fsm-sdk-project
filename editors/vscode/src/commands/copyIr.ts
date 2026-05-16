@@ -7,24 +7,33 @@
 // Doc 27 §6.1.3): verified against the shipped CLI
 // (crates/fsm-cli/src/cmd/generate.rs:165-209) — `--emit-ir` writes the
 // `.ir.json` ONLY AFTER codegen `emit()` + the generated-file `fs::write`
-// succeed; if codegen fails the CLI `return ExitCode::from(2)` BEFORE the
-// IR write, so NO `.ir.json` is produced. This command MUST surface that
-// honestly: if the CLI failed / no `.ir.json` exists, it tells the user
-// (codegen-gated) and copies NOTHING — never a stale/empty clipboard
-// presented as success (the cardinal-sin bar; this is the named V3 gate
-// "the test fixture is one that codegen-succeeds … the command must
-// surface that honestly, asserted here").
-
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+// succeed; if codegen fails the CLI exits BEFORE the IR write, so NO
+// `.ir.json` is produced. This command MUST surface that honestly: if the
+// CLI failed / no `.ir.json` exists, it tells the user (codegen-gated) and
+// copies NOTHING — never a stale/empty clipboard presented as success (the
+// cardinal-sin bar; the named V3 gate "the test fixture is one that
+// codegen-succeeds … the command must surface that honestly, asserted
+// here").
+//
+// V4 REFACTOR (AUDIT_PHASE_V2V3_2026_05_16 §1.2, the recommended clean
+// move): the `--emit-ir`-to-temp + locate-`*.ir.json` + codegen-gated
+// honesty logic that used to live INLINE here is now the shared
+// `diagram/emitIr.ts` core, so the V4 diagram Webview consumes the SAME
+// honest IR producer (one seam, no duplicated cardinal-sin logic, no
+// drift). The OBSERVABLE BEHAVIOUR of `fsm.copyIR` is byte-unchanged — the
+// V3 `commands.test.ts` copyIR tests (clipboard byte-identical to the real
+// artifact on success; clipboard NOT mutated on a codegen-failing fixture)
+// are re-asserted unregressed (the SUBAGENT §10 refactor pre/post-identity
+// bar). The mapping is exact: emitIr `ok` → write the clipboard;
+// `codegenFailed`/`noIrFile` → the same "cannot copy IR — codegen failed …
+// the IR is codegen-gated" decline; `noCli`/`spawnError` → the same
+// missing/unspawnable-CLI errors.
 
 import * as vscode from "vscode";
 
 import { resolveTargetFsm } from "./activeFsm";
 import { CommandDeps } from "./index";
-import { noCliBinaryMessage, resolveCliBinary } from "./cliBinary";
-import { runCli } from "./cliRunner";
+import { emitIr } from "../diagram/emitIr";
 import { error, errorWithLog, info, warn } from "./notify";
 
 export function registerCopyIr(
@@ -39,99 +48,46 @@ export function registerCopyIr(
         return;
       }
 
-      const cli = resolveCliBinary(
+      // The shared honest IR producer (the ONE real `fsm generate
+      // --emit-ir`-to-temp path; the codegen-gated boundary is mapped to a
+      // typed `codegenFailed` — emitIr never fabricates an IR).
+      const res = await emitIr(
+        fsmPath,
         deps.extensionPath,
         vscode.workspace.getConfiguration("fsmLang"),
+        deps.outputChannel,
       );
-      if (!cli) {
-        error(noCliBinaryMessage(`${process.platform}-${process.arch}`));
+
+      if (!res.ok) {
+        if (res.reason === "noCli") {
+          // No silent no-op — the verbatim missing-CLI message.
+          error(res.detail);
+          return;
+        }
+        if (res.reason === "spawnError") {
+          error(`FSM Studio: ${res.detail}`);
+          return;
+        }
+        // codegenFailed / noIrFile: the R-11 codegen-gated boundary,
+        // surfaced honestly — copy NOTHING, tell the user exactly why.
+        // Fire-and-handle: the command is DONE (correctly declining to
+        // copy); the toast must not pin it "in progress".
+        errorWithLog(
+          "FSM Studio: cannot copy IR — codegen failed, so no IR was " +
+            `produced (the IR is codegen-gated). ${res.detail}`,
+          deps.outputChannel,
+        );
         return;
       }
 
-      // Generate into an isolated temp dir so we never pollute the
-      // workspace just to read the IR (Doc 27 §5: "runs it to a temp
-      // dir and copies the file's content").
-      const tmpDir = fs.mkdtempSync(
-        path.join(os.tmpdir(), "fsm-copyir-"),
+      await vscode.env.clipboard.writeText(res.json);
+      deps.outputChannel.appendLine(
+        `[fsm] copied IR (${res.irFileName}, ${res.json.length} bytes) ` +
+          "to the clipboard.",
       );
-      try {
-        const args = [
-          "generate",
-          "--target",
-          "c99",
-          "--out",
-          tmpDir,
-          "--emit-ir",
-          fsmPath,
-        ];
-        deps.outputChannel.appendLine(
-          `[fsm] fsm.copyIR: ${cli.command} ${args.join(" ")}`,
-        );
-        const res = await runCli(cli.command, args, {
-          cwd: path.dirname(fsmPath),
-        });
-
-        if (res.spawnError) {
-          deps.outputChannel.appendLine(
-            `[fsm] copyIR could not spawn the CLI: ${res.stderr}`,
-          );
-          error(
-            `FSM Studio: could not run fsm generate — ` +
-              `${res.stderr.trim()}`,
-          );
-          return;
-        }
-        if (res.stderr.trim().length > 0) {
-          deps.outputChannel.appendLine(res.stderr.trimEnd());
-        }
-
-        // R-11 codegen-gated boundary, surfaced honestly: a non-zero
-        // exit means codegen failed and NO .ir.json was written. Do NOT
-        // copy anything; tell the user exactly why.
-        if (res.code !== 0) {
-          const detail =
-            res.stderr.trim().length > 0
-              ? res.stderr.trim().split("\n")[0]
-              : `fsm generate exited with code ${res.code}`;
-          // Fire-and-handle: the command is DONE (correctly declining to
-          // copy); the toast must not pin it "in progress".
-          errorWithLog(
-            "FSM Studio: cannot copy IR — codegen failed, so no IR was " +
-              `produced (the IR is codegen-gated). ${detail}`,
-            deps.outputChannel,
-          );
-          return;
-        }
-
-        // Locate the single `*.ir.json` the CLI wrote (named after the
-        // first machine — crates/fsm-cli/src/cmd/generate.rs:189-209).
-        const irFiles = fs
-          .readdirSync(tmpDir)
-          .filter((f) => f.endsWith(".ir.json"));
-        if (irFiles.length === 0) {
-          // Defensive: exit 0 but no IR file (should not happen given the
-          // verified CLI contract) — still never fake a clipboard.
-          errorWithLog(
-            "FSM Studio: cannot copy IR — the CLI reported success but " +
-              "wrote no .ir.json file.",
-            deps.outputChannel,
-          );
-          return;
-        }
-
-        const irPath = path.join(tmpDir, irFiles[0]);
-        const irJson = fs.readFileSync(irPath, "utf8");
-        await vscode.env.clipboard.writeText(irJson);
-        deps.outputChannel.appendLine(
-          `[fsm] copied IR (${irFiles[0]}, ${irJson.length} bytes) ` +
-            "to the clipboard.",
-        );
-        info(
-          `FSM Studio: IR JSON copied to the clipboard (${irFiles[0]}).`,
-        );
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
+      info(
+        `FSM Studio: IR JSON copied to the clipboard (${res.irFileName}).`,
+      );
     }),
   );
 }

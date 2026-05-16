@@ -51,6 +51,7 @@ import {
 } from "vscode-languageclient/node";
 
 import { registerCommands } from "./commands";
+import { registerOpenDiagram } from "./diagram";
 import { FsmErrorHandler } from "./crashRecovery";
 import { readInlayHintSettings } from "./inlayConfig";
 import {
@@ -126,6 +127,22 @@ export async function activate(
   // undefined). `getClient` reads the module-level `client` set by V1's
   // (unaltered) spawn path; this call adds command registrations only.
   registerCommands(context, {
+    getClient: () => client,
+    outputChannel,
+    restartServer,
+    extensionPath: context.extensionPath,
+  });
+
+  // V4: register the read-only diagram WebviewPanel (Doc 28 §3-V4).
+  // Done HERE — before the no-binary early-return — so `fsm.openDiagram`
+  // is functional even with no language-SERVER binary: the diagram's data
+  // source is the `fsm` CLI (`generate --emit-ir`), NOT `fsm-lang-server`
+  // (the genuine two-binary need Doc 27 §2.2 records; resolved by the V3
+  // `cliBinary.ts` seam, not the server resolver). An additive call site
+  // identical in shape to V3's `registerCommands` — it adds one command
+  // registration only and does NOT touch V1's (unaltered) client-spawn /
+  // `serverOptions` / `positionEncoding` (MV4-2 / M-1 lineage).
+  registerOpenDiagram(context, {
     getClient: () => client,
     outputChannel,
     restartServer,

@@ -101,6 +101,12 @@
         "command": "fsm.showOutputChannel",
         "title": "Show Language Server Log",
         "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.openDiagram",
+        "title": "Open Diagram",
+        "icon": "$(type-hierarchy)",
+        "category": "FSM Studio"
       }
     ],
     "keybindings": [
@@ -109,10 +115,28 @@
         "key": "ctrl+shift+g",
         "mac": "cmd+shift+g",
         "when": "editorLangId == fsm-lang"
+      },
+      {
+        "command": "fsm.openDiagram",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d",
+        "when": "editorLangId == fsm-lang"
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "fsm.openDiagram",
+          "when": "editorLangId == fsm-lang",
+          "group": "navigation"
+        }
+      ],
       "editor/context": [
+        {
+          "command": "fsm.openDiagram",
+          "when": "editorLangId == fsm-lang",
+          "group": "fsm@1"
+        },
         {
           "command": "fsm.generateC99",
           "when": "editorLangId == fsm-lang",
@@ -147,6 +171,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "fsm.openDiagram",
+          "when": "editorLangId == fsm-lang"
+        },
         {
           "command": "fsm.generateC99",
           "when": "editorLangId == fsm-lang"
@@ -210,10 +238,10 @@
   "scripts": {
     "vscode:prepublish": "npm run bundle",
     "compile": "tsc -p ./ && node copy-fixtures.mjs",
-    "typecheck": "tsc --noEmit -p ./",
+    "typecheck": "tsc --noEmit -p ./ && tsc --noEmit -p ./tsconfig.webview.json",
     "lint": "eslint src --ext ts",
     "bundle": "node esbuild.mjs",
-    "pretest": "tsc -p ./ && node copy-fixtures.mjs && node esbuild.mjs",
+    "pretest": "tsc -p ./ && tsc --noEmit -p ./tsconfig.webview.json && node copy-fixtures.mjs && node esbuild.mjs",
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
@@ -230,6 +258,7 @@
     "typescript": "^5.4.5"
   },
   "dependencies": {
+    "elkjs": "^0.11.1",
     "vscode-languageclient": "^9.0.1"
   }
 }
