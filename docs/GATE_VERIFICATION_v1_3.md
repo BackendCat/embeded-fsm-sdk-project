@@ -45,7 +45,7 @@ The accepted-tracked-debt carried forward from `GATE_VERIFICATION_v1_2.md` §6 (
   - **R-4** `util::span_of`/`loc_of`/`submachine_ref_is_nested` positional helpers — pure rowan-positional, **zero cross-crate callers**, de-facto crate-internal; threading a typed wrapper through 79 call sites is massive non-behavioural churn for zero clarity gain.
 - **Discipline verdict (`AUDIT_PHASE_W0` §0/§4.1):** a **success of the C-1 / SUBAGENT §10 leave-and-explain discipline**, precedent-consistent with how DRIFT-2 and the v1.1 pub-hygiene debt closed (paid where clean, left-and-explained where forcing it was worse-EV). Nothing was contorted to hit a zero-`cst` count; the one genuinely-clean order-independent site **was** removed.
 
-### 2.2 The VS Code extension — V1–V6 (`editors/vscode/`, pure additive — zero Rust delta)
+### 2.2 The VS Code extension — V1–V6 (`editors/vscode/`, pure additive — zero Rust delta vs W0-clean `ceb8efd`)
 
 Each wave is depth-first, additive on `editors/vscode/`, with a real Extension-Host behavioural-acceptance gate (the §5.4-analogue: real `@vscode/test-electron`, oracle recomputed from `fsm check --json`/`fsm generate --emit-ir`, byte-compared — never symbol-presence; Doc 28 §3, CHANGELOG `[1.3.0]` Added):
 
@@ -166,7 +166,7 @@ Constructed §11.30-clean from the start (no v1.1-style off-by-one to reconcile 
 
 | Metric | Value | Method (independently re-derived, not echoed) |
 |---|---|---|
-| Live `DiagnosticCode` variants | **73** | `for_each_code!` macro body `=> (Severity,` definition-line count at `fa3befc:crates/fsm-diagnostics/src/lib.rs` (lines 262–403) = 73 — **equals the frozen v1.2 figure** (the sole v1.3 Rust change W0 added/retired no code; nothing Rust changed after W0) |
+| Live `DiagnosticCode` variants | **73** | `for_each_code!` macro body `=> (Severity,` definition-line count at `fa3befc:crates/fsm-diagnostics/src/lib.rs` (lines 262–386) = 73 — **equals the frozen v1.2 figure** (the sole v1.3 Rust change W0 added/retired no code; nothing Rust changed after W0) |
 | `#![forbid(unsafe_code)]` | **11 roots / 10 crates** | `git grep -l '#![forbid(unsafe_code)]' fa3befc -- 'crates/*/src/*.rs'` = 11 files (fsm-lsp lib.rs+main.rs, fsm-cli main.rs, 8 other lib.rs) across 10 crates — **equals the frozen v1.2 figure** (W0 added no crate / touched no forbid root) |
 | Conformance fixtures | **26** | equals the frozen v1.2 figure (the sole v1.3 Rust change W0 added/retired no diagnostic code; `tests/conformance/MANIFEST.json` byte-untouched; W0 preserved 26/26 byte-unchanged pre/post) |
 | Extension-Host tests | **34** | `test(`/`it(` count at `fa3befc` per suite: V1 4 + V2 7 + V3 9 + V4 4 + V5 6 + V6 4 = 34 |

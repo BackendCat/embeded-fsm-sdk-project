@@ -73,7 +73,7 @@
     "rust_delta_vs_v1_2": 0,
     "rust_note": "Carried as the frozen v1.2 figure (45620, frozen 2026-05-16.json — a frozen attestation is not rewritten). The sole v1.3 Rust change is W0 (the §11.49 paydown, additive-only on fsm-parser +421/-93 across 18 files, 0 new deps, non-behavioural); the v1.2 snapshot's whole-src-file `wc -l` method nets ~+328 in fsm-parser/fsm-analyzer for W0 — re-derivable but immaterial to the frozen v1.2 attestation. There is zero further Rust delta after W0 (ceb8efd..fa3befc empty). The headline LOC story for v1.3 is the NEW editors/vscode/ subsystem (3415 src LOC, see editors_vscode_subsystem) plus the W0 +421/-93 accessor relocation.",
     "editors_vscode_src_loc_excl_tests": 3415,
-    "method": "Rust: unchanged vs frozen v1.2 (byte-identical workspace). editors/vscode: `git show fa3befc:<f> | wc -l` summed over src/*.ts excl tests.",
+    "method": "Rust: LOC value carried from the frozen v1.2 attestation (not rewritten — a frozen attestation is not edited); W0's additive +421/-93 is acknowledged in rust_note, NOT a workspace-byte-identical claim (W0 changed 18 Rust files). editors/vscode: `git show fa3befc:<f> | wc -l` summed over src/*.ts excl tests.",
     "interpretation": "v1.3's LOC delta is the +3415-LOC editors/vscode/ TypeScript extension (a NEW subsystem) + the W0 additive-only +421/-93 fsm-parser accessor relocation. No Rust subsystem grew materially; the extension is intentionally thin because all language intelligence is free over vscode-languageclient."
   },
 
