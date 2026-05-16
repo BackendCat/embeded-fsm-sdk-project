@@ -26,7 +26,9 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onLanguage:fsm-lang",
-    "workspaceContains:**/*.fsm"
+    "workspaceContains:**/*.fsm",
+    "onCommand:fsm.restartLanguageServer",
+    "onCommand:fsm.showOutputChannel"
   ],
   "contributes": {
     "languages": [
@@ -44,6 +46,121 @@
         ]
       }
     ],
+    "commands": [
+      {
+        "command": "fsm.checkFile",
+        "title": "Check File",
+        "icon": "$(check-all)",
+        "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.generateC99",
+        "title": "Generate C99 Code",
+        "icon": "$(export)",
+        "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.generateCpp17",
+        "title": "Generate C++17 Code",
+        "icon": "$(export)",
+        "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.copyIR",
+        "title": "Copy IR JSON to Clipboard",
+        "icon": "$(clippy)",
+        "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.formatDocument",
+        "title": "Format Document",
+        "icon": "$(symbol-misc)",
+        "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.restartLanguageServer",
+        "title": "Restart Language Server",
+        "icon": "$(refresh)",
+        "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.showOutputChannel",
+        "title": "Show Language Server Log",
+        "category": "FSM Studio"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "fsm.generateC99",
+        "key": "ctrl+shift+g",
+        "mac": "cmd+shift+g",
+        "when": "editorLangId == fsm-lang"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "fsm.generateC99",
+          "when": "editorLangId == fsm-lang",
+          "group": "fsm@3"
+        },
+        {
+          "command": "fsm.generateCpp17",
+          "when": "editorLangId == fsm-lang",
+          "group": "fsm@4"
+        },
+        {
+          "command": "fsm.formatDocument",
+          "when": "editorLangId == fsm-lang",
+          "group": "fsm@5"
+        },
+        {
+          "command": "fsm.copyIR",
+          "when": "editorLangId == fsm-lang",
+          "group": "fsm@6"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "fsm.checkFile",
+          "when": "resourceExtname == .fsm",
+          "group": "fsm"
+        },
+        {
+          "command": "fsm.generateC99",
+          "when": "resourceExtname == .fsm",
+          "group": "fsm"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "fsm.generateC99",
+          "when": "editorLangId == fsm-lang"
+        },
+        {
+          "command": "fsm.generateCpp17",
+          "when": "editorLangId == fsm-lang"
+        },
+        {
+          "command": "fsm.formatDocument",
+          "when": "editorLangId == fsm-lang"
+        },
+        {
+          "command": "fsm.checkFile",
+          "when": "editorLangId == fsm-lang"
+        },
+        {
+          "command": "fsm.copyIR",
+          "when": "editorLangId == fsm-lang"
+        },
+        {
+          "command": "fsm.restartLanguageServer"
+        },
+        {
+          "command": "fsm.showOutputChannel"
+        }
+      ]
+    },
     "configuration": {
       "title": "FSM Studio",
       "properties": {

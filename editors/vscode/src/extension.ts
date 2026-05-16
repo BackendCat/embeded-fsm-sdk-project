@@ -50,6 +50,7 @@ import {
   State,
 } from "vscode-languageclient/node";
 
+import { registerCommands } from "./commands";
 import { FsmErrorHandler } from "./crashRecovery";
 import { readInlayHintSettings } from "./inlayConfig";
 import {
@@ -115,6 +116,21 @@ export async function activate(
 
   statusBar = new FsmStatusBar();
   context.subscriptions.push(statusBar);
+
+  // V3: register the CLI-wrapper + client-control commands (Doc 28 §3-V3).
+  // Done HERE — before the no-binary early-return — so the M-2 commands
+  // (`fsm.showOutputChannel`, `fsm.restartLanguageServer`) are functional
+  // even with no server binary (V1's status-bar click wires to
+  // `fsm.showOutputChannel` and is shown in the stopped state too;
+  // `fsm.restartLanguageServer` degrades honestly when `client` is
+  // undefined). `getClient` reads the module-level `client` set by V1's
+  // (unaltered) spawn path; this call adds command registrations only.
+  registerCommands(context, {
+    getClient: () => client,
+    outputChannel,
+    restartServer,
+    extensionPath: context.extensionPath,
+  });
 
   const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const resolved = resolveServerBinary(context.extensionPath, config);
