@@ -371,13 +371,30 @@ machine Pick {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// STOP-not-wrong: a model outside W1's flat scope is rejected LOUDLY, not
-// silently mis-verified (Doc 30 §4.2-W1 + §8). A composite state would make
-// the explorer miss completion edges and risk a false deadlock — better an
-// explicit error.
+// W2 RELAXATION (Doc 30 §4.2-W2 — supersedes the W1 `reject_non_flat`
+// limitation this test previously asserted). W1 loud-rejected
+// composite/parallel/history/timer/submachine because its explorer only
+// enumerated declared-event edges (a timer-wait would be a false
+// deadlock) AND the pre-W2 snapshot was lossy for timers/submachines. W2
+// closed BOTH (lossless snapshot W2-P0 + the timer-fire `advance_clock`
+// edge + submachine-completion via the interpreter's drain). So a
+// composite model is now VERIFIED, not rejected. (This is the same class
+// as the audit's Doc 30 §4.1 overstatement: a W1 assertion W2 is
+// explicitly chartered to invalidate.) The STOP-not-wrong contract is
+// preserved structurally: an un-driveable model surfaces a loud
+// `VerifyError` (the durable exit-4 path) rather than a false verdict —
+// it is just the empty set for the v1.4 interpreter's supported language.
 // ───────────────────────────────────────────────────────────────────────
 #[test]
-fn out_of_w1_scope_is_rejected_loudly() {
+fn composite_model_is_verified_not_rejected_in_w2() {
+    // A composite `Outer { initial Inner; Inner --GO--> Inner }`. Pre-W2
+    // this was `Err(OutOfW1Scope)`. Post-W2 it is explored through the
+    // interpreter. `Inner --GO--> Inner` is a self-loop that never reaches
+    // a *new* configuration and `Inner` is not final ⇒ per the operational
+    // deadlock definition (no progress to a new config ∧ not final, Doc 08
+    // §3.1) it is a stuck sink → `Deadlock`. The point of THIS test is the
+    // W2 relaxation (it is no longer an `Err`); the deadlock verdict on a
+    // self-loop sink is verified by the keystone oracle below.
     let src = r#"language fsm 2.0
 machine Hier {
     events { GO }
@@ -388,11 +405,63 @@ machine Hier {
     }
 }"#;
     let ir = ir_of(src);
+    let out = verify(&ir, VerifyOptions::default())
+        .expect("W2 verifies composite models — it no longer rejects them");
+
+    // The composite was actually explored (not rejected, not empty).
+    assert!(
+        !out.reachability.reachable.is_empty(),
+        "the composite model must have been explored through the interpreter"
+    );
+
+    // Keystone cross-check: a direct Interpreter run agrees that GO from
+    // `Inner` does not leave `Inner` (the verifier's deadlock verdict
+    // tracks the real semantics, not a fork).
+    let mut interp = Interpreter::new(&ir).unwrap();
+    interp
+        .init(InitOptions {
+            machine_name: ir.machines[0].name.clone(),
+            initial_context: None,
+            virtual_clock_start_ms: 0,
+        })
+        .unwrap();
+    let before = interp.current_states();
+    interp.dispatch("GO").unwrap();
+    let after = interp.current_states();
+    assert_eq!(
+        before, after,
+        "oracle: GO is a self-loop on Inner (no new configuration) — so the \
+         verifier's stuck-sink verdict tracks the real interpreter"
+    );
+    match &out.verdict {
+        Verdict::Deadlock { report, .. } => {
+            assert_eq!(
+                before, report.config,
+                "the deadlocked config is exactly the oracle's stuck config"
+            );
+        }
+        other => panic!("a self-loop-only sink is a deadlock; got {other:?}"),
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// STOP-not-wrong durability: the loud-reject / non-verdict path
+// (exit-4-equivalent) a factory CI integrated against W1 must still be a
+// real, exercised code path. An un-driveable model (no machines) surfaces
+// a `VerifyError`, NOT a (false) verdict.
+// ───────────────────────────────────────────────────────────────────────
+#[test]
+fn undriveable_model_is_a_loud_error_not_a_false_verdict() {
+    // A zero-machine IR; the verifier surfaces it as a loud `VerifyError`
+    // (the CLI maps this to a non-verdict exit — never
+    // "verified"/"property-violated").
+    let ir = fsm_ir::Ir::default();
+    assert!(ir.machines.is_empty(), "default IR has no machines");
     let err = verify(&ir, VerifyOptions::default())
-        .expect_err("a composite-state model must be rejected as out of W1 scope");
+        .expect_err("a model with no machines must be a loud error, not a verdict");
     let msg = err.to_string();
     assert!(
-        msg.contains("flat single-machine") && msg.contains("W2"),
-        "the error must clearly state W1-flat-only + point at W2; got: {msg}"
+        !msg.is_empty(),
+        "the STOP-not-wrong path must produce a clear diagnostic message"
     );
 }

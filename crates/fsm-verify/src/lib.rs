@@ -1,8 +1,9 @@
 //! `fsm-verify` — the FSM Studio verification core.
 //!
-//! W1 of the v1.4 "verification core" epic (Doc 30 §4.2-W1 / §4.3). This
-//! crate is the **single source of verification truth**: a bounded
-//! explicit-state explorer that *drives the shipped
+//! The v1.4 "verification core" epic (W1 keystone spine + W2
+//! composite/parallel/history/timer/submachine coverage — Doc 30
+//! §4.2-W1/-W2). This crate is the **single source of verification
+//! truth**: a bounded explicit-state explorer that *drives the shipped
 //! [`fsm_simulator::Interpreter`] as the transition oracle* and reports
 //! reachability + deadlock properties over a model.
 //!

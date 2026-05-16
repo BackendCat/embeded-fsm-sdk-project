@@ -1,0 +1,58 @@
+// W2 acceptance (5): a SUBMACHINE machine — sub-instance configs are
+// explored and the verdict is correct.
+//
+// `Connecting is Connection` embeds the `Connection` submachine. The
+// sub-instance advances Idle -> Handshake -> Established -> Done(final) on
+// delegated events (Doc 08 §12.1). When the sub reaches its `final`, the
+// parent's `done -> Online` completion fires automatically inside the
+// interpreter's RTC drain — NO event edge re-implemented in fsm-verify;
+// the explorer just observes the resulting snapshot (whose nested
+// sub-instance state is now captured losslessly, W2-P0). RECONNECT from
+// Online tears the sub down and re-enters Connecting with a fresh one.
+//
+// Every state (parent + the nested sub leaves) is reachable; from every
+// reachable configuration some declared event progresses, and the
+// sub-completion is taken by the interpreter — so there is NO deadlock.
+//
+// Expected: ProvenNoDeadlock; the reachable set includes the parent
+// states AND the nested sub-instance leaves. Cross-checked against a
+// direct Interpreter-driven hand BFS (the keystone proof, submachine
+// axis): the verifier's reachable set equals the interpreter's.
+language fsm 2.0
+
+feature submachines
+
+submachine Connection {
+    events { CONNECT ACK ESTABLISHED }
+
+    initial Idle
+
+    state Idle {
+        on CONNECT -> Handshake
+    }
+
+    state Handshake {
+        on ACK -> Established
+    }
+
+    state Established {
+        on ESTABLISHED -> Done
+    }
+
+    final Done
+}
+
+machine Device {
+    events { CONNECT ACK ESTABLISHED RECONNECT }
+
+    initial Connecting
+
+    state Connecting is Connection {
+        done -> Online
+        on RECONNECT -> Connecting
+    }
+
+    state Online {
+        on RECONNECT -> Connecting
+    }
+}

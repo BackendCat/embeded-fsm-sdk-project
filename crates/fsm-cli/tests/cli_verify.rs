@@ -169,24 +169,64 @@ fn unanalyzable_model_exits_four() {
     );
 }
 
-// Exit-code contract: an out-of-W1-scope model (composite state) ⇒ exit 4
-// with a clear message (STOP-not-wrong, Doc 30 §4.2-W1), NOT a bogus
-// verdict.
+// W2 relaxation (Doc 30 §4.2-W2 — supersedes the W1 `out_of_w1_scope`
+// exit-4 rejection this test previously asserted). A composite/parallel/
+// timer/submachine model is now VERIFIED end-to-end through the CLI, not
+// rejected. (The durable STOP-not-wrong exit-4 path is still exercised by
+// `unanalyzable_model_exits_four` above.) Here: a composite machine that
+// is deadlock-free verifies (exit 0); a timer machine with a genuine
+// every_internal deadlock is detected (exit 1) — both through the real
+// binary with the documented exit-code contract intact.
 #[test]
-fn out_of_w1_scope_exits_four_loudly() {
+fn composite_and_timer_models_verify_end_to_end_in_w2() {
     let td = tempfile::tempdir().unwrap();
-    let p = td.path().join("hier.fsm");
+
+    // (i) A deadlock-free composite/parallel machine ⇒ exit 0 "verified".
+    let parallel = td.path().join("parallel_sound.fsm");
     std::fs::write(
-        &p,
-        "language fsm 2.0\nmachine H {\n  events { GO }\n  initial Outer\n  \
-         state Outer {\n    initial Inner\n    state Inner { on GO -> Inner }\n  }\n}\n",
+        &parallel,
+        "language fsm 2.0\nfeature parallel\nfeature hsm\n\
+         machine P {\n  events { T S }\n  initial Idle\n  \
+         state Idle { on S -> Run }\n  \
+         state Run {\n    on S -> Idle\n    \
+         region A { initial A0 state A0 { on T -> A1 } state A1 { on T -> A0 } }\n    \
+         region B { initial B0 state B0 { on T -> B1 } state B1 { on T -> B0 } }\n  }\n}\n",
     )
     .unwrap();
-    let (code, _o, err) = run_verify(&[p.to_str().unwrap()]);
-    assert_eq!(code, 4, "out-of-scope model must exit 4; stderr: {err}");
+    let (code, stdout, err) = run_verify(&[parallel.to_str().unwrap()]);
+    assert_eq!(
+        code, 0,
+        "a deadlock-free composite/parallel model now VERIFIES (W2) — \
+         exit 0; stdout: {stdout}; stderr: {err}"
+    );
     assert!(
-        err.contains("flat single-machine") && err.contains("W2"),
-        "the error must explain W1-flat-only + point at W2; got: {err}"
+        stdout.contains("verified"),
+        "composite/parallel sound model must say verified; got: {stdout}"
+    );
+
+    // (ii) A genuine timer-deadlock (every_internal — config never
+    //      changes) ⇒ exit 1 "property-violated" with a witness, detected
+    //      end-to-end (the W2 timer-fire edge + extended deadlock def).
+    let timer_dl = td.path().join("timer_dl.fsm");
+    std::fs::write(
+        &timer_dl,
+        "language fsm 2.0\nfeature timers\nextern tick()\n\
+         machine HB {\n  events { START }\n  initial Ok\n  \
+         state Ok { on START -> Wedged }\n  \
+         state Wedged { every 1000 ms : tick() }\n}\n",
+    )
+    .unwrap();
+    let (code, stdout, err) = run_verify(&["--json", timer_dl.to_str().unwrap()]);
+    assert_eq!(
+        code, 1,
+        "a genuine timer-deadlock is detected end-to-end ⇒ exit 1; \
+         stdout: {stdout}; stderr: {err}"
+    );
+    let v: Value = serde_json::from_str(&stdout).expect("--json parses");
+    assert_eq!(v["verdict"], "property-violated");
+    assert_eq!(
+        v["schema"], "fsm-verify/v1",
+        "the schema stays additive fsm-verify/v1 across W2"
     );
 }
 

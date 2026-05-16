@@ -20,41 +20,64 @@
 //!   completion** by construction — completion-driven progress has already
 //!   been taken.
 //!
-//! ## The definition (W1, flat machines)
+//! ## The definition (W2 — composite/parallel/history/timer/submachine)
 //!
 //! A reachable configuration C is **deadlocked** iff *all* hold:
 //!
 //! 1. C is **not a final configuration** — at least one active leaf is not
 //!    a `final` state. A configuration whose every active leaf is `final`
 //!    is a *legitimate terminal* (Doc 08 §9.1's all-regions-done /
-//!    composite-final rules), the machine has *completed*, and that is
-//!    **NOT** a deadlock.
-//! 2. **No declared event enables any transition.** Operationally (the
-//!    interpreter is the oracle): for *every* declared event, dispatching
-//!    it from C leaves the full configuration **unchanged** (Doc 08 §3.1 —
-//!    no enabled transition ⇒ discard ⇒ config unchanged). We never decide
-//!    "is this transition enabled?" ourselves; we ask the interpreter by
-//!    driving it.
+//!    composite-final rules) — including an **all-regions-final parallel**
+//!    (every region's leaf is `final`) — the machine has *completed*, and
+//!    that is **NOT** a deadlock.
+//! 2. **No exploration edge makes progress.** The W2 explorer drives two
+//!    edge families through the interpreter (the §4.1 keystone): (a) for
+//!    *every* declared event, `dispatch` leaves the full configuration
+//!    **unchanged** (Doc 08 §3.1 — no enabled transition ⇒ discard ⇒
+//!    config unchanged); **and** (b) the **timer-fire edge** — if any
+//!    timer is armed anywhere (parent or, recursively, a nested
+//!    sub-instance), `advance_clock` to the soonest expiry also leaves the
+//!    configuration unchanged. We never decide "is this transition/timer
+//!    enabled?" ourselves; we ask the interpreter by driving it. Hence a
+//!    state armed-waiting on a timer that *fires* is **NOT** a deadlock
+//!    (edge (b) progresses it — the Doc 08 §13 / Doc 30 §4.1 foot-gun
+//!    guard, now W2-real, not W1-deferred); only a config where *even the
+//!    timer-fire* changes nothing (e.g. an `every_internal` heartbeat that
+//!    runs an action but never transitions) is stuck.
 //! 3. **No completion is pending** — guaranteed by construction: the
 //!    interpreter only ever hands us drained-to-quiescence configurations
-//!    (§9.2/§14 above). No extra check is needed *for the configurations
-//!    the explorer holds*; this clause is recorded so the invariant is
-//!    explicit and W2 (which adds timer-fire / submachine exploration
-//!    edges) extends it correctly.
+//!    (§9.2/§14 above), and **submachine-completion** (a sub-instance
+//!    reaching its `final` driving the parent's `done ->`) is taken
+//!    *inside* the interpreter's `dispatch`/`advance_clock` RTC drain — so
+//!    a config whose only progress is a submachine-completion is **NOT** a
+//!    deadlock (the event/timer edge that triggered the drain already set
+//!    progress, or `init` drained it). No extra check is needed here; this
+//!    clause is the explicit invariant.
 //!
-//! ### W2 forward-compatibility (do NOT hardcode "no event ⇒ deadlock")
+//! ### Doc 08 derivation of the W2 extensions (cited, not intuited)
 //!
-//! W1 covers **flat single-machine FSMs and does not explore timer-fire
-//! edges**. A state whose only outgoing transition is an `after`/`every`
-//! timer is **not** a deadlock — the timer *will* fire (Doc 08 §13). W1's
-//! deadlock fixtures contain no timers, so "no event-enabled transition +
-//! not final" *is* a genuine deadlock for W1's scope. The definition is
-//! phrased as *"no progress is possible by any exploration edge"*; W2 adds
-//! timer-fire and submachine-completion as additional exploration edges, so
-//! a timer-wait state will then correctly have a successor and not be
-//! flagged. The flat-machine guard ([`engine`](crate::engine) rejects
-//! timers / composites / parallels / submachines as out-of-W1-scope) keeps
-//! W1 sound without baking a wrong rule into this module.
+//! - **Timer (Doc 08 §13).** A timer fires when its owning runtime's
+//!   `virtual_clock_ms` reaches `expiry_ms`. So "no declared event ⇒
+//!   deadlock" is **wrong** the moment timers exist (it false-positives
+//!   every timer-wait). The correct rule is "no progress by **any** edge",
+//!   and the timer-fire edge is driven by the real
+//!   `Interpreter::advance_clock` — never a re-implemented clock/firing
+//!   rule. (`digest` additionally normalises the *non-observable* absolute
+//!   clock origin to a relative timer phase — Doc 08 §13 — so cyclic
+//!   timers / heartbeats terminate and a genuine timer-deadlock is
+//!   *detected* rather than wrongly reported `Inconclusive`; the
+//!   bisimulation proof is in `digest`.)
+//! - **Parallel join (Doc 08 §9.1).** An all-regions-final parallel is the
+//!   completion *terminal*, caught by clause 1 (`is_final_configuration`
+//!   = every active leaf is `final`); it must NOT be flagged a deadlock. A
+//!   parallel where one region can never reach its `final` so the join
+//!   never fires *and* no other transition leaves the composite IS a
+//!   genuine deadlock — correctly caught by clause 2 (no edge progresses).
+//! - **Submachine (Doc 08 §12).** Sub-instance advancement (delegation,
+//!   §12.1) and sub-completion driving the parent `done ->` (§12.3) are
+//!   the interpreter's, taken inside `dispatch`; the explorer only observes
+//!   the resulting snapshot (whose nested sub-instance state is now
+//!   captured losslessly — the W2-P0 fix). No `done` is re-implemented.
 
 use fsm_ir::{MachineObject, StateNode};
 

@@ -1,4 +1,5 @@
-//! `fsm verify` — bounded explicit-state verification (v1.4-W1).
+//! `fsm verify` — bounded explicit-state verification (v1.4-W2:
+//! composite / parallel / history / timer / submachine; W1 was flat-only).
 //!
 //! The canonical, pipeline-grade verification interface (Doc 30
 //! top-section TL architecture decision: CLI is the canonical surface; no
@@ -65,6 +66,39 @@
 //!              "hit": false, "stopReason": "exhausted" }
 //! }
 //! ```
+//!
+//! ### Schema versioning policy — `fsm-verify/vN` (the factory-contract
+//! durability guarantee; the §11.3-W1-audit's named actionable gap)
+//!
+//! The `schema` field is the **stability contract a factory / CI
+//! integrates against**. The versioning rule is **explicit and binding**:
+//!
+//! - **Additive changes keep the SAME major version** (`fsm-verify/v1`).
+//!   *Additive* = a NEW key under an existing object (e.g. a new property
+//!   under `properties`, a new field in `bound`), or a NEW element kind in
+//!   an existing array (e.g. a new diagnostic `code`). A consumer that
+//!   reads only the keys it knows (`properties.deadlockFree`,
+//!   `verdict`, `exitCode`, …) is **unaffected** — JSON object readers
+//!   ignore unknown keys. **W2's new coverage (composite / parallel /
+//!   history / timer / submachine) is purely additive**: the same keys
+//!   carry the same meaning; a timer-deadlock counterexample is the
+//!   *existing* `properties.deadlockFree.counterexample` shape (its
+//!   `witness` may now contain a synthetic `"<timer-fire @ Nms>"` step
+//!   alongside declared-event names — a value-space extension of an
+//!   existing field, not a shape change), and the reachable/unreachable
+//!   sets + `FSM-E0400`/`FSM-W0602` diagnostics are the *existing* arrays.
+//!   So W2 stays `fsm-verify/v1` and a W1-era integration does not break.
+//! - **A breaking change bumps the major** (`fsm-verify/v2`). *Breaking* =
+//!   the *meaning, type, or shape* of an EXISTING key changes, a key is
+//!   removed/renamed, or an exit-code's meaning changes. Only then.
+//! - The **exit-code contract (0/1/2/3/4) is itself part of the versioned
+//!   surface** and is held stable across additive `vN` revisions.
+//!
+//! A consumer SHOULD therefore branch on the major (`schema` prefix
+//! `fsm-verify/v1`) and tolerate unknown keys, rather than pinning an
+//! exact byte shape. This sentence-level policy is the contract; it is
+//! intentionally co-located with the schema it governs so a factory
+//! integrator needs no other doc.
 
 use std::process::ExitCode;
 
@@ -176,12 +210,16 @@ pub(crate) fn run(args: VerifyArgs) -> ExitCode {
 
 fn verify_error_exit(e: &VerifyError) -> ExitCode {
     match e {
-        // Out-of-W1-scope / unknown machine / no machines are *usage*
-        // problems with the request, not a verification verdict — Doc 18
-        // §3 user-error bucket (4), kept distinct from a verdict code so a
-        // factory script never confuses "I asked for the wrong thing" with
-        // "the model is unsafe".
-        VerifyError::OutOfW1Scope(_)
+        // Out-of-scope / unknown machine / no machines are *usage* problems
+        // with the request, not a verification verdict — Doc 18 §3
+        // user-error bucket (4), kept distinct from a verdict code so a
+        // factory script never confuses "I asked for the wrong thing /
+        // an unhandleable model" with "the model is unsafe". The W2
+        // explorer covers all in-language shapes, so `OutOfScope` is the
+        // durable STOP-not-wrong path (currently the empty set in-language)
+        // rather than the W1 flat-only rejection — exit 4 is preserved so a
+        // factory CI integrated against W1's contract does not break.
+        VerifyError::OutOfScope(_)
         | VerifyError::UnknownMachine(_, _)
         | VerifyError::NoMachines => {
             eprintln!("error: {e}");

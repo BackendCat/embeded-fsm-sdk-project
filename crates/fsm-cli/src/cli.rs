@@ -54,7 +54,8 @@ pub(crate) enum Command {
 
     /// Bounded explicit-state verification: prove deadlock-freedom +
     /// report unreachable states (drives the shipped interpreter as the
-    /// semantic oracle). v1.4-W1: flat single-machine FSMs.
+    /// semantic oracle). v1.4-W2: composite / parallel / history / timer /
+    /// submachine FSMs (W1 was flat single-machine only).
     Verify(VerifyArgs),
 }
 

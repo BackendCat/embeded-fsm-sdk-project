@@ -1,0 +1,48 @@
+// W2 acceptance (3): a COMPOSITE + PARALLEL machine that is deadlock-free.
+//
+// `Active` is a parallel state with two independent regions (Motor, Pump).
+// Each region cycles on its own event with no guards, so from every
+// reachable configuration at least one declared event progresses SOME
+// region — there is no deadlock. STOP from `Active` exits to `Idle`
+// (composite-level transition handled by the interpreter's LCA), and
+// `Idle --START--> Active` re-enters. The reachable space is finite
+// (region leaf × region leaf × top-level) and fully explorable.
+//
+// The verdict (ProvenNoDeadlock + the reachable set) is cross-checked
+// against a direct Interpreter-driven hand BFS in the acceptance test —
+// the W2 keystone proof extended to a hierarchical/parallel fixture.
+language fsm 2.0
+
+feature parallel
+feature hsm
+
+machine Plant {
+    events {
+        START
+        STOP
+        MOTOR_TICK
+        PUMP_TICK
+    }
+
+    initial Idle
+
+    state Idle {
+        on START -> Active
+    }
+
+    state Active {
+        on STOP -> Idle
+
+        region Motor {
+            initial MotorLow
+            state MotorLow { on MOTOR_TICK -> MotorHigh }
+            state MotorHigh { on MOTOR_TICK -> MotorLow }
+        }
+
+        region Pump {
+            initial PumpOff
+            state PumpOff { on PUMP_TICK -> PumpOn }
+            state PumpOn { on PUMP_TICK -> PumpOff }
+        }
+    }
+}

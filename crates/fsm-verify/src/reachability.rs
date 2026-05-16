@@ -51,9 +51,10 @@ fn declared_concrete_states(machine: &MachineObject) -> BTreeSet<String> {
                 }
                 StateNode::Composite(c) => {
                     // A composite is itself in the configuration (with one
-                    // active substate). W1 fixtures are flat so this arm is
-                    // exercised by W2; kept correct now so the reachable-set
-                    // fact is right when W2 enables hierarchy.
+                    // active substate). Exercised by W2's composite/parallel
+                    // coverage — the declared-concrete-state set must
+                    // include composite/parallel container IDs so the
+                    // reachable-set fact (FSM-E0400 backing) is correct.
                     acc.insert(c.id.clone());
                     for r in &c.regions {
                         walk(&r.states, acc);

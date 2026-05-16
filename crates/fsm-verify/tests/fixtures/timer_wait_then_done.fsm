@@ -1,0 +1,30 @@
+// W2 acceptance (4a): a state that WAITS on a timer which FIRES — it must
+// NOT be flagged as a deadlock (the Doc 08 §13 / Doc 30 §4.1 foot-gun
+// guard). `Warming` has NO declared-event transition — its only exit is
+// `after 2000 ms -> Ready`. A naive "no enabled event ⇒ deadlock" rule
+// (the W1 limitation) would FALSE-POSITIVE this. The W2 explorer drives
+// the timer-fire edge via `Interpreter::advance_clock`, so `Warming`
+// progresses to `Ready`, then `Ready --after 1000 ms-> Done` (final).
+//
+// Expected: ProvenNoDeadlock, every state reachable, finite (the
+// clock-origin normalisation makes the timer-cycle-free machine converge).
+// Cross-checked: a direct Interpreter `advance_clock` reaches `Ready`.
+language fsm 2.0
+
+feature timers
+
+machine Heater {
+    events { }
+
+    initial Warming
+
+    state Warming {
+        after 2000 ms -> Ready
+    }
+
+    state Ready {
+        after 1000 ms -> Done
+    }
+
+    final Done
+}

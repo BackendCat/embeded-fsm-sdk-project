@@ -1,0 +1,35 @@
+// W2 acceptance (4b): a GENUINE timer-deadlock detected WITH a witness.
+//
+// `Stuck` reaches `Wedged` on START. `Wedged`'s only behaviour is an
+// `every 1000 ms : tick()` internal periodic timer — Doc 08 §9.3
+// `every_internal`: it runs an action on every period but has NO
+// transition, so the *configuration never changes*. `Wedged` is not a
+// `final` state, no declared event is enabled there, and the timer-fire
+// edge produces no progress (the config is byte-identical after firing,
+// modulo the non-observable clock the W2 digest normalises away). This is
+// the precise W2-extended deadlock: "no progress is possible by ANY
+// exploration edge (declared event OR timer-fire) ∧ not a final config".
+//
+// Expected: Deadlock, deadlocked config = {Wedged}, witness = [START]
+// (the event sequence from init that reaches the wedge — replayed through
+// a fresh Interpreter in the acceptance test to confirm it lands there).
+// This is the brief's "a real timer-deadlock IS detected with witness".
+language fsm 2.0
+
+feature timers
+
+extern tick()
+
+machine Heartbeat {
+    events { START }
+
+    initial Ok
+
+    state Ok {
+        on START -> Wedged
+    }
+
+    state Wedged {
+        every 1000 ms : tick()
+    }
+}

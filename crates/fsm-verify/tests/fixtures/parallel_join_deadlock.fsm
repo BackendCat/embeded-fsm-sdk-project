@@ -1,0 +1,55 @@
+// W2 acceptance (3): a genuine PARALLEL-JOIN deadlock.
+//
+// `Working` is a parallel state whose `done -> Finished` completion fires
+// only when BOTH regions reach their `final` (Doc 08 §9.1 all-regions-done
+// join). Region `Left` CAN reach its final (`LB --GO--> LFinal`). Region
+// `Right` is stuck: `RB` has only `on NEVER -> RFinal`, and `NEVER` is a
+// declared event that the explorer dispatches — but `RB` is reached only
+// after `GO` moved `LB`, and there is no path that enables progress in
+// `Right` toward `RFinal` without `NEVER`… and `NEVER` IS declared, so the
+// explorer WILL try it. To make `Right` genuinely unable to join we make
+// `RB`'s only exit a guarded transition whose guard is unsatisfiable on
+// the reachable context (`ctx.unlock` defaults 0 and is never assigned),
+// exactly the W1 `deadlock_guard_trap` technique lifted into a region.
+//
+// Result: `Left` reaches `LFinal`, `Right` is wedged at `RB` forever, the
+// all-regions-done join can never fire, `Working` never completes, no
+// other transition leaves `Working` ⇒ a reachable non-final configuration
+// with no progress on ANY declared event and no timer ⇒ DEADLOCK. The
+// witness + deadlocked config are cross-checked against a direct
+// Interpreter run in the acceptance test.
+language fsm 2.0
+
+feature parallel
+feature hsm
+
+machine Joiner {
+    context {
+        unlock: u8 = 0
+    }
+
+    events {
+        GO
+        TRY
+    }
+
+    initial Working
+
+    state Working {
+        done -> Finished
+
+        region Left {
+            initial LB
+            state LB { on GO -> LFinal }
+            final LFinal
+        }
+
+        region Right {
+            initial RB
+            state RB { on TRY [ctx.unlock == 1] -> RFinal }
+            final RFinal
+        }
+    }
+
+    final Finished
+}
