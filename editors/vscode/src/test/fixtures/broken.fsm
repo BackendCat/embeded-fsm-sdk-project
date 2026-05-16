@@ -1,0 +1,11 @@
+language fsm 2.0
+
+machine Broken {
+    events {
+        GO
+    }
+
+    state Only {
+        on GO -> Only
+    }
+}

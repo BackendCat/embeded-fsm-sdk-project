@@ -20,3 +20,15 @@ examples/*/generated/
 # Snapshot test pending files
 **/*.snap.new
 **/*.pending-snap
+
+# VS Code extension (v1.3, Doc 28 §2 Option A): node_modules + the esbuild
+# output live under editors/vscode/ and are NOT tracked; the
+# @vscode/test-electron VS Code download goes to its default OUT-OF-TREE
+# cache (~/.vscode-test), never under /root/dev — the cargo-target
+# out-of-tree posture (.cargo/config.toml) applied to the Node toolchain so
+# the cold-cargo disk trough is never worsened by JS caches.
+editors/vscode/node_modules/
+editors/vscode/out/
+editors/vscode/dist/
+editors/vscode/.vscode-test/
+editors/vscode/*.vsix

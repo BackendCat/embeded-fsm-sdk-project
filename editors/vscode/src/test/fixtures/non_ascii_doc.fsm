@@ -1,0 +1,11 @@
+language fsm 2.0
+
+/// 🚀 Документация — astral emoji + Cyrillic on this doc-comment line
+machine Demo {
+    events { GO }
+    initial A
+
+    state A {
+        on GO -> Missing
+    }
+}

@@ -1,0 +1,104 @@
+{
+  "name": "fsm-lang",
+  "displayName": "FSM Studio",
+  "description": "FSM-Lang language support, diagrams, and simulator for embedded state machines.",
+  "version": "0.1.0",
+  "publisher": "fsmstudio",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fsmstudio/sm-sdk"
+  },
+  "galleryBanner": {
+    "color": "#0D1117",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=20"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Visualization",
+    "Debuggers"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:fsm-lang",
+    "workspaceContains:**/*.fsm"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "fsm-lang",
+        "aliases": [
+          "FSM-Lang",
+          "fsm"
+        ],
+        "extensions": [
+          ".fsm"
+        ],
+        "mimetypes": [
+          "text/x-fsm-lang"
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "FSM Studio",
+      "properties": {
+        "fsmLang.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the fsm-lang-server binary. Leave empty to use the bundled binary for this platform.",
+          "scope": "machine-overridable"
+        },
+        "fsmLang.enableInlayHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inlay hints (priority values, timer durations, state counts)."
+        },
+        "fsmLang.inlayHints.showTransitionPriorities": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show priority values on non-default priority transitions."
+        },
+        "fsmLang.inlayHints.showStateTypes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show state kind labels (composite, parallel) next to state names."
+        },
+        "fsmLang.inlayHints.showTimerDurations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show human-readable duration next to timer ms values."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run bundle",
+    "compile": "tsc -p ./ && node copy-fixtures.mjs",
+    "typecheck": "tsc --noEmit -p ./",
+    "lint": "eslint src --ext ts",
+    "bundle": "node esbuild.mjs",
+    "pretest": "tsc -p ./ && node copy-fixtures.mjs && node esbuild.mjs",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.7.0",
+    "@typescript-eslint/parser": "^7.7.0",
+    "@vscode/test-electron": "^2.3.9",
+    "esbuild": "^0.20.2",
+    "eslint": "^8.57.0",
+    "glob": "^10.3.12",
+    "mocha": "^10.4.0",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

@@ -1,0 +1,18 @@
+language fsm 2.0
+
+machine Gate {
+    events {
+        OPEN
+        CLOSE
+    }
+
+    initial Closed
+
+    state Closed {
+        on OPEN -> Open
+    }
+
+    state Open {
+        on CLOSE -> Closed
+    }
+}
