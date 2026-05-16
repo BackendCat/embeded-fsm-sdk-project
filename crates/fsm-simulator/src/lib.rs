@@ -35,8 +35,8 @@ pub mod trace;
 
 pub use interpreter::{InitOptions, Interpreter, StepError};
 pub use runtime::{
-    EventKind, EventQueue, InterpreterSnapshot, MachineIndex, QueuedEvent, RuntimeState, Timer,
-    TimerFire, TimerSet, Value,
+    EventKind, EventQueue, InterpreterSnapshot, MachineIndex, QueuedEvent, RuntimeState,
+    SubmachineSnapshot, Timer, TimerFire, TimerSet, Value,
 };
 pub use trace::{
     execute_trace, parse_trace_yaml, write_trace_yaml, EventReceivedRecord, ExecError, InitTrace,

@@ -9,9 +9,20 @@
 //! a linear scan is far below the cost of the surrounding event loop, and
 //! keeping mutation simple avoids re-heapification headaches when a state
 //! cancels one of its timers due to an external transition.
+//!
+//! [`Timer`] / [`TimerFire`] derive `Serialize`/`Deserialize` so the armed
+//! set is part of [`crate::InterpreterSnapshot`] (v1.4-W2): the armed
+//! timers *are* configuration — two otherwise-identical configs that differ
+//! only in which timers are armed (or in remaining timer phase) are
+//! behaviourally distinct (a timer-fire edge can make progress from one and
+//! not the other), so the verifier's visited-set key must not conflate
+//! them. Every field is a serde-trivial scalar/`String`/`Option`/enum, so
+//! the Doc 13 §11 byte-determinism contract holds (no `HashMap`).
+
+use serde::{Deserialize, Serialize};
 
 /// A single armed timer.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Timer {
     /// Source-of-truth: the timer ID from the IR. Trace records reference
     /// this back to the IR `TimerObject.id`.
@@ -28,10 +39,21 @@ pub struct Timer {
     pub fires: TimerFire,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimerFire {
     OneShot,
     Periodic { period_ms: u32 },
+}
+
+/// Total-order key for [`TimerFire`] used only by
+/// [`TimerSet::snapshot_sorted`] so the canonical armed-set form is stable
+/// across runs. `(discriminant, period)` — `OneShot` sorts before any
+/// `Periodic`; `Periodic`s order by period.
+fn fire_ord(f: &TimerFire) -> (u8, u32) {
+    match f {
+        TimerFire::OneShot => (0, 0),
+        TimerFire::Periodic { period_ms } => (1, *period_ms),
+    }
 }
 
 /// In-flight timer set. We keep a `Vec` rather than a `BinaryHeap` so that
@@ -61,6 +83,47 @@ impl TimerSet {
     /// All currently armed timers (for snapshot / debugging).
     pub fn iter(&self) -> impl Iterator<Item = &Timer> {
         self.timers.iter()
+    }
+
+    /// Canonical, byte-deterministic armed-set form for
+    /// [`crate::InterpreterSnapshot`] (v1.4-W2). The live `timers` `Vec`
+    /// preserves *arm order* (insertion order is irrelevant to firing —
+    /// `pop_fired_through` sorts by expiry — but is observable order); the
+    /// snapshot returns a **sorted clone** so two configurations with the
+    /// same armed set reached via different arm orders serialise to
+    /// identical bytes (the digest must key the *set*, not the arm
+    /// sequence, or the visited-set would split behaviourally-identical
+    /// configs and never converge — the same termination guard
+    /// `next_trace_id` exclusion serves for the parent counter). The sort
+    /// key is the full timer tuple (`timer_id`, `source_state`,
+    /// `expiry_ms`, …) so it is total and stable.
+    pub fn snapshot_sorted(&self) -> Vec<Timer> {
+        let mut v = self.timers.clone();
+        v.sort_by(|a, b| {
+            (
+                &a.timer_id,
+                &a.source_state,
+                &a.transition_id,
+                a.expiry_ms,
+                fire_ord(&a.fires),
+            )
+                .cmp(&(
+                    &b.timer_id,
+                    &b.source_state,
+                    &b.transition_id,
+                    b.expiry_ms,
+                    fire_ord(&b.fires),
+                ))
+        });
+        v
+    }
+
+    /// Replace the armed set wholesale from a previously captured snapshot
+    /// (the [`TimerSet`] half of `Interpreter::restore`). Arm order is not
+    /// load-bearing for firing, so restoring the sorted form is
+    /// behaviourally exact.
+    pub fn restore_from(&mut self, timers: Vec<Timer>) {
+        self.timers = timers;
     }
 
     pub fn is_empty(&self) -> bool {

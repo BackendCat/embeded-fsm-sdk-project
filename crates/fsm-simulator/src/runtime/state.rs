@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::machine_index::MachineIndex;
 use super::queue::EventQueue;
-use super::timer::TimerSet;
+use super::timer::{Timer, TimerSet};
 use super::value::Value;
 
 /// Map of context-field name → current [`Value`]. Held as a `BTreeMap` so
@@ -121,6 +121,138 @@ impl RuntimeState {
         }
         set
     }
+
+    /// Recursively capture this runtime's submachine map into the
+    /// serialisable [`SubmachineSnapshot`] form (v1.4-W2 losslessness). The
+    /// recursion walks `submachines` (a `BTreeMap`, so deterministic key
+    /// order) and, for each nested sub-instance, captures the same
+    /// configuration-relevant fields the parent snapshot captures —
+    /// including *its* `submachines` (the recursion). Transients
+    /// (`queue`/`current_payload`/`completion_run`) are deliberately
+    /// omitted, matching the parent-snapshot policy: the interpreter only
+    /// snapshots quiescent configs.
+    pub(crate) fn capture_submachines(&self) -> BTreeMap<String, SubmachineSnapshot> {
+        self.submachines
+            .iter()
+            .map(|(ref_id, sub)| (ref_id.clone(), sub.capture_as_sub()))
+            .collect()
+    }
+
+    /// Capture *this* runtime as a [`SubmachineSnapshot`] (used when this
+    /// runtime is itself a nested sub-instance — the recursive step).
+    fn capture_as_sub(&self) -> SubmachineSnapshot {
+        SubmachineSnapshot {
+            active_states: self.active_states.clone(),
+            history: self.history.clone(),
+            defer_set: self.defer_set.clone(),
+            virtual_clock_ms: self.virtual_clock_ms,
+            timers: self.timers.snapshot_sorted(),
+            context: self.context.clone(),
+            next_trace_id: self.next_trace_id,
+            initialized: self.initialized,
+            submachines: self.capture_submachines(),
+        }
+    }
+
+    /// Rebuild this runtime's `submachines` map from a previously captured
+    /// [`SubmachineSnapshot`] tree (the [`RuntimeState`] half of
+    /// `Interpreter::restore`, v1.4-W2). For each captured sub-instance:
+    /// reconstruct its skeleton via
+    /// [`super::submachine::build_sub_runtime`] (the *same* path
+    /// `sync_submachines` uses to instantiate one — the template is
+    /// derivable from `self.machine` + the ref-state id), then overlay the
+    /// snapshot's mutable fields and recurse into *its* nested
+    /// `submachines`. A ref-state whose template no longer resolves (a
+    /// degraded/partial IR — Doc 09 §1) is skipped, mirroring
+    /// `sync_submachines`'s `else { continue }`.
+    pub(crate) fn restore_submachines(&mut self, captured: BTreeMap<String, SubmachineSnapshot>) {
+        let mut rebuilt: BTreeMap<String, Box<RuntimeState>> = BTreeMap::new();
+        for (ref_id, sub_snap) in captured {
+            let Some(mut sub_rt) = super::submachine::build_sub_runtime(&self.machine, &ref_id)
+            else {
+                // Unresolved ref (FSM-E0103 at analysis) — skip rather than
+                // panic, exactly as `sync_submachines` degrades.
+                continue;
+            };
+            sub_rt.overlay_from_sub(sub_snap);
+            rebuilt.insert(ref_id, Box::new(sub_rt));
+        }
+        self.submachines = rebuilt;
+    }
+
+    /// Overlay a [`SubmachineSnapshot`]'s mutable config onto this freshly
+    /// `build_sub_runtime`-built sub-instance, then recurse into its nested
+    /// subs. `machine`/`queue`/`current_payload`/`completion_run` keep
+    /// their freshly-built (empty/quiescent) values — the snapshot is taken
+    /// at a quiescent boundary so this is behaviourally exact.
+    fn overlay_from_sub(&mut self, snap: SubmachineSnapshot) {
+        self.active_states = snap.active_states;
+        self.history = snap.history;
+        self.defer_set = snap.defer_set;
+        self.virtual_clock_ms = snap.virtual_clock_ms;
+        self.timers.restore_from(snap.timers);
+        self.context = snap.context;
+        self.next_trace_id = snap.next_trace_id;
+        self.initialized = snap.initialized;
+        self.restore_submachines(snap.submachines);
+    }
+}
+
+/// Recursively-captured mutable state of one **submachine sub-instance**
+/// (v1.4-W2 — closes the audit's D-2 / §1.3 snapshot-lossiness blocker).
+///
+/// A [`RuntimeState`]'s `submachines: BTreeMap<String, Box<RuntimeState>>`
+/// holds the live nested sub-instance configs (Doc 08 §12). Before W2 the
+/// [`InterpreterSnapshot`] dropped them, so the verifier's `ConfigDigest`
+/// would conflate two reachable configs that differ *only* in a nested
+/// sub-instance's active leaf (or its context / timers / history), prune
+/// the second as already-visited, and could return a **false
+/// `ProvenNoDeadlock`** (the cardinal verification sin). This type makes
+/// the snapshot lossless: the same configuration-relevant fields as
+/// [`InterpreterSnapshot`], **recursively** (a sub-instance can itself
+/// embed sub-instances).
+///
+/// **Reconstruction note (why no `machine: Arc<MachineIndex>` field).** A
+/// sub-instance's `MachineIndex` template is *deterministically derivable*
+/// from the parent index + the referencing ref-state id (the
+/// `submachines` `BTreeMap` key) via
+/// [`super::submachine::build_sub_runtime`] — exactly how
+/// `sync_submachines` instantiates one. So the snapshot stores **only the
+/// mutable config**; `Interpreter::restore` rebuilds each sub's skeleton
+/// from its key and overlays this. This keeps the snapshot serialisable
+/// (`Arc<MachineIndex>` is not, nor should it be in a wire form) and
+/// byte-deterministic, and matches the existing parent-snapshot policy of
+/// omitting the shared, reconstructable index.
+///
+/// **Transient-field policy (mirrors the parent snapshot exactly).** The
+/// per-RTC-step transients (`queue`, `current_payload`, `completion_run`)
+/// are **not** captured — identical to [`InterpreterSnapshot`] for the
+/// parent. The interpreter only ever hands back configurations drained to
+/// quiescence (Doc 08 §3.2 / §9.2 / §14), so these are empty/0 at every
+/// snapshot/restore boundary; capturing them would add non-configuration
+/// bytes to the digest and risk splitting behaviourally-identical configs.
+/// `timers` is serialised as a **sorted** `Vec<Timer>` (see
+/// [`super::timer::TimerSet::snapshot_sorted`]) so the armed *set* — not
+/// the arm order — is what the digest keys.
+///
+/// `BTreeMap` (not `HashMap`) throughout so JSON encoding is
+/// byte-deterministic across runs — the Doc 13 §11 wire-format contract,
+/// here *extended* (not broken) to the recursive sub-instance + timers.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SubmachineSnapshot {
+    pub active_states: Vec<String>,
+    pub history: BTreeMap<String, Vec<String>>,
+    pub defer_set: Vec<String>,
+    pub virtual_clock_ms: u64,
+    /// Sorted armed-timer set of this sub-instance (canonical form).
+    pub timers: Vec<Timer>,
+    pub context: ContextValues,
+    pub next_trace_id: u64,
+    pub initialized: bool,
+    /// Nested sub-instances of *this* sub-instance — the recursion. Keyed
+    /// by the (this-template-relative) referencing ref-state id, same as
+    /// [`RuntimeState::submachines`].
+    pub submachines: BTreeMap<String, SubmachineSnapshot>,
 }
 
 /// Snapshot serialisable form — used by `Interpreter::snapshot` /
@@ -129,13 +261,39 @@ impl RuntimeState {
 ///
 /// `BTreeMap` (not `HashMap`) so JSON encoding is byte-deterministic across
 /// runs — Doc 13 §11 wire-format contract.
+///
+/// **v1.4-W2 losslessness extension (additive — closes audit D-2).** Prior
+/// to W2 this captured only `active_states`/`history`/`defer_set`/
+/// `virtual_clock_ms`/`context`/`next_trace_id`/`initialized`, silently
+/// dropping `RuntimeState.timers` and `RuntimeState.submachines`. Two new
+/// fields — `timers` (the armed set, canonical sorted form) and
+/// `submachines` (the recursive nested sub-instance configs) — make the
+/// snapshot **lossless**: a `snapshot → restore → re-snapshot` round-trip
+/// is now byte-identical for hierarchical/parallel/timer/submachine configs
+/// as well as flat ones. The new fields are **purely additive** — every
+/// pre-W2 field keeps its name, type, and position, so an existing flat
+/// snapshot serialises byte-identically *to its old form for those fields*
+/// (the two new fields encode as an empty `[]` / `{}` when no timers /
+/// submachines are armed). The Doc 13 §11 byte-stability contract is
+/// thereby extended, not broken.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InterpreterSnapshot {
     pub active_states: Vec<String>,
     pub history: BTreeMap<String, Vec<String>>,
     pub defer_set: Vec<String>,
     pub virtual_clock_ms: u64,
+    /// Armed-timer set, canonical sorted form (v1.4-W2). The armed timers
+    /// *are* configuration: a state armed-waiting on a timer is
+    /// behaviourally distinct from the same state with no timer (a
+    /// timer-fire edge can make progress from the former). Empty `[]` when
+    /// nothing is armed ⇒ flat-machine snapshots are byte-unchanged.
+    pub timers: Vec<Timer>,
     pub context: ContextValues,
     pub next_trace_id: u64,
     pub initialized: bool,
+    /// Live submachine sub-instances, recursively captured (v1.4-W2).
+    /// Keyed by the referencing `StateNode::Submachine` ref-state id, same
+    /// as [`RuntimeState::submachines`]. Empty `{}` for any machine with no
+    /// active submachine ⇒ flat-machine snapshots are byte-unchanged.
+    pub submachines: BTreeMap<String, SubmachineSnapshot>,
 }

@@ -18,7 +18,7 @@ pub use event::{EventKind, QueuedEvent};
 pub use lca::{effective_lca, lca_inclusive};
 pub use machine_index::{MachineIndex, NodeKind, NodeRef, RegionRef};
 pub use queue::{EventQueue, QueueError};
-pub use state::{ContextValues, InterpreterSnapshot, RuntimeState};
+pub use state::{ContextValues, InterpreterSnapshot, RuntimeState, SubmachineSnapshot};
 pub use submachine::{build_sub_runtime, entry_target, sub_reached_final, MAX_SUBMACHINE_DEPTH};
 pub use timer::{Timer, TimerFire, TimerSet};
 pub use value::Value;

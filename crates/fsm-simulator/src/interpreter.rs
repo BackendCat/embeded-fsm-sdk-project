@@ -419,9 +419,21 @@ impl Interpreter {
             history: rt.history.clone(),
             defer_set: rt.defer_set.clone(),
             virtual_clock_ms: rt.virtual_clock_ms,
+            // v1.4-W2 losslessness (audit D-2): the armed timer set and the
+            // recursive submachine sub-instance configs are *configuration*
+            // — capturing them makes `snapshot → restore → re-snapshot`
+            // byte-identical for timer/submachine machines, so the
+            // verifier's `ConfigDigest` can no longer conflate
+            // behaviourally-distinct configs. `snapshot_sorted()` /
+            // `capture_submachines()` produce the canonical (sorted /
+            // BTreeMap) forms ⇒ byte-determinism preserved (Doc 13 §11,
+            // extended not broken). Flat machines have an empty timer set +
+            // empty submachine map ⇒ their snapshots are byte-unchanged.
+            timers: rt.timers.snapshot_sorted(),
             context: rt.context.clone(),
             next_trace_id: rt.next_trace_id,
             initialized: rt.initialized,
+            submachines: rt.capture_submachines(),
         })
     }
 
@@ -435,9 +447,19 @@ impl Interpreter {
         rt.history = snap.history;
         rt.defer_set = snap.defer_set;
         rt.virtual_clock_ms = snap.virtual_clock_ms;
+        // v1.4-W2: restore the armed timer set and recursively rebuild the
+        // submachine sub-instances. `restore_submachines` reconstructs each
+        // sub's `MachineIndex` skeleton from `rt.machine` + the ref-state
+        // id (the same `build_sub_runtime` path `sync_submachines` uses)
+        // then overlays the captured mutable config — so a config restored
+        // mid-sub-instance resurrects the *exact* nested state, not a
+        // silently-torn-down one (the pre-W2 lossy-restore bug the audit
+        // flagged).
+        rt.timers.restore_from(snap.timers);
         rt.context = snap.context;
         rt.next_trace_id = snap.next_trace_id;
         rt.initialized = snap.initialized;
+        rt.restore_submachines(snap.submachines);
         Ok(())
     }
 
