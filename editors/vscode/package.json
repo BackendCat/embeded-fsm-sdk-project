@@ -131,6 +131,12 @@
         "title": "Baseline Regression Check",
         "icon": "$(history)",
         "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.verifyLive",
+        "title": "Verify Live (via Language Server)",
+        "icon": "$(shield)",
+        "category": "FSM Studio"
       }
     ],
     "keybindings": [
@@ -211,6 +217,11 @@
           "group": "fsm@2"
         },
         {
+          "command": "fsm.verifyLive",
+          "when": "editorLangId == fsm-lang",
+          "group": "fsm@2"
+        },
+        {
           "command": "fsm.baseline",
           "when": "editorLangId == fsm-lang",
           "group": "fsm@7"
@@ -229,6 +240,11 @@
         },
         {
           "command": "fsm.verify",
+          "when": "resourceExtname == .fsm",
+          "group": "fsm"
+        },
+        {
+          "command": "fsm.verifyLive",
           "when": "resourceExtname == .fsm",
           "group": "fsm"
         }
@@ -260,6 +276,10 @@
         },
         {
           "command": "fsm.verify",
+          "when": "editorLangId == fsm-lang"
+        },
+        {
+          "command": "fsm.verifyLive",
           "when": "editorLangId == fsm-lang"
         },
         {
