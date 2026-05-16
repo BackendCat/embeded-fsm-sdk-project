@@ -141,23 +141,27 @@ Phase-boundary audits (FSM-PROC-SUBAGENT §11.3) after L1 and after L5.
 
 ---
 
-## v1.3 — VS Code extension
+## v1.3 — VS Code extension — ✅ SHIPPED (pending the `v1.3.0` annotated tag, 2026-05-16, local; `checkpoint/2026-05-16-v1_3` anchor)
 
 **Theme: First-class editor experience on top of the shipped LSP.**
 
-Re-scoped here 2026-05-16 (Doc 00 §11.40): the VS Code extension is the natural consumer of the v1.2 LSP server. Architecture + wave plan: **`docs/27-VSCode-Extension-Architecture.md`** (FSM-ARCH-VSCE) — the V1–V6 plan + a capability-reuse map (all language intelligence comes **free** over `vscode-languageclient` now the LSP shipped; only the ELK diagram Webview is substantive-new) + a Doc-22-vs-shipped-LSP reconciliation table.
+Re-scoped here 2026-05-16 (Doc 00 §11.40): the VS Code extension is the natural consumer of the v1.2 LSP server. Architecture + wave plan: **`docs/27-VSCode-Extension-Architecture.md`** (FSM-ARCH-VSCE) + **`docs/28-v1_3-VSCode-Wave-Plan.md`** (FSM-PLAN-VSCE-V13, the V1–V6 epic plan + tag gate) — all language intelligence comes **free** over `vscode-languageclient` now the LSP shipped; only the ELK diagram Webview is substantive-new.
 
-- **VS Code extension** (Doc 22 / Doc 27): packaged extension wiring `vscode-languageclient` to `fsm-lang-server`, the Doc 21 TextMate grammar, syntax/semantic highlighting, and a diagram `WebviewPanel` (ELK-laid-out). Per Doc 27 V1–V6.
-- **`wasm32` build of `fsm-lsp`** (Doc 26 §9): the analysis core is tokio-free and WASM-compatible by design; this is the compile/packaging work that also unlocks the Web IDE.
-- **Cross-file / workspace LSP intelligence** (Doc 26 §4.6/§9): the project-index substrate enabling cross-file `definition`/`references`/`rename`, `workspaceSymbol`, and the startup workspace scan — single-file was the explicit v1.2 contract; this is where it grows up (paired with the Web IDE multi-file story).
+> ✅ **SHIPPED 2026-05-16 (pending the contingent tag step).** The deferred §11.49 analyzer→CST-coupling debt was paid first as **W0** (`ceb8efd` == `checkpoint/2026-05-16-w0-clean`; DRIFT-2-grade, additive-only, 0 new deps, non-behavioural — 13 documented R-1..R-4 leave-and-explain residuals; Doc 00 §11.50). Then the **VS Code extension epic V1–V6 landed** (`editors/vscode/`, **zero Rust delta**): V1 client spine, V2 grammar/snippets, V3 commands, V4 read-only diagram WebviewPanel, V5 activity-bar tree views, V6 host-only bundled installable VSIX. Each wave has a real `@vscode/test-electron` behavioural-acceptance gate (34 Extension-Host tests, oracles independently recomputed — never symbol-presence). The two Doc-28-mandated §11.3 phase-boundary audits (post-V1, post-V4) plus the orchestrator-cadenced post-W0 + post-V2/V3 audits each returned **PROCEED-WITH-NOTES**. Canonical record: **`docs/GATE_VERIFICATION_v1_3.md`**. The release is contingent on the cold-from-source cargo quad **and** the JS Extension-Host lane (`npm ci` + `@vscode/test-electron` under `xvfb` + `npm audit`) at the gate-doc commit being green + an independent pre-tag four-lens audit returning TAG-CLEAR (the §11.30/§11.22 sequence). **Owner/v1.3.x carry-overs (not blockers; `GATE_VERIFICATION_v1_3.md` §5):** the never-run G9 CI matrix + the new JS lane (owner push); the **G9-gated 5-platform binary-bundling tail** (V6 ships host-only — owner/infra action); **VSIX publishing/signing OUT** (owner credential decision); **no top-level `LICENSE`** (owner/legal, coupled to publishing).
+
+- **VS Code extension** (Doc 22 / Doc 27 / Doc 28): ✅ **SHIPPED** — packaged extension wiring `vscode-languageclient` to `fsm-lang-server`, the Doc 21 TextMate grammar, syntax highlighting, the 7 client/CLI commands, the activity-bar tree views, and an ELK-laid-out diagram `WebviewPanel`. Per Doc 27/28 V1–V6. Detail: CHANGELOG `[1.3.0]`, Doc 00 §11.50–§11.62.
+
+**Deferred out of the shipped v1.3 scope (carried to a later minor — explicitly NOT delivered in the v1.3 extension epic, Doc 28's V1–V6 was the v1.3 contract):**
+- **`wasm32` build of `fsm-lsp`** (Doc 26 §9): the analysis core is tokio-free and WASM-compatible by design; this is the compile/packaging work that also unlocks the Web IDE. **Deferred to v1.4** (paired with the Web IDE multi-file story; not in the Doc 28 V1–V6 extension scope).
+- **Cross-file / workspace LSP intelligence** (Doc 26 §4.6/§9): the project-index substrate enabling cross-file `definition`/`references`/`rename`, `workspaceSymbol`, and the startup workspace scan — single-file was the explicit v1.2 contract. **Deferred to v1.4** (paired with the Web IDE multi-file story; not in the Doc 28 V1–V6 extension scope).
 
 ---
 
-## v1.4 — Simulation & verification
+## v1.4 — Simulation & verification (the next minor)
 
 **Theme: Trustable behavioral validation.**
 
-> Was "v1.3 — Simulation & verification"; pushed to v1.4 by the 2026-05-16 re-scope (Doc 00 §11.40) when the VS Code extension took the v1.3 slot. Content unchanged.
+> Was "v1.3 — Simulation & verification"; pushed to v1.4 by the 2026-05-16 re-scope (Doc 00 §11.40) when the VS Code extension took the v1.3 slot. The VS Code extension is now ✅ SHIPPED (pending tag), so this is the **next minor**. Content unchanged; the `wasm32` `fsm-lsp` build + cross-file/workspace LSP intelligence (the Web IDE substrate) are folded here from the deferred-v1.3 carry-overs above.
 
 - **Simulator WebSocket protocol** (Doc 13): JSON-RPC 2.0 server lets VS Code / Web IDE drive the simulator interactively. Step-debugging, breakpoints, watchpoints.
 - **Web IDE** (Doc 05): Monaco editor + WASM-compiled toolchain + ELK-laid-out diagram. Demo target: edit FSM in browser, immediate diagram, immediate trace.

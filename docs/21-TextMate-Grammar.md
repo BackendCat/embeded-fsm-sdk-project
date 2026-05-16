@@ -116,6 +116,8 @@ naming conventions to ensure compatibility with VS Code themes.
 
 # 3. Grammar File — `fsm-lang.tmLanguage.json`
 
+> **⚠ v1.3-V2 reconciliation note (N-6, corrected-in-shipped — see Doc 00 §11.55).** The literal JSON below is **structurally defective as written**: `machine`/`state`/`composite`/`parallel`/`region` are declared as single-line `match` rules with **no begin/end body rule**, so a `{ … }` body has no rule to descend into and the bare-`{` `#action-block` greedily swallows the whole machine body (the v1.3-V2 behavioural gate caught this). The **shipped** `editors/vscode/syntaxes/fsm-lang.tmLanguage.json` (v1.3-V2 `1542bfb`) corrects the *structure* — those five become **begin/end block rules whose body re-includes the pattern set**, plus a `state-declaration-bare` `match` fallback — while keeping **every §2 scope name verbatim** (independently verified, `docs/AUDIT_PHASE_V2V3_2026_05_16.md` §3.D, J-1 §11.1-ratified). This document remains a `Status: Deferred` DRAFT; the shipped grammar's inline `_note` (`tmLanguage.json:6`) + this pointer are the durable correction-of-record (the DRIFT-2 fix-where-demonstrably-broken-and-explain discipline). The illustrative literal below is intentionally left as-authored for the scope-naming reference; the shipped grammar is authoritative for structure.
+
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",

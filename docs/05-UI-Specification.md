@@ -271,6 +271,8 @@ If the identifier has a `@id` annotation, a prompt appears:
 - Tab title: `⬡ MachineName — Diagram`.
 - One diagram panel per machine. Re-using the same command focuses existing panel.
 
+> **⚠ v1.3-V4 reconciliation note (V4 JC-3, corrected-in-shipped — see Doc 00 §11.56).** "One diagram panel per machine" is **realized as "per source file"** in the shipped v1.3-V4 panel (`4c4c6a2`): the panel is keyed by **resolved file path**, not machine name. This is the *correct* realization, not drift — a machine-name key would be a correctness bug, because a transient parse/codegen error removes the machine from the IR, so a re-open after an error would spawn a **fresh blank panel** instead of focusing the existing one + showing last-valid-render + the §1.5.9 banner (the "identity stable across re-renders" contract). In the v1.3 one-machine-per-panel scope (the diagram shows the file's *first* machine) "per machine" ≡ "per file". The shipped `diagramPanel.ts:58-75` `_note` is the durable correction-of-record; this prose under-specifies only the error-transient case (independently verified, `docs/AUDIT_PHASE_V4_2026_05_16.md` §3.A). The §1.5.9 banner string + `$(type-hierarchy)` icon + the focus-existing semantics are byte-faithful as written.
+
 ### 1.5.2 Layout
 
 ```

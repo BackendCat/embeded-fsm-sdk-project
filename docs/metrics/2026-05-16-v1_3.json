@@ -1,0 +1,237 @@
+{
+  "$comment": "FSM Studio metrics snapshot at the v1.3.0 tag (pending the contingent cold-quad + JS-lane + pre-tag-audit step). Phase D.8 of the autonomy plan. COMPANION to the v1.2.0 snapshot docs/metrics/2026-05-16.json (NOT overwritten — that remains the frozen v1.2 attestation). 'deltas_vs_prev' carries v1.2->v1.3 movement; 'attention:true' marks a metric the next status report must examine. Reproducible: every metric has a 'method'. KEY FACT: the v1.3 Rust delta vs the v1.2 tag (71043935) IS EXACTLY W0 — the §11.49 CST-coupling paydown (ceb8efd, 18 files +421/-93 in fsm-analyzer + additive-only fsm-parser; 0 new deps; non-behavioural, pre/post byte-identity proven; independently §11.1-verified at ceb8efd: COLD-QUAD GREEN 806/0/108 + conformance 26/26 + clippy -D/fmt clean + the 38-file diff -r pre/post byte-empty). There is ZERO FURTHER Rust delta after W0: `git diff ceb8efd fa3befc -- crates/ Cargo.* rust-toolchain.toml` is empty — the entire V1-V6 extension epic is editors/vscode/-only. The Rust metrics below therefore equal the frozen v1.2 figures NOT because nothing changed but because W0 (the sole Rust change) is non-behavioural and §11.1-cold-verified at ceb8efd; each is independently re-derived at fa3befc, not echoed.",
+  "date": "2026-05-16",
+  "milestone": "v1.3.0 — VS Code extension epic V1-V6 + W0 §11.49 CST-coupling paydown shipped; tag is the contingent cold-quad+JS-lane+pre-tag-audit step (GATE_VERIFICATION_v1_3.md §4/§7)",
+  "tag_topology": {
+    "v1_3_0_gate_doc_commit": "X (pending — this metrics file + GATE_VERIFICATION_v1_3.md + the batched Doc-00 §11.50-62 / CHANGELOG [1.3.0] / ROADMAP consolidation; the release commit)",
+    "v1_3_0_head_pre_gate": "fa3befc",
+    "v1_3_0_head_pre_gate_full": "fa3befca1bd703fb2541bcd8489d0a526e5b2e91",
+    "v1_3_0_head_subject": "v1.3-V6: host-only binary bundling + installable VSIX packaging (Doc 28 §3-V6)",
+    "checkpoint_2026_05_16_v1_3_commit": "X (== the v1.3.0 tag commit, per §11.30: gate-doc commit -> cold quad + JS lane -> tag, all at the same commit; prospective §11.30-clean as v1.2 first achieved)",
+    "note": "v1.3 follows the §11.30 prospective ordering (gate-doc commit X -> cold-from-source cargo quad AT X + the JS Extension-Host lane AT X -> tag AT X), the v1.2 pattern repeated. The cargo quad shape carries from v1.2 NOT because nothing Rust changed but because the sole v1.3 Rust change is W0 (the §11.49 paydown, ceb8efd, 18 files +421/-93 vs 71043935; 0 new deps; non-behavioural — independently §11.1-cold-GREEN + pre/post byte-identical at ceb8efd) and there is zero further Rust delta after it (git diff ceb8efd fa3befc -- crates/ Cargo.toml Cargo.lock rust-toolchain.toml is empty — independently re-derived, all four §11.3 audits confirmed). The §11.30-clean cold-quad at the v1.3 gate-doc commit X re-confirms it from cold regardless (the contingent gating step). The new JS lane (npm ci + tsc/eslint/esbuild + @vscode/test-electron under xvfb + npm audit) runs green at the same commit X; both transcripts recorded in the annotated v1.3.0 tag message. Canonical record: docs/GATE_VERIFICATION_v1_3.md.",
+    "intra_epic_anchor": "checkpoint/2026-05-16-w0-clean -> ceb8efd (the post-W0-§11.3-audit SUBAGENT §11.4 rollback anchor; NOT a release tag; immutable, not moved)",
+    "v1_2_0_commit": "71043935", "v1_2_0_tag_object": "3b37db7c", "v1_2_0_checkpoint": "checkpoint/2026-05-16 -> 71043935",
+    "v1_1_0_commit": "abc70044", "v1_1_0_tag_object": "9634c7e2",
+    "v1_0_0_commit": "b4800036", "v1_0_0_tag_object": "13e2ac6c",
+    "tag_object_vs_commit_note": "Release tags are ANNOTATED: `git rev-parse <tag>` yields the tag-OBJECT sha; `git rev-list -1 <tag>` yields the COMMIT. They differ and must not be conflated. Recorded per Doc 00 §11.30 / GATE_VERIFICATION_v1_2 §8 / GATE_VERIFICATION_v1_3 §8 so no future wave misreads a tag-object sha as a mismatched commit."
+  },
+
+  "v1_3_rust_delta_is_exactly_w0": {
+    "rust_delta_vs_w0_clean": "EMPTY",
+    "method": "`git diff --stat ceb8efd fa3befc -- crates/ Cargo.toml Cargo.lock rust-toolchain.toml` => empty. Independently re-derived this snapshot; AUDIT_PHASE_W0/V1/V2V3/V4 each re-confirmed from `git`.",
+    "rust_delta_vs_v1_2_tag": "W0 only (§11.49 paydown, ceb8efd, 18 files +421/-93, 0 new deps, non-behavioural, §11.1-cold-verified); ceb8efd..fa3befc empty. `git diff --stat 71043935 fa3befc -- crates/ Cargo.toml Cargo.lock rust-toolchain.toml` = 18 files / +421 / -93 — this IS W0 (the headline v1.3 Rust deliverable), NOT empty; `git diff --stat ceb8efd fa3befc` over the same paths => empty (the V1-V6 extension epic added zero Rust).",
+    "w0_paydown_delta": "18 files / +421 / -93; Cargo.lock byte-unchanged (0 new deps — `git diff 7d6792a ceb8efd -- Cargo.lock` empty)",
+    "interpretation": "The v1.3 Rust delta vs the v1.2 tag (71043935) IS EXACTLY W0 — the §11.49 CST-coupling paydown (7d6792a..ceb8efd, 18 files +421/-93 in fsm-analyzer + additive-only fsm-parser; 0 new deps; non-behavioural — pre/post byte-identity proven; independently §11.1-verified at ceb8efd: COLD-QUAD GREEN 806/0/108 + conformance 26/26 + clippy -D/fmt clean + the 38-file diff -r pre/post byte-empty). There is ZERO FURTHER Rust delta after W0: ceb8efd..fa3befc over crates/ Cargo.* rust-toolchain.toml is empty — the entire V1-V6 extension epic is editors/vscode/ TypeScript only. Every Rust metric below (tests, conformance, forbid-unsafe, diagnostic codes, LOC, api-surface) therefore EQUALS the frozen v1.2 snapshot 2026-05-16.json figures — NOT because nothing changed but because the sole Rust change (W0) is non-behavioural and §11.1-cold-GREEN + behaviour-identical at ceb8efd, and nothing Rust changed thereafter; each is independently re-derived at fa3befc (not echoed) and confirmed identical. The new subsystem metrics are the editors/vscode/ TypeScript LOC + the 34 Extension-Host tests."
+  },
+
+  "editors_vscode_subsystem": {
+    "$comment": "NEW v1.3 subsystem — the VS Code extension. TypeScript, pure additive, zero Rust. Did not exist at v1.2 (full editors/vscode delta vs v1.2 tag = 52 files / +14149).",
+    "src_ts_files_excl_tests": 22,
+    "src_loc_excl_tests": 3415,
+    "test_loc": 3453,
+    "test_files": 6,
+    "total_editors_vscode_delta_vs_v1_2_tag": "52 files / +14149 insertions (the subsystem is entirely new — it did not exist at 71043935)",
+    "browser_context_module": "src/diagram/webview/diagramWebview.ts (the only browser-context module; type-checked under the separate strict tsconfig.webview.json — lib ES2020+DOM, strict, noUnusedLocals/Parameters, noImplicitReturns, noEmit — V4 JC-4, a Zero-Legacy positive credit)",
+    "method": "`git ls-tree -r --name-only fa3befc -- editors/vscode/src` filtered to *.ts; src = excl '*/test/*' + '*.test.ts'; LOC = `git show fa3befc:<f> | wc -l` summed. Full delta = `git diff --shortstat 71043935 fa3befc -- editors/vscode`.",
+    "runtime_deps": {
+      "vscode-languageclient": "^9.0.1 (locked 9.0.1, sha512-cross-checked; the LSP client)",
+      "elkjs": "^0.11.1 (locked, lockfile-pristine — 1 entry, zero transitives, webview-bundle-only via esbuild platform:browser; the single sanctioned new runtime dep, Doc 27 §6.2 / Doc 28 §3-V4)"
+    },
+    "interpretation": "A focused ~3.4k-LOC TypeScript extension + ~3.5k-LOC Extension-Host test corpus. All language intelligence is FREE over vscode-languageclient (no re-implementation); the only substantive-new code is the V4 ELK diagram Webview. Bundle is esbuild-cjs, external:['vscode'], client+elkjs bundled (no node_modules runtime dep in the VSIX). The committed delta excludes the gitignored bin/ + *.vsix build artifacts (V6 — committed delta is ONLY packaging machinery)."
+  },
+
+  "extension_host_tests": {
+    "total": 34,
+    "per_suite": {
+      "extension.test.ts (V1 spine)": 4,
+      "grammar.test.ts (V2 TextMate)": 7,
+      "commands.test.ts (V3 CLI/client-control)": 9,
+      "diagram.test.ts (V4 WebviewPanel)": 4,
+      "tree.test.ts (V5 activity-bar)": 6,
+      "suiteV6/bundled.test.ts (V6 VSIX/bundle)": 4
+    },
+    "method": "`git show fa3befc:<test-file> | grep -cE '^\\s*(test|it)\\s*\\(\\s*[\\x27\"\\x60]'` per suite file (independently re-counted at fa3befc, not echoed). Sum = 34.",
+    "harness": "real headless Extension Host via @vscode/test-electron; fsm-lang-server/fsm built FROM the repo root so the 1.75.0 pin applies (toolchain-trap-aware); oracle RECOMPUTED from `fsm check --json` / `fsm generate --emit-ir`, byte-compared, never symbol-presence; R-15 fixture isolation hard-asserted (OS-temp-dir stage + up-tree fsm.toml walk that fails loud)",
+    "oracles_independently_cross_checked": "V1 documentSymbol/diagnostic byte-range + non-ASCII multibyte under negotiated UTF-16; V3 copyIR IR sha; V4 3-node/2-edge model + the verbatim Doc 05 §1.5.9 banner; V5 tree-node-set == executeDocumentSymbolProvider result; V6 Rule-2-against-a-real-4.95MB-bundle + bundled-server diagnostic byte-equal to the bundled `fsm check --json` oracle + the SEC-P0-1 multibyte seam through the bundle",
+    "xvfb_required": true,
+    "xvfb_note": "@vscode/test-electron launches a real Electron host needing a DISPLAY; strictly load-bearing post the V4 Webview test (JC-1 / Doc 00 §11.59). The CI JS-lane + every §11.1 / pre-tag re-run MUST invoke under xvfb-run.",
+    "attention": false
+  },
+
+  "tests": {
+    "total_passing": 806,
+    "total_failing": 0,
+    "authoritative_source": "Equals the frozen v1.2 figure (806/0/108) NOT because nothing changed but because the sole v1.3 Rust change (W0, ceb8efd) was independently §11.1-cold-GREEN + behaviour-identical at ceb8efd, and nothing Rust changed thereafter (ceb8efd..fa3befc empty). The W0 §11.1 post-merge run at ceb8efd re-produced COLD-QUAD GREEN (806/0/108, 26/26, clippy -D clean, fmt clean) + 38-file `diff -r` byte-empty pre/post (the pre/post-identity proof for the non-behavioural W0 refactor); the §11.30-clean canonical confirming cold-quad at the v1.3 gate-doc commit X re-confirms it from cold regardless (the contingent step — GATE_VERIFICATION_v1_3 §4.4).",
+    "method": "The sole v1.3 Rust change is W0 (71043935..ceb8efd, 18 files +421/-93, 0 new deps, non-behavioural); ceb8efd..fa3befc over crates/ Cargo.* rust-toolchain.toml is empty (the V1-V6 extension added zero Rust). The frozen v1.2 figure carries because W0 §11.1-cold-re-confirmed 806/0/108 at ceb8efd as the pre/post-identity proof for the non-behavioural refactor; re-derived at fa3befc, not echoed.",
+    "delta_vs_v1_2": 0,
+    "attention": false,
+    "new_v1_3_test_surface": "34 Extension-Host tests (editors/vscode/, @vscode/test-electron) — see extension_host_tests; these are the v1.3 NEW behavioural-acceptance surface, run in the separate JS lane, NOT counted in the 806 Rust total."
+  },
+
+  "loc": {
+    "rust_src_excl_tests_total": 45620,
+    "rust_delta_vs_v1_2": 0,
+    "rust_note": "Carried as the frozen v1.2 figure (45620, frozen 2026-05-16.json — a frozen attestation is not rewritten). The sole v1.3 Rust change is W0 (the §11.49 paydown, additive-only on fsm-parser +421/-93 across 18 files, 0 new deps, non-behavioural); the v1.2 snapshot's whole-src-file `wc -l` method nets ~+328 in fsm-parser/fsm-analyzer for W0 — re-derivable but immaterial to the frozen v1.2 attestation. There is zero further Rust delta after W0 (ceb8efd..fa3befc empty). The headline LOC story for v1.3 is the NEW editors/vscode/ subsystem (3415 src LOC, see editors_vscode_subsystem) plus the W0 +421/-93 accessor relocation.",
+    "editors_vscode_src_loc_excl_tests": 3415,
+    "method": "Rust: unchanged vs frozen v1.2 (byte-identical workspace). editors/vscode: `git show fa3befc:<f> | wc -l` summed over src/*.ts excl tests.",
+    "interpretation": "v1.3's LOC delta is the +3415-LOC editors/vscode/ TypeScript extension (a NEW subsystem) + the W0 additive-only +421/-93 fsm-parser accessor relocation. No Rust subsystem grew materially; the extension is intentionally thin because all language intelligence is free over vscode-languageclient."
+  },
+
+  "conformance": {
+    "manifest_fixtures_total": 26,
+    "manifest_by_category": { "parser": 6, "validator": 6, "semantic": 7, "codegen-c": 4, "formatter": 3 },
+    "v1_2_baseline_fixtures": 26,
+    "delta_vs_v1_2": 0,
+    "added_v1_3": "NONE — v1.3 retired/added no diagnostic code; the conformance suite + MANIFEST.json are byte-untouched. The sole v1.3 Rust change (W0) preserved conformance 26/26 byte-unchanged pre/post (the SUBAGENT-§5.4 pre/post-identity proof for the non-behavioural refactor) and nothing Rust changed after W0.",
+    "method": "AUTHORITATIVE source = tests/conformance/MANIFEST.json, byte-untouched across v1.3 (W0 added/retired no code; ceb8efd..fa3befc empty). W0 §11.1 re-confirmed 26/26 at ceb8efd as the pre/post-identity gate.",
+    "coverage_map_formal_vs_crate_split": {
+      "formal_conformance_tested": 39,
+      "untested_in_formal_harness": 34,
+      "retired_codes": 2,
+      "total_live_diagnostic_codes": 73,
+      "total_including_retired": 75,
+      "note": "Equals the frozen v1.2 figures (the sole v1.3 Rust change W0 added/retired no diagnostic code; nothing Rust changed after W0). 39 Tested + 34 UNTESTED + 2 RETIRED = 75 historical total; live = 75 - 2 = 73. G7 partial posture unchanged: not every live code has a formal fixture; every NEW v1.3 surface (the extension) is behaviourally tested by the 34 Extension-Host tests."
+    },
+    "attention": false
+  },
+
+  "safety": {
+    "crates_forbid_unsafe": 10,
+    "crate_roots_with_forbid_unsafe": 11,
+    "crates_total": 10,
+    "delta_vs_v1_2": 0,
+    "root_files": [
+      "crates/fsm-diagnostics/src/lib.rs",
+      "crates/fsm-lexer/src/lib.rs",
+      "crates/fsm-ir/src/lib.rs",
+      "crates/fsm-parser/src/lib.rs",
+      "crates/fsm-formatter/src/lib.rs",
+      "crates/fsm-analyzer/src/lib.rs",
+      "crates/fsm-codegen-c/src/lib.rs",
+      "crates/fsm-simulator/src/lib.rs",
+      "crates/fsm-lsp/src/lib.rs",
+      "crates/fsm-lsp/src/main.rs",
+      "crates/fsm-cli/src/main.rs"
+    ],
+    "method": "`git grep -l '#![forbid(unsafe_code)]' fa3befc -- 'crates/*/src/*.rs'` = 11 root files across 10 crates (independently re-derived at fa3befc, not echoed). Equals the frozen v1.2 figure (the sole v1.3 Rust change W0 added no crate / touched no forbid root; nothing Rust changed after W0) — GATE_VERIFICATION_v1_3 §8 independently re-derived '11 roots / 10 crates'.",
+    "unsafe_blocks": 0,
+    "attention": false,
+    "interpretation": "v1.2 was 10 crates / 11 roots; the sole v1.3 Rust change (W0, the §11.49 paydown) is additive-only on fsm-parser — it added no crate and touched no `#![forbid(unsafe_code)]` root, so the invariant holds and is re-confirmed at fa3befc; nothing Rust changed after W0. The new editors/vscode/ subsystem is TypeScript (no `unsafe` concept); the extension is forbidden remote code by CSP `default-src 'none'` (the V4 Webview)."
+  },
+
+  "diagnostic_codes": {
+    "live_count": 73,
+    "retired_count": 6,
+    "retired_codes": ["E0301", "E0304", "W0400", "E0903", "W0500"],
+    "delta_vs_v1_2": 0,
+    "v1_3_change": "NONE — v1.3 retired/implemented no diagnostic code. The sole v1.3 Rust change (W0) preserved the byte-identical diagnostic stream (the R-2 unsorted-vector residual is RETAINED precisely because reordering would change the vector — AUDIT_PHASE_W0 §6 independently re-derived 'no sort in the analyzer->CLI diagnostics path'); nothing Rust changed after W0.",
+    "ci_lock": "all_codes_matches_expected_count test asserts count==73; byte-unchanged across v1.3 (W0 added/retired no code).",
+    "method": "Count `for_each_code!` macro body `=> (Severity,` definition lines in `git show fa3befc:crates/fsm-diagnostics/src/lib.rs` (lines 262-403) = 73 (independently re-derived at fa3befc, not echoed). Matches the frozen v1.2 live_count exactly (the sole v1.3 Rust change W0 added/retired no code; nothing Rust changed after W0).",
+    "attention": false
+  },
+
+  "api_surface": {
+    "rust_pub_strict_total": 597,
+    "rust_pub_broad_total": 787,
+    "delta_vs_v1_2": 0,
+    "note": "Carried as the frozen v1.2 figures (a frozen attestation is not rewritten). The sole v1.3 Rust change is W0: its ~7 new `pub fn` accessors on fsm-parser ast_node! types are offset within the same crate, the net effect is immaterial, and nothing Rust changed after W0. The post-W0 §11.3 audit confirmed every new accessor is consumed by the analyzer migration (clippy -D warnings clean = no unreachable_pub = each replaced a real coupling site, not dead API). NOT a regression.",
+    "method": "Rust: carried from the frozen v1.2 attestation (the v1.3 Rust delta is exactly W0's additive accessors, which clippy-clean confirms are all consumed; ceb8efd..fa3befc empty). Not separately re-derived — the v1.2 snapshot is the frozen attestation and v1.3 has zero net workspace-API regression.",
+    "attention": false
+  },
+
+  "decisions_ledger": {
+    "section_11_total_rows": 62,
+    "v1_3_rows_range": "§11.50 - §11.62",
+    "v1_3_rows_count": 13,
+    "v1_2_rows_count": 20,
+    "v1_1_rows_count": 11,
+    "method": "Counted `§11.N` distinct row numbers in docs/00-Decisions-And-Reconciliation.md. v1.3 span: §11.50 (W0 §11.49-paydown) through §11.62 (no-LICENSE owner/legal). Footer bumped: 'rows §11.50-62 appended 2026-05-16, the v1.3 batched doc/ledger consolidation'. Each row commit/branch-verified against a real merged commit (the per-row traceability table in the closeout report).",
+    "v1_3_rows_summary": "§11.50 W0 §11.49-paydown (ceb8efd, 13-file R-1..R-4 residual catalogue, parallel.rs sole-removal); §11.51 toolchain-probe-trap correction (the §11.1-agent 1.95 false-alarm + codified repo-cwd probe method); §11.52 V1-Finding-1 Doc 27 §2.2 TransportKind.stdio->omit-transport; §11.53 V1-Finding-2 UTF-8-unreachable->UTF-16-fallback-correct (+N-2); §11.54 V1 spine decision; §11.55 V2/V3 + N-5 CLOSED + N-6 CORRECTED-IN-SHIPPED (Doc 21 §3 grammar); §11.56 V4 + copyIr->emitIr extraction; §11.57 V5/V6 + the 3 V6 owner-escalations (G9-tail/VSIX-not-published/no-LICENSE); §11.58 JC-3 config-discoverability (owner/later wave); §11.59 JC-1 xvfb (JS CI lane); §11.60 the copyIr->emitIr POSITIVE credit; §11.61 makeNonce Math.random->CSPRNG tracked v1.3.x hardening; §11.62 no-LICENSE owner/legal escalation."
+  },
+
+  "gate_status": {
+    "cleanly_met": 7,
+    "acceptable_partial": 2,
+    "blocked": 0,
+    "detail": "GATE_VERIFICATION_v1_3.md §1: G1-G6, G8 clean. The cargo quad shape carries from v1.2 NOT because nothing changed but because the sole v1.3 Rust change (W0, the §11.49 paydown vs 71043935: 18 files +421/-93, 0 new deps) is non-behavioural and W0 §11.1 re-produced COLD-QUAD GREEN + behaviour-identical at ceb8efd, with zero further Rust delta after it (ceb8efd..fa3befc empty); the §11.30-clean cold-quad at the v1.3 gate-doc commit X re-confirms from cold regardless. G7 (formal conformance 26 fixtures, not all 73 live codes) + G9 (remote CI never run + the NEW never-run JS lane + the G9-gated 5-platform binary-bundling tail) are the same acceptable-partial posture as v1.0/v1.1/v1.2. 0 open P0. The four §11.3 phase-boundary audits (post-W0/V1/V2V3/V4) each returned PROCEED-WITH-NOTES (0 ship-blockers)."
+  },
+
+  "phase_boundary_audits": [
+    "docs/AUDIT_PHASE_W0_2026_05_16.md (post-W0, ceb8efd, PROCEED-WITH-NOTES; commit 255a3e7; N-1 Doc-29-§3.1-stale + N-2 toolchain-probe correction)",
+    "docs/AUDIT_PHASE_V1_2026_05_16.md (post-V1, 6707d1d, PROCEED-WITH-NOTES; commit 4280406; Findings 1+2 independently re-derived — shipped code correct, Doc 27/28 prose wrong)",
+    "docs/AUDIT_PHASE_V2V3_2026_05_16.md (post-V2/V3-batch, 61cc3f0, PROCEED-WITH-NOTES; commit 4aaef5d; N-5 CLOSED, N-6 CORRECTED-IN-SHIPPED, JC-3/JC-1 new)",
+    "docs/AUDIT_PHASE_V4_2026_05_16.md (post-V4, 4c4c6a2, PROCEED-WITH-NOTES; commit 203b7d5; K-3 sealed, copyIr->emitIr POSITIVE credit, V4 JC-2/JC-3/JC-4)"
+  ],
+
+  "accepted_tracked_debt": {
+    "resolved_this_release": {
+      "item": "analyzer->parser-CST coupling cleanup (the v1.2 §11.49 deferral)",
+      "status": "SUBSTANTIALLY PAID as v1.3-W0 (ceb8efd) with documented reasoned R-1..R-4 residuals",
+      "detail": "parallel.rs sole full cst:: removal + B-clean accessor relocations + 13 fsm-analyzer files retaining cst:: as the documented R-1..R-4 leave-and-explain residual (R-1 OPAQUE-BUG-1 P0-1-risk; R-2 unsorted-diagnostic byte-load-bearing; R-3 relocate-not-eliminate shallow-expr; R-4 zero-cross-crate-caller positional helpers). Each carries a DRIFT-2-form comment. The post-W0 §11.3 audit rated it a SUCCESS of the leave-and-explain discipline, not under-delivery. Doc 00 §11.50, GATE_VERIFICATION_v1_3 §6.1.",
+      "precedent": "v1.1 pub-hygiene + v1.2 DRIFT-2 closed the same way (paid where clean, left-and-explained where forcing it was worse-EV)"
+    },
+    "carried_owner_escalations": [
+      "G9-gated 5-platform binary-bundling tail (V6 host-only — owner/infra action; GATE_VERIFICATION_v1_3 §5.2 / Doc 00 §11.57)",
+      "VSIX packaged-not-published (owner credential/product decision; §5.3 / §11.57)",
+      "no top-level LICENSE file (owner/legal, coupled to publishing; §6.3 / §11.62)",
+      "CI matrix + the NEW JS lane never run (owner push action; §5.1 / §11.59 — the v1.2 §5 carry, doubled by the Node lane)"
+    ],
+    "carried_v1_3_x_doc_ci": [
+      "JC-3 fsmLang.codegen.* config-discoverability (owner/later config-owner wave; not a correctness bug — defaults match Doc 22 §8; §11.58)",
+      "makeNonce Math.random->CSPRNG (tracked senior-bar one-liner; independently rated adequate under default-src 'none'; §11.61)",
+      "N-4 status-bar restarting-tooltip generic string (V5-area cosmetic; unexercised recovery path)"
+    ]
+  },
+
+  "security": {
+    "rust_known_vulns": 0,
+    "rust_note": "Equals the frozen v1.2 figure (0 known vulns). The sole v1.3 Rust change (W0, the §11.49 paydown) is 0-new-deps: Cargo.lock is byte-identical to the v1.2-tagged 71043935 (`git diff 7d6792a ceb8efd -- Cargo.lock` empty), so RUSTSEC-2026-0009 remained eliminated and the dependency surface is unchanged; nothing Rust changed after W0. The SCA cargo audit ci.yml job is byte-unchanged + still unexercised (G9).",
+    "node_audit": "PENDING — Doc 28 §6.2(5) adds `npm audit` of editors/vscode/ at 0 high/critical to the pre-tag reliability checklist; run at the v1.3 gate-doc commit X in the JS lane, transcript in the annotated tag message (GATE_VERIFICATION_v1_3 §4.4). NOT yet run at snapshot time — recorded as the contingent step, not a result.",
+    "webview_csp": "V4 diagram Webview is CSP-locked: default-src 'none', nonce'd script-src/style-src, img-src webview.cspSource+data:, localResourceRoots-pinned, postMessage-only, no remote. makeNonce uses Math.random (independently rated adequate under default-src 'none' / no remote-or-inline-injection vector; tracked v1.3.x CSPRNG hardening, §11.61 — NOT a contract weakening)."
+  },
+
+  "deltas_vs_prev": {
+    "_prev_milestone": "v1.2.0 (2026-05-16, docs/metrics/2026-05-16.json — frozen, NOT overwritten)",
+    "rust_workspace": {
+      "delta": "W0 only (the §11.49 CST-coupling paydown, ceb8efd): 18 files / +421 / -93 across crates/ vs the v1.2 tag 71043935; 0 new deps (Cargo.lock byte-unchanged); non-behavioural. Zero further Rust delta after W0.",
+      "attention": false,
+      "note": "`git diff --stat 71043935 fa3befc -- crates/ Cargo.toml Cargo.lock rust-toolchain.toml` = 18 files / +421 / -93 — this IS W0 (the headline v1.3 Rust deliverable, the §11.49 paydown), NOT empty. `git diff ceb8efd fa3befc` over the same paths is empty (the V1-V6 extension epic added zero Rust) — independently re-derived; all four §11.3 audits confirmed from git. W0 is independently §11.1-cold-GREEN + pre/post byte-identical at ceb8efd (COLD-QUAD 806/0/108 + 26/26 + clippy -D/fmt clean + 38-file diff -r byte-empty). Every Rust metric (tests 806/0, conformance 26, forbid-unsafe 11/10, live diagnostic codes 73, api-surface 597/787, src LOC 45620) therefore EQUALS the frozen v1.2 figures NOT because nothing changed but because W0 (the sole Rust change) is non-behavioural + §11.1-cold-verified at ceb8efd and nothing Rust changed thereafter; each re-confirmed at fa3befc, not echoed."
+    },
+    "new_subsystem_editors_vscode": {
+      "v1_2": "absent (did not exist)", "v1_3": "3415 src LOC (22 TS files) + 3453 test LOC (6 files) + 34 Extension-Host tests",
+      "delta": "+14149 total editors/vscode insertions vs the v1.2 tag (52 files, entirely new)",
+      "attention": false,
+      "note": "The v1.3 VS Code extension epic V1-V6. Pure additive TypeScript, zero Rust. Two sanctioned runtime deps (vscode-languageclient@9.0.1, elkjs@0.11.1 webview-bundle-only)."
+    },
+    "extension_host_tests": {
+      "v1_2": 0, "v1_3": 34, "delta": 34,
+      "attention": false,
+      "note": "V1 4 + V2 7 + V3 9 + V4 4 + V5 6 + V6 4 = 34. The §5.4-analogue: real @vscode/test-electron, oracle recomputed, byte-compared, never symbol-presence. Run in the separate JS lane under xvfb (NOT counted in the 806 Rust total)."
+    },
+    "decisions_section_11_rows": {
+      "v1_2": 49, "v1_3": 62, "delta": 13,
+      "attention": false,
+      "note": "+13 rows §11.50-§11.62 (W0 §11.49-paydown, toolchain-probe correction, V1 Findings 1+2, V1-V6 wave decisions, JC-1/JC-3, the copyIr->emitIr POSITIVE credit, makeNonce hardening, no-LICENSE escalation). Each row commit-traced against a real merged commit."
+    },
+    "live_diagnostic_codes": { "v1_2": 73, "v1_3": 73, "delta": 0, "attention": false, "note": "Unchanged — the sole v1.3 Rust change (W0) retired/added no code and is non-behavioural; nothing Rust changed after W0. Re-derived at fa3befc." },
+    "conformance_fixtures": { "v1_2": 26, "v1_3": 26, "delta": 0, "attention": false, "note": "Unchanged — byte-identical MANIFEST.json; W0 preserved 26/26 byte-unchanged pre/post." },
+    "forbid_unsafe_roots": { "v1_2": 11, "v1_3": 11, "delta": 0, "attention": false, "note": "Unchanged — 11 roots / 10 crates; the sole v1.3 Rust change (W0) added no crate and touched no forbid root; nothing Rust changed after W0. Re-derived at fa3befc." },
+    "tests_total_passing": { "v1_2": 806, "v1_3": 806, "delta": 0, "attention": false, "note": "Equals the frozen v1.2 figure because the sole v1.3 Rust change (W0) is non-behavioural + §11.1-cold-GREEN 806/0/108 at ceb8efd and nothing Rust changed thereafter; the 34 Extension-Host tests are the NEW v1.3 behavioural surface, separate JS lane." },
+    "regression_flags": "NONE — the sole v1.3 Rust change (W0, the §11.49 paydown) is non-behavioural (pre/post byte-identity proven + independently §11.1-cold-GREEN at ceb8efd) and there is zero further Rust delta after it, so no Rust metric could regress (each independently re-confirmed equal-to-frozen-v1.2 at fa3befc). The new editors/vscode/ subsystem + 34 Extension-Host tests are pure-additive. No metric crossed into attention-territory this release. The W0 refactor is proven non-behavioural by the pre/post-identity gate (byte-identical corpus + 35 LSP client tests + examples 5/5 + conformance 26/26)."
+  },
+
+  "process": {
+    "v1_3_waves": "W0 (§11.49 CST-coupling paydown) + V1-V6 (the VS Code extension epic) + 4 §11.3 phase-boundary audit docs",
+    "sprint_theme": "VS Code extension (Doc 27/28) on the shipped v1.2 LSP — V1 client spine, V2 grammar/snippets, V3 commands, V4 read-only ELK diagram WebviewPanel, V5 activity-bar tree views, V6 host-only bundled installable VSIX; preceded by W0 the deferred §11.49 analyzer-coupling paydown (DRIFT-2-grade, non-behavioural)",
+    "canonical_release_record": "docs/GATE_VERIFICATION_v1_3.md (authored at the v1.3 gate-doc commit X; §11.30 prospective ordering followed — gate-doc commit -> cold cargo quad + JS lane -> tag, all at X)",
+    "frozen_phase_audits": "docs/AUDIT_PHASE_{W0,V1,V2V3,V4}_2026_05_16.md (4 audits, all PROCEED-WITH-NOTES; the durable correction-of-record the v1.3 closeout folds — NOT edited)",
+    "roadmap_doc": "docs/ROADMAP.md (v1.3 = VS Code extension SHIPPED pending tag; next minor = v1.4 Simulation & verification + wasm32/cross-file LSP folded from deferred-v1.3; C++17 its own minor)",
+    "key_process_refinements": [
+      "Four §11.3 phase-boundary audits (post-W0/V1/V2V3/V4) layering judgment on top of the §11.1 mechanical proof — the durable correction-of-record folded by this closeout (the W0/V1 §11.3 / N-1 pattern)",
+      "Toolchain-probe-trap codified: bare `rustc --version` (box default 1.95) is NOT pin-violation evidence; probe via `rustup show active-toolchain` FROM the repo dir (Doc 00 §11.51; memory feedback_embeded_fsm_toolchain_probe_trap)",
+      "verify-the-record symmetric: the V1 audit independently re-derived Findings 1+2 from the locked vscode-languageclient@9.0.1 source and proved the PROSE wrong, the shipped code right — recorded as Doc-of-record fixes, NOT regressed into a falsehood (§11.29 lineage)",
+      "Second CI lane: a separate additive Node/Extension-Host JS lane (Doc 28 §2.3 Option-A) under xvfb, caches out-of-tree so the cold-cargo disk trough is unaffected; +npm audit added to the pre-tag reliability checklist",
+      "Batched doc/ledger writes (the v1.2 generalisation): the v1.3 closeout is a single controlled batch-append (GATE_VERIFICATION_v1_3 + Doc-00 §11.50-62 + CHANGELOG [1.3.0] + ROADMAP + this metrics companion)"
+    ]
+  }
+}

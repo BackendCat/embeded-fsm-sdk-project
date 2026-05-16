@@ -7,6 +7,184 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-05-16
+
+**Theme: First-class editor experience on top of the shipped LSP — the VS Code extension (Doc 27), preceded by the deferred §11.49 analyzer-coupling paydown (W0).**
+
+> **Scope (Doc 00 §11.40, the v1.2-era user-endorsed re-version):** `v1.3.0` ships the **VS Code extension** — the natural `vscode-languageclient` consumer of the v1.2 LSP server. All language intelligence comes **free** over the client now the LSP shipped; only the ELK diagram Webview is substantive-new. The deferred §11.49 CST-coupling debt is paid as **W0 before V1** (the v1.1→v1.2 "L0-before-LSP" precedent, Doc 28 §4). The extension adds **zero Rust surface** (`git diff ceb8efd fa3befc -- crates/ Cargo.toml Cargo.lock rust-toolchain.toml` empty — independently re-derived, the four §11.3 phase-audits each confirmed from `git`).
+
+### Added
+
+- **VS Code extension — V1 MVP spine** (v1.3-V1, `editors/vscode/`): a
+  greenfield TypeScript extension wiring `vscode-languageclient@9.0.1` to
+  the `fsm-lang-server` binary over **stdio** (constructed as an
+  `Executable` `ServerOptions` with the `transport` field **deliberately
+  omitted** — the only form that round-trips against the shipped server's
+  strict no-args/exit-2-on-unknown-arg parser; robust *by construction*
+  against the locked client's `Executable`-vs-`NodeModule` dispatch). Live
+  diagnostics reuse the **exact** `fsm check` pipeline (editor squiggles
+  can never disagree with `fsm check --json`). Doc 22 §2.2 binary
+  resolution Rule 1/2/3 with **no silent PATH/guess fallback** (the
+  cardinal-sin bar at the client boundary), and the Doc 22 §13.2
+  exponential-backoff (3/9/27 s, 60 s success-reset) crash-recovery
+  handler. Proven by 4 real `@vscode/test-electron` Extension-Host tests
+  with the diagnostics oracle independently recomputed from `fsm check
+  --json` and byte-compared (incl. a non-ASCII multibyte fixture under the
+  negotiated UTF-16 encoding), R-15 fixture isolation hard-asserted. See
+  `docs/27-VSCode-Extension-Architecture.md` §8 V1, `docs/28-v1_3-VSCode-Wave-Plan.md` §3-V1,
+  and `docs/00-Decisions-And-Reconciliation.md` §11.52–§11.54.
+- **VS Code extension — V2 TextMate grammar + language-configuration +
+  snippets** (v1.3-V2): the Doc 21 grammar (every Doc 21 §2 scope name
+  preserved **verbatim**), `language-configuration.json` (brackets,
+  comments, auto-closing, folding markers), and FSM-Lang snippets. Static
+  assets; 7 grammar-test cases. (The Doc 21 §3 *literal JSON* was
+  structurally defective — single-line `match` rules with no body rule, so
+  the bare-`{` `#action-block` greedily swallowed the machine body; the
+  shipped grammar corrects the **structure** to begin/end block rules
+  while keeping the **scope names** Doc-21-verbatim. See §11.55 + the
+  Doc 21 §3 reconciliation note.) See `docs/00-Decisions-And-Reconciliation.md` §11.55.
+- **VS Code extension — V3 CLI-wrapper + client-control commands**
+  (v1.3-V3): the 7 Doc 22 §4 commands (`fsm.checkFile`,
+  `fsm.generateC99`, `fsm.generateCpp17`, `fsm.formatDocument`,
+  `fsm.copyIR`, `fsm.restartLanguageServer`, `fsm.showOutputChannel`) with
+  bare titles + `category:"FSM Studio"` (VS Code renders `FSM Studio:
+  <X>`), their menus/keybindings/`commandPalette` gating, and a
+  centralised honest `cliRunner.ts`/`cliBinary.ts` process seam
+  (resolve-never-reject; a non-zero exit is data, never a masked success;
+  no silent PATH fallback). `fsm.showOutputChannel` +
+  `fsm.restartLanguageServer` (wired by V1's status-bar + crash-exhaustion
+  buttons) are now contributed + registered + `onCommand:`
+  activation-evented. 9 command-test cases. See
+  `docs/00-Decisions-And-Reconciliation.md` §11.55.
+- **VS Code extension — V4 read-only diagram WebviewPanel** (v1.3-V4):
+  `fsm.openDiagram` → a CSP-locked (`default-src 'none'`, nonce'd,
+  `localResourceRoots`-pinned, `postMessage`-only, no remote) split-right
+  read-only Webview. Data = the **one real** codegen-gated `fsm generate
+  --emit-ir` → `<machine>.ir.json` path via the V3 seam (**no** new
+  LSP/server method, **no** `fsm ir` subcommand — the architecture stays
+  pinned to the one real IR producer); elkjs ELK-Layered layout
+  in-webview; click a rendered state → editor reveals its declaration via
+  the IR `SourceLocation`. The codegen-gated boundary is sealed:
+  parse-OK-but-codegen-fails keeps the **last valid render** + shows the
+  Doc 05 §1.5.9 banner `⚠ Diagram shows last valid state. Fix parse errors
+  to update.` **verbatim**, asserted at the real Webview ack. The shared
+  IR-acquisition core was extracted to `emitIr.ts` (one honest `--emit-ir`
+  seam consumed by both `copyIR` and the diagram; `copyIR`
+  pre/post-identical). 4 diagram-test cases. See
+  `docs/00-Decisions-And-Reconciliation.md` §11.56.
+- **VS Code extension — V5 activity-bar tree views + context-key chrome**
+  (v1.3-V5): `fsm.machineExplorer`/`fsm.eventExplorer`
+  `TreeDataProvider`s fed by the **free `documentSymbol`** LSP response
+  (the same single-`analyze_with_source` seam — **not** the codegen-gated
+  IR), the Doc 22 §7 activity-bar view container, and the Doc 22 §11
+  context keys (`fsm.hasOpenFsmFile`/`fsm.serverRunning`) driving
+  `when`-clauses. Tree fidelity asserted **exactly** against the client's
+  `executeDocumentSymbolProvider` result (re-projected, not re-analyzed —
+  never symbol-presence). 6 tree-test cases. See
+  `docs/00-Decisions-And-Reconciliation.md` §11.57.
+- **VS Code extension — V6 host-only binary bundling + installable VSIX**
+  (v1.3-V6): the host-triple `fsm-lang-server` + `fsm` built on the
+  pinned 1.75 toolchain into `editors/vscode/bin/<host-triple>/` (the
+  producer and V1's never-before-exercised Rule-2 resolver are
+  re-derived from the **same** `os.platform()`-`os.arch()` expression so
+  they cannot drift), packaged via `@vscode/vsce package` into a lean
+  **installable `.vsix`** (excludes `node_modules`/`src`/`out`/`test`).
+  V1's bundled-binary Rule-2 path fires against a real bundle for the
+  first time; a real diagnostic round-trips through the bundled server
+  byte-equal to the bundled `fsm check --json` oracle; the SEC-P0-1
+  multibyte-line seam is re-verified through the bundle. 4 V6-test cases
+  (full V1–V5 regression green alongside). See
+  `docs/00-Decisions-And-Reconciliation.md` §11.57.
+
+### Changed
+
+- **`fsm-analyzer` → `fsm-parser`-CST coupling substantially paid down
+  (v1.3-W0, DRIFT-2-grade, non-behavioural, additive-only, 0 new deps).**
+  The accepted-tracked-debt deferred at the v1.2 tag (Doc 00 §11.49) is
+  resolved: `checks/parallel.rs` fully shed `use fsm_parser::cst::*` (its
+  lone `INITIAL_DECL` predicate → the typed `RegionDecl::initials()`); ~7
+  new typed accessors on `fsm-parser` `ast_node!` types
+  (`PriorityClause::value`, `{Transition,Internal,Local}Decl::payload_binding`,
+  `{After,Every,EveryInternal}Decl::{action_block,duration}`,
+  `{Machine,Region}Decl::initials`) absorb the B-clean single-construct
+  relocations. **13 `fsm-analyzer` files deliberately retain the `cst::`
+  import as the documented R-1..R-4 leave-and-explain residual** (R-1
+  OPAQUE-BUG-1 parent-node type resolution — P0-1 silent-data-loss risk if
+  removed; R-2 heterogeneous source-/document-pre-order dispatch — the
+  emitted diagnostic vector is unsorted so traversal order is
+  byte-load-bearing; R-3 the deliberately-shallow expr/stmt sublanguage —
+  folding relocates not eliminates the walk; R-4 `util::span_of`-family
+  positional helpers — pure rowan-positional, zero cross-crate callers).
+  Each carries a DRIFT-2-form comment citing Doc 00 §11.44/§11.49. Proven
+  non-behavioural by the pre/post-identity gate (full corpus + 35 LSP
+  client tests + examples 5/5 + conformance 26/26 byte-unchanged). The
+  post-W0 §11.3 phase-audit rated it a success of the leave-and-explain
+  discipline. Detail: Doc 00 §11.50, `docs/GATE_VERIFICATION_v1_3.md` §2.1/§6.1.
+- **`copyIr.ts` refactored to delegate to the shared `emitIr.ts` core**
+  (v1.3-V4, audit-recommended) — one honest `fsm generate --emit-ir`
+  acquisition seam consumed by both `copyIR` and the diagram panel;
+  `copyIR` behaviour is pre/post-identical (the SUBAGENT §10 refactor
+  pre/post-identity bar met). Recorded as a positive consolidation credit,
+  not a behaviour change. Detail: Doc 00 §11.56/§11.60.
+
+### Fixed
+
+- **Doc-of-record corrections (no code change — the shipped V1 code was
+  already correct; the V1 phase-audit independently re-derived both from
+  the locked `vscode-languageclient@9.0.1` source and proved the *prose*
+  wrong):** Doc 27 §2.2's `TransportKind.stdio` is a wrong literal — the
+  only round-tripping form is to **omit** `transport` on the `Executable`
+  (Doc 00 §11.52); UTF-8 `positionEncoding` is **unreachable** through the
+  official client (it hardcodes `['utf-16']` and throws on non-UTF-16), so
+  the correct negotiated value is `"utf-16"` and the shipped acceptance
+  test already asserts exactly that (Doc 00 §11.53). These are
+  documentation-of-record fixes folded at the v1.3 closeout; the shipped
+  extension's behaviour was correct throughout.
+
+### Known limitations
+
+- **CI matrix + the new JS lane never run** (G9). The GitHub Actions
+  matrix (linux/macos/windows × fmt/clippy/build/test) and the SCA `cargo
+  audit` job have **never executed against any v1.2 or v1.3 commit**
+  (local-only repo — owner controls the remote). v1.3 adds a **second**
+  never-run lane: the Node/Extension-Host JS lane (Doc 28 §2.3 Option-A;
+  it needs `xvfb-run` for a virtual DISPLAY — strictly load-bearing post
+  the V4 Webview test). Local-equivalent cargo quad + JS lane are green;
+  platform-specific behaviour is unverified on the runners. Post-tag owner
+  push action — `docs/GATE_VERIFICATION_v1_3.md` §5.1.
+- **Multi-platform binary bundling is host-only (G9-gated).** V6 ships the
+  **host-triple** `fsm-lang-server`+`fsm` bundled in the VSIX (Rule-2
+  proven against the real bundle). The full 5-platform `bin/{triple}/`
+  tail is **blocked-on-G9 existing** (no cross toolchains on the box;
+  infra-escalation, not grind). Accepted-tracked-debt — owner/infra
+  action, `docs/GATE_VERIFICATION_v1_3.md` §5.2.
+- **The VSIX is installable, not published.** `vsce package` produces a
+  lean local `.vsix`; marketplace publishing/signing is explicitly OUT —
+  an owner credential/product decision (no PAT sought).
+  `docs/GATE_VERIFICATION_v1_3.md` §5.3.
+- **No top-level `LICENSE` file.** Generated firmware code carries an SPDX
+  header (MIT-by-default, `--license` overridable) and the v1.3 VSIX is
+  host-only-unpublished, so this does not block the local tag — but a
+  *published* extension / distributed source should carry an explicit
+  repository license (owner/legal decision, coupled to the
+  publishing-OUT item above). Doc 00 §11.62.
+- **`fsmLang.codegen.outputDir`/`codegen.strategy` are not Settings-UI
+  discoverable** (JC-3). Both are extension-consumed by the V3 generate
+  command with the correct Doc 22 §8 defaults but are not in
+  `contributes.configuration.properties` (only via raw `settings.json`).
+  Not a correctness bug (defaults match the spec); carried to a later
+  config-owner wave. Doc 00 §11.58.
+- **`makeNonce()` uses `Math.random()`, not a CSPRNG** (the V4 diagram
+  Webview CSP nonce). Independently rated **adequate and
+  non-contract-weakening** for a local `vscode-webview://` bundle under
+  `default-src 'none'` with no remote/inline-injection vector; carried as
+  a tracked v1.3.x senior-bar one-liner hardening, not a ship issue.
+  Doc 00 §11.61.
+- The status-bar "restarting" tooltip renders a generic `"…starting"`
+  string (not the literal `"FSM Language Server restarting (attempt
+  N/3)..."`); inside the unexercised recovery path, icon/text already
+  match. Carried as a V5-area v1.3.x cosmetic polish (N-4).
+
 ## [1.2.0] — 2026-05-16
 
 **Theme: Developer tooling — the `fsm-lsp` Language Server.**
@@ -498,7 +676,8 @@ Pre-tag audits at `docs/AUDIT_*_2026_05_14.md`:
   AI-friendliness (`#![forbid(unsafe_code)]` everywhere; 14/14 Doc 00
   blockers traceable in code).
 
-[Unreleased]: https://github.com/BackendCat/embeded-fsm-sdk-project/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/BackendCat/embeded-fsm-sdk-project/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/BackendCat/embeded-fsm-sdk-project/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/BackendCat/embeded-fsm-sdk-project/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/BackendCat/embeded-fsm-sdk-project/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/BackendCat/embeded-fsm-sdk-project/releases/tag/v1.0.0
