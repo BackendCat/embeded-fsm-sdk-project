@@ -107,6 +107,18 @@
         "title": "Open Diagram",
         "icon": "$(type-hierarchy)",
         "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.refreshMachineExplorer",
+        "title": "Refresh Machines",
+        "icon": "$(refresh)",
+        "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.refreshEventExplorer",
+        "title": "Refresh Events",
+        "icon": "$(refresh)",
+        "category": "FSM Studio"
       }
     ],
     "keybindings": [
@@ -124,6 +136,30 @@
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "fsm.refreshMachineExplorer",
+          "when": "view == fsm.machineExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "fsm.refreshEventExplorer",
+          "when": "view == fsm.eventExplorer",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "fsm.refreshMachineExplorer",
+          "when": "view == fsm.machineExplorer && viewItem == fsmSymbol",
+          "group": "inline"
+        },
+        {
+          "command": "fsm.refreshEventExplorer",
+          "when": "view == fsm.eventExplorer && viewItem == fsmSymbol",
+          "group": "inline"
+        }
+      ],
       "editor/title": [
         {
           "command": "fsm.openDiagram",
@@ -200,6 +236,14 @@
         },
         {
           "command": "fsm.showOutputChannel"
+        },
+        {
+          "command": "fsm.refreshMachineExplorer",
+          "when": "false"
+        },
+        {
+          "command": "fsm.refreshEventExplorer",
+          "when": "false"
         }
       ]
     },
@@ -233,7 +277,42 @@
           "description": "Show human-readable duration next to timer ms values."
         }
       }
-    }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "fsm-explorer",
+          "title": "FSM Studio",
+          "icon": "./assets/activitybar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "fsm-explorer": [
+        {
+          "id": "fsm.machineExplorer",
+          "name": "Machines",
+          "when": "fsm.hasOpenFsmFile"
+        },
+        {
+          "id": "fsm.eventExplorer",
+          "name": "Events",
+          "when": "fsm.hasOpenFsmFile"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "fsm.machineExplorer",
+        "when": "!fsm.hasOpenFsmFile",
+        "contents": "Open a .fsm file to explore its machines, states, and transitions.\nThe outline is the language server's live document symbols — it stays in sync as you edit."
+      },
+      {
+        "view": "fsm.eventExplorer",
+        "when": "!fsm.hasOpenFsmFile",
+        "contents": "Open a .fsm file to explore the events each machine declares."
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run bundle",

@@ -1,0 +1,50 @@
+language fsm 2.0
+
+machine Traffic {
+    events {
+        TICK
+        RESET
+    }
+
+    initial Red
+
+    state Red {
+        on TICK -> Green
+    }
+
+    state Green {
+        on TICK -> Yellow
+        on RESET -> Red
+    }
+
+    state Yellow {
+        on TICK -> Red
+    }
+}
+
+machine Door {
+    events {
+        OPEN
+        CLOSE
+        LOCK
+    }
+
+    initial Closed
+
+    state Closed {
+        on OPEN -> Open
+        on LOCK -> Locked
+    }
+
+    state Open {
+        on CLOSE -> Closed
+    }
+
+    state Locked {
+        initial Idle
+
+        state Idle {
+            on OPEN -> Idle
+        }
+    }
+}

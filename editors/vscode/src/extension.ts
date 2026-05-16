@@ -52,6 +52,7 @@ import {
 
 import { registerCommands } from "./commands";
 import { registerOpenDiagram } from "./diagram";
+import { FsmExplorerHandle, registerFsmExplorer } from "./tree";
 import { FsmErrorHandler } from "./crashRecovery";
 import { readInlayHintSettings } from "./inlayConfig";
 import {
@@ -89,10 +90,24 @@ export interface FsmExtensionApi {
   readonly negotiatedPositionEncoding: string | undefined;
   /** Which binary-resolution rule won (Doc 22 §2.2). */
   readonly binarySource: "compilerPath" | "bundled" | "none";
+  /**
+   * V5 test-observability (additive — V1's three fields above are
+   * unchanged; structural typing keeps V1's/V2's/V3's/V4's tests, which
+   * declare their own narrower `FsmExtensionApi`, byte-unaffected). Lets
+   * the V5 §5.4 Extension-Host acceptance read the EXACT projected tree
+   * forest each registered provider rendered and force a deterministic
+   * `documentSymbol` refresh — so the gate is "the tree's node structure
+   * deep-equals the `executeDocumentSymbolProvider` oracle", NOT "a
+   * provider is registered" (the P0-1 bar). `undefined` only if V5
+   * registration was skipped (it never is — it runs before the no-binary
+   * return).
+   */
+  readonly fsmExplorer: FsmExplorerHandle | undefined;
 }
 
 function buildApi(
   binarySource: "compilerPath" | "bundled" | "none",
+  fsmExplorer: FsmExplorerHandle | undefined,
 ): FsmExtensionApi {
   return {
     get serverStarted(): boolean {
@@ -106,6 +121,7 @@ function buildApi(
       return typeof enc === "string" ? enc : undefined;
     },
     binarySource,
+    fsmExplorer,
   };
 }
 
@@ -149,6 +165,24 @@ export async function activate(
     extensionPath: context.extensionPath,
   });
 
+  // V5: register the activity-bar tree views + context-key chrome
+  // (Doc 28 §3-V5 / Doc 27 §5/§8-V5; Doc 22 §7/§11). Done HERE — before
+  // the no-binary early-return — so the FSM-explorer container, its
+  // `fsm.machineExplorer`/`fsm.eventExplorer` providers, the `view/title`
+  // refresh commands, and the Doc 22 §11 context keys exist even with no
+  // server binary (the views then show their `viewsWelcome` / honest
+  // empty state — never a fabricated or IR-sourced tree). The tree's data
+  // is the FREE V1-client `documentSymbol` capability
+  // (`executeDocumentSymbolProvider`, server.rs:251) — NOT the `fsm`
+  // CLI's `--emit-ir` path (MV5-1). An additive call site identical in
+  // shape to V3's `registerCommands` / V4's `registerOpenDiagram` — it
+  // adds tree/command/context-key registrations only and does NOT touch
+  // V1's (unaltered) client-spawn / `serverOptions` / `clientOptions` /
+  // `positionEncoding` (MV5-2 / M-1 lineage).
+  const fsmExplorer = registerFsmExplorer(context, {
+    getClient: () => client,
+  });
+
   const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const resolved = resolveServerBinary(context.extensionPath, config);
   if (!resolved) {
@@ -161,7 +195,7 @@ export async function activate(
     );
     statusBar.set("stopped");
     void vscode.window.showErrorMessage(noBundledBinaryMessage(triple));
-    return buildApi("none");
+    return buildApi("none", fsmExplorer);
   }
   outputChannel.appendLine(
     `[fsm] launching fsm-lang-server (${resolved.source}): ${resolved.command}`,
@@ -197,7 +231,14 @@ export async function activate(
       return;
     }
     if (state.kind === "restarting") {
-      statusBar.set("starting");
+      // N-4 (the audit-sanctioned V5 status-bar fold-in, Doc 22:679):
+      // route the restarting state to the dedicated tooltip
+      // (`FSM Language Server restarting (attempt N/3)...`) instead of the
+      // shared `set("starting")` whose generic tooltip the V1 audit
+      // flagged. The `attempt` is read off the error-handler state object
+      // (FsmErrorHandler already supplies it — crashRecovery.ts:84-88); no
+      // client-spawn / serverOptions / clientOptions touched (M-1 intact).
+      statusBar.setRestarting(state.attempt);
     } else {
       statusBar.set("stopped");
       void vscode.window
@@ -271,7 +312,7 @@ export async function activate(
   await client.start();
   context.subscriptions.push(client);
   refreshSeverityIndicator();
-  return buildApi(resolved.source);
+  return buildApi(resolved.source, fsmExplorer);
 }
 
 function refreshSeverityIndicator(): void {
