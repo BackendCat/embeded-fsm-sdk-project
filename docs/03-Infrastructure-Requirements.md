@@ -193,7 +193,17 @@ The FSM-Lang Language Server MUST implement LSP version 3.17 or later.
 
 ## 3.5 Language Server Binary
 
-- The language server MUST be distributed as a standalone binary: `fsm-lsp`.
+> **AS-SHIPPED (post-v1.3 reconciliation 2026-05-16).** The standalone
+> language-server binary **shipped in v1.2.0 as `fsm-lang-server`** (per
+> `crates/fsm-lsp/Cargo.toml` `[[bin]]`, Doc 14 §1, CHANGELOG `[1.2.0]`).
+> The original requirement named it `fsm-lsp`; the requirement below is
+> **reconciled to the shipped binary name** `fsm-lang-server` (the `fsm-lsp`
+> *crate* directory name is unchanged; only the binary differs). Other
+> `fsm-lsp` binary references in this document (§8.3, §10 settings, §12.4)
+> are likewise the `fsm-lang-server` binary.
+
+- The language server MUST be distributed as a standalone binary:
+  `fsm-lang-server` (shipped v1.2.0; was specified as `fsm-lsp`).
 - The binary MUST accept `--stdio` flag for LSP over stdin/stdout.
 - The binary MUST accept `--socket PORT` for LSP over TCP.
 
@@ -437,7 +447,8 @@ The older trace shapes previously sketched here and in Doc 24 are retired.
 
 ## 8.3 Language Server Integration
 
-- The extension MUST launch `fsm-lsp` as a subprocess with `--stdio`.
+- The extension MUST launch `fsm-lang-server` (the §3.5 binary; was
+  specified as `fsm-lsp`) as a subprocess with `--stdio`.
 - The LSP client MUST support all capabilities listed in Section 3.2.
 - LSP restart MUST be available via command palette: `FSM Studio: Restart Language Server`.
 
@@ -507,7 +518,8 @@ The extension MUST provide snippets for:
 
 The extension MUST expose settings under `fsmLang.*`:
 
-- `fsmLang.lspPath`: Path to the `fsm-lsp` binary.
+- `fsmLang.lspPath`: Path to the `fsm-lang-server` binary (the §3.5
+  binary; was specified as `fsm-lsp`).
 - `fsmLang.simulatorPath`: Path to the `fsm-sim` binary.
 - `fsmLang.simulatorPort`: WebSocket port for simulator.
 - `fsmLang.diagramLayout`: Layout algorithm (`hierarchical`, `dot`, `elk`).
@@ -649,6 +661,22 @@ void M_tick(M_t *m, uint32_t elapsed_ms); /* Advance timers by elapsed time, fir
 
 # 12. Packaging and Distribution Requirements
 
+> **KNOWN-UNMET NORMATIVE (post-v1.3 reconciliation 2026-05-16 — do not
+> read as satisfied).** The MUST-level requirements in this section
+> (prebuilt release-asset binaries, SHA-256 checksums, npm/Homebrew/Cargo/
+> pip packages, Marketplace/Open-VSX extension publishing, the Docker
+> image) are a **standing G9 carry-over and are NOT met** as of `v1.3.0`.
+> The repository is local-only by a hard project rule; the CI matrix +
+> `cargo-audit` SCA job exist in `.github/workflows/ci.yml` but have
+> **never run** (the remote/CI is owner-controlled). v1.3 ships a
+> **host-only** bundled VSIX; the 5-platform binary tail, signing, SBOM,
+> and `cargo install` story are explicitly **deferred and owner-gated** —
+> tracked as the G9 owner-push action in every `docs/GATE_VERIFICATION_v1_*.md`
+> §"owner action" and surfaced as a roadmap item (the supply-chain/
+> provenance arc). These remain authoritative *targets*; they are recorded
+> here as **unmet** rather than implied-done so the gap is visible to a
+> first-time evaluator.
+
 ## 12.1 CLI Binary Distribution
 
 - Pre-built binaries MUST be provided for:
@@ -680,7 +708,8 @@ void M_tick(M_t *m, uint32_t elapsed_ms); /* Advance timers by elapsed time, fir
 ## 12.4 Docker Image
 
 - A Docker image MUST be provided: `fsm-sdk/compiler:latest`.
-- The image MUST include: `fsm` CLI, `fsm-lsp`, `fsm-sim`.
+- The image MUST include: `fsm` CLI, `fsm-lang-server` (the §3.5 binary;
+  was specified as `fsm-lsp`), `fsm-sim`.
 - Base image MUST be `alpine` or `distroless` for minimal size.
 - Multi-arch images (linux/amd64, linux/arm64) MUST be supported.
 

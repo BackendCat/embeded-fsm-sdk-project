@@ -1,3 +1,34 @@
+> # ⚠️ SUPERSEDED — HISTORICAL PRE-IMPLEMENTATION ARTIFACT (DO NOT ACT ON)
+>
+> **This is a frozen 2026-02-18 *spec-gate* review that predates Phase 0
+> scaffolding (2026-05-11) and the entire v1.0–v1.3 implementation.** Its
+> "Needs revision / 14 blockers / 42 gaps" verdict reflects the spec
+> corpus *before* the reconciliation work — it is **not** a current
+> assessment of the codebase or docs.
+>
+> **All 14 blockers (and the consistency/completeness/semantic findings)
+> were resolved across v1.0–v1.3.** The single-source-of-truth
+> restructuring this report recommended was carried out (Doc 10 is the
+> normative diagnostic source; Doc 13 the simulator protocol; Doc 04 §1.5
+> the keyword list; etc.).
+>
+> **The live equivalents of this document — the current release records —
+> are:**
+> - `CHANGELOG.md` (per-release, what shipped when)
+> - `docs/00-Decisions-And-Reconciliation.md` §2 (the 14-blocker
+>   resolutions) + §11 (the implementation-time decisions ledger)
+> - `docs/GATE_VERIFICATION_v1_0.md` … `_v1_3.md` (per-release MVP-gate
+>   evidence) and the `docs/AUDIT_*` pre-tag audits
+>
+> This file is **retained unedited below for historical traceability**
+> (the frozen-historical / annotate-not-rewrite discipline — the resolution
+> trail lives in Doc 00 §2/§11, not here). Do not treat anything below this
+> banner as the current state of the project.
+>
+> _— post-v1.3 doc-honesty pass, 2026-05-16_
+
+---
+
 # FSM Studio SDK — Specification Gate Review
 
 **Date:** 2026-02-18

@@ -2,20 +2,29 @@
 
 **Document ID:** FSM-SPEC-SIM
 **Version:** 1.0.0
-**Status:** _**Reserved — v1.1 surface.**_ Updated 2026-05-14 in v1.0 doc
-reconciliation; see CHANGELOG.
+**Status:** _**Spec normative; server deferred to v1.5.**_ The original
+"Reserved — v1.1 surface" banner (2026-05-14 v1.0 reconciliation) is
+two minors stale: the WebSocket server is now **v1.5-scoped** (owner-
+confirmed; Doc 30 §2 / `docs/ROADMAP.md`).
 **Depends on:** FSM-SPEC-IR, FSM-SPEC-SEM
 
-> **v1.0 NOTE.** Per Doc 00 §B-02 / §6 D-02, this protocol does NOT activate
-> in v1.0. The simulator runs **in-process** as a Rust library backing
-> `fsm test` and `fsm simulate` (no JSON-RPC, no port 7842, no auth). The
-> security gap (server on `0.0.0.0` with no auth, Doc 00 §G-02) is removed
-> by deletion, not hardening. The protocol shape below is the authoritative
-> **future** reference: slash-form method names (`sim/init`, `sim/step`, …)
-> are normative; dot-form is forbidden. The `StepRecord` schema in §11
-> remains the single normative trace format consumed in v1.0 by
-> conformance `.trace` files and by the in-process interpreter when run
-> under `fsm test`.
+> **AS-SHIPPED (supersedes the prior "v1.0 NOTE", post-v1.3 reconciliation
+> 2026-05-16).** The WebSocket JSON-RPC server described here is **not yet
+> built**. The "v1.1" label was never accurate post-v1.0; the server is
+> now an **owner-confirmed v1.5 minor** (its own security-gated cut — Doc
+> 30 §2.1 / "Owner scope-confirmation" + `docs/ROADMAP.md` §v1.5). The
+> simulator instead runs **in-process** as a Rust library backing `fsm
+> test` (no JSON-RPC, no port 7842, no auth — there is no `fsm simulate`
+> subcommand in v1.x); that in-process interpreter is fully shipped and
+> battle-tested (the conformance suite is built on it). The security gap
+> (a server on `0.0.0.0` with no auth, Doc 00 §G-02) remains removed by
+> deletion, not hardening; when the v1.5 server lands it gets a
+> SEC-P0-1-grade security audit lens (Doc 30 §3.1). The protocol shape
+> below stays the authoritative **future** reference and remains
+> normative: slash-form method names (`sim/init`, `sim/step`, …) are
+> normative; dot-form is forbidden. The `StepRecord` schema in §11 is
+> the single normative trace format, consumed today by conformance
+> `.trace` files and by the in-process interpreter under `fsm test`.
 
 Defines the JSON-RPC 2.0 over WebSocket protocol between the FSM simulator daemon and
 its clients (VS Code extension, Web IDE, test scripts). All tooling that needs to

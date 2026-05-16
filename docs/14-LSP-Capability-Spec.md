@@ -2,15 +2,23 @@
 
 **Document ID:** FSM-SPEC-LSP
 **Version:** 1.0.0
-**Status:** _**Deferred to v1.1.**_ Updated 2026-05-14 in v1.0 doc
-reconciliation; see CHANGELOG.
+**Status:** _**Implemented in v1.2.0**_ (single-file scope). The original
+"Deferred to v1.1" banner (2026-05-14 v1.0 reconciliation) is superseded:
+the LSP server **shipped in v1.2.0**.
 **Depends on:** FSM-SPEC-DSL, FSM-SPEC-DIAG, FSM-SPEC-IR
 
-> **v1.0 NOTE.** Per Doc 00 §B-03 / §6 D-03, the LSP server is deferred to
-> v1.1. No `fsm-lang-server` binary ships in v1.0. When this surface is
-> revived, the **authoritative keyword list** lives at
-> [Doc 04 §1.5](04-DSL-Specification.md) (per Doc 00 §B-03); diagnostic
-> codes come from [Doc 10](10-Diagnostic-Code-Catalog.md). This document
+> **AS-SHIPPED (supersedes the prior "v1.0 NOTE", post-v1.3 reconciliation
+> 2026-05-16).** The LSP server **shipped in v1.2.0** as the `fsm-lang-server`
+> binary (`crates/fsm-lsp/`, the full L1–L7 capability set, all fed by one
+> `analyze()` byte-consistent with `fsm check`). The earlier "deferred to
+> v1.1 / no `fsm-lang-server` binary ships in v1.0" statement is **no
+> longer true** — see CHANGELOG `[1.2.0]`, `docs/26-LSP-Architecture.md`,
+> and `docs/GATE_VERIFICATION_v1_2.md`. **Scope as shipped: single-file**;
+> cross-file / workspace intelligence + the `wasm32` build are deferred
+> (Doc 26 §9; carried to v1.4 with the multi-file story). The capability
+> spec body below remains normative as-is. The **authoritative keyword
+> list** still lives at [Doc 04 §1.5](04-DSL-Specification.md); diagnostic
+> codes come from [Doc 10](10-Diagnostic-Code-Catalog.md); this document
 > MUST NOT inline-redefine either.
 
 Specifies all LSP 3.17 capabilities provided by the `fsm-lang-server`. Each section

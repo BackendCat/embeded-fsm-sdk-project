@@ -2,18 +2,28 @@
 
 **Document ID:** FSM-SPEC-GEN-CPP
 **Version:** 1.0.0
-**Status:** _**Deferred to v1.1.**_ Updated 2026-05-14 in v1.0 doc reconciliation;
-see CHANGELOG.
+**Status:** _**Deferred to its own unscheduled minor (between v1.3 and
+v2.0).**_ The original "Deferred to v1.1" banner (2026-05-14 v1.0
+reconciliation) is superseded: C++17 codegen was re-scoped (Doc 00
+§11.40 / `docs/ROADMAP.md` §"C++17 code generator") to a self-contained
+orthogonal minor of its own — it does not block, and is not blocked by,
+the LSP / VS Code / verification line. **Not yet implemented** (Docs
+14/22 *did* ship in v1.2/v1.3; this backend did not).
 **Depends on:** FSM-SPEC-GEN-C, FSM-SPEC-IR, FSM-SPEC-HAL
 
-> **v1.0 NOTE.** Per Doc 00 §B-12 / §6 D-01, the C++17 code generator is
-> entirely deferred to v1.1. v1.0 ships C99 codegen only. The STL profile
-> sketched here would heap-allocate via `std::queue<Event>`'s backing
-> `std::deque`, which violates Doc 02 G2 (no dynamic allocation); the v1.1
-> revival MUST use a fixed-capacity circular buffer (e.g.
-> `std::array<Event, N>` indexed manually, or `etl::queue`). Profile
-> naming ("STL" vs "embedded-bare" / "embedded-stl") is a v1.1 decision
-> per Doc 00 §10.6.
+> **AS-PLANNED (supersedes the prior "v1.0 NOTE", post-v1.3 reconciliation
+> 2026-05-16).** The C++17 code generator is **still unimplemented** and is
+> now scoped as **its own unscheduled minor between v1.3 and v2.0** (not
+> "v1.1"; that label predates the §11.40 re-scope — see `docs/ROADMAP.md`).
+> "v1.0 ships C99 codegen only" remains literally true but is no longer the
+> useful framing at a post-v1.3 HEAD: every shipped release (v1.0–v1.3)
+> ships C99 codegen only; this backend is orthogonal and may land in
+> parallel with any line. The STL profile sketched here would heap-allocate
+> via `std::queue<Event>`'s backing `std::deque`, violating Doc 02 G2 (no
+> dynamic allocation); the revival MUST use a fixed-capacity circular
+> buffer (e.g. `std::array<Event, N>` indexed manually, or `etl::queue`).
+> Profile naming ("STL" vs "embedded-bare" / "embedded-stl") is an
+> implementation-time decision for that minor (Doc 00 §10.6).
 
 Specifies the C++17 code emitted by the FSM compiler for C++ embedded targets
 (Arduino, ARM Cortex-M with C++ toolchain, RISC-V with libc++, host simulation).

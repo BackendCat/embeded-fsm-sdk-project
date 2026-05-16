@@ -6,17 +6,27 @@ Formal embedded-first DSL and toolchain for deterministic hierarchical finite st
 
 A production-grade platform for industrial FSM development.
 
-### What v1.0 ships
+### What ships today
+
+The compiler core below shipped in **v1.0.0** and is stable across every
+release since. The LSP server (v1.2.0) and VS Code extension (v1.3.0)
+shipped on top of it — see [Project Status](#project-status) and
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for the per-release breakdown.
 
 - **FSM-Lang DSL** — formal text grammar for hierarchical state machines (parser + analyzer + IR emitter)
 - **C99 code generator** — deterministic, heap-free output safe for embedded targets.
   Two dispatch strategies via `fsm generate --strategy {switch,table,auto}`
   (`auto` picks `switch` when state count < 64, else `table`).
 - **In-process simulator** — virtual-clock interpreter for trace-based testing.
-  Emits `StepRecord` JSON (Doc 13 §11) — byte-deterministic.
+  Emits `StepRecord` JSON (Doc 13 §11) — byte-deterministic. Runs as a
+  library backing `fsm test` (no standalone `simulate` subcommand in
+  v1.x — the WebSocket server is deferred to v1.5, Doc 13).
 - **Canonical formatter** — `fsm fmt` for idempotent `.fsm` source layout.
+- **LSP server** — `fsm-lang-server` (shipped v1.2.0; Docs 14/26).
+- **VS Code extension** — syntax highlighting, LSP client, read-only ELK
+  diagram panel, activity-bar views (shipped v1.3.0; Docs 21/22/27/28).
 - **CLI** — `fsm check`, `fsm generate`, `fsm fmt`, `fsm test`, `fsm parse`,
-  `fsm simulate`, `fsm doc`, `fsm decompile`, `fsm init`.
+  `fsm doc`, `fsm decompile`, `fsm init`.
 
 ### Generated code
 
@@ -42,14 +52,27 @@ void fsm_hal_assert(const char *f, int l, const char *m) {
 The HAL is **mandatory** in v1.0 (Doc 00 §10.3): codegen unconditionally emits
 `#include "fsm_hal.h"`. Trivial integration is ≤ 10 lines per project.
 
-### Roadmap (post-v1.0)
+### Roadmap (post-v1.3)
 
-- Simulator WebSocket protocol + JSON-RPC server (Doc 13)
-- VS Code extension — syntax highlighting, LSP, live diagram panel, simulator panel (Doc 22)
-- Web IDE — browser-based editor, diagram, and simulator (Doc 05)
-- C++17 code generator (Doc 12)
-- LSP server (Doc 14)
-- `defer EVENT` runtime support (currently rejected at analysis with `FSM-E0903`)
+`docs/ROADMAP.md` is the live, per-release source of truth — this list is a
+pointer, not a duplicate.
+
+Shipped since v1.0 (tagged, local):
+
+- **LSP server** (`fsm-lang-server`, Docs 14/26) — shipped in **v1.2.0**
+- **VS Code extension** (Docs 21/22/27) — shipped in **v1.3.0**
+- **`defer EVENT` runtime support** — shipped in **v1.1.0** (the v1.0
+  `FSM-E0903` hard-fail was removed)
+
+Not yet shipped (current deferred set, per `docs/ROADMAP.md` + Doc 30):
+
+- **`fsm verify` verification core** — bounded reachability + deadlock
+  detection + trace differential replay — **v1.4, in progress**
+- **Simulator WebSocket / JSON-RPC server** (Doc 13) — deferred to **v1.5**
+- **Web IDE** — browser editor + diagram + `wasm32` toolchain (Doc 05) —
+  deferred to **v1.6**
+- **C++17 code generator** (Doc 12) — its own unscheduled minor between
+  v1.3 and v2.0
 
 ## Getting Started
 
@@ -129,18 +152,32 @@ FSM-Lang source files use the `.fsm` extension.
 
 MIT
 
+<a id="project-status"></a>
+
 ## Project Status
 
-v1.0 in active development.
+**Latest tagged release: `v1.3.0` (2026-05-16, local). v1.4 in progress.**
 
-- **Phase 0 scaffolded:** 2026-05-11
-- **Doc reconciliation pass:** 2026-05-14 — see [`CHANGELOG.md`](CHANGELOG.md)
-- **Scope:** full UML semantics → C99 codegen → CLI tool only
-- **Deferred to v1.1+:** C++17 codegen, LSP, VS Code extension, Web IDE,
-  WebSocket simulator, TextMate grammar, `defer` runtime support
+All tags below are annotated and **local** (the remote/CI is owner-controlled;
+see `docs/GATE_VERIFICATION_v1_*.md` §"owner action"). `docs/ROADMAP.md` is
+the authoritative, per-release source — this is a summary of it.
+
+| Release | Theme | Status |
+|---|---|---|
+| `v1.0.0` | Correct, tested, embedded-ready core (DSL → C99 → CLI + in-process simulator + formatter) | ✅ Shipped (tagged, local) |
+| `v1.1.0` | Integration ergonomics + UML completion (`defer`, submachines, `--import-header`) | ✅ Shipped (tagged, local) |
+| `v1.2.0` | LSP server (`fsm-lang-server`, Docs 14/26) | ✅ Shipped (tagged, local) |
+| `v1.3.0` | VS Code extension (Docs 21/22/27/28) | ✅ Shipped (tagged, local) |
+| `v1.4`   | Verification core — `fsm verify` (bounded reachability + deadlock) + trace differential replay (Doc 30) | 🚧 In progress |
+
+- **Deferred to a later minor** (per `docs/ROADMAP.md` + Doc 30, owner-confirmed):
+  Simulator WebSocket / JSON-RPC server → **v1.5**; Web IDE + `wasm32`
+  toolchain (Doc 05) → **v1.6**; C++17 codegen (Doc 12) → its own
+  unscheduled minor between v1.3 and v2.0.
 - **Why X?** — read [`docs/00-Decisions-And-Reconciliation.md`](docs/00-Decisions-And-Reconciliation.md).
   The 14 blocker resolutions (§2), TL escalation decisions (§10), and the
-  Phase-1 implementation-time decisions table (§11) cover every "why is it
+  implementation-time decisions table (§11) cover every "why is it
   this way" question.
-- **What changed in v1.0?** — see [`CHANGELOG.md`](CHANGELOG.md).
+- **What changed when?** — see [`CHANGELOG.md`](CHANGELOG.md) (per-release
+  entries) and the `docs/GATE_VERIFICATION_v1_*.md` gate-evidence docs.
 - **Developer entry:** [`docs/23-Developer-Onboarding.md`](docs/23-Developer-Onboarding.md).

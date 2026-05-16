@@ -1,5 +1,14 @@
 # Scientific and Technical Justification for the Embedded FSM SDK
 
+> **Status: foundational (as-of 2026-05-16).** This is the original
+> motivating justification; its present-need framing ("a … toolchain is
+> therefore required") predates implementation. The toolchain it argues
+> for now **substantially exists and is shipped through `v1.3.0`** (full
+> DSL → C99 compiler + CLI + LSP + VS Code extension + simulator +
+> formatter + conformance suite; verification core in progress). The body
+> is retained as authored; for what has actually shipped see
+> [`../CHANGELOG.md`](../CHANGELOG.md) and [`ROADMAP.md`](ROADMAP.md).
+
 ## Abstract
 
 This document justifies the development of a next-generation domain-specific language (DSL),

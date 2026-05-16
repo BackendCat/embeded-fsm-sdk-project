@@ -234,6 +234,19 @@ The orchestrator (the conversation-level Claude that dispatches waves) is respon
 - Removing worktrees post-merge
 - Updating backlog + memory after each merge
 - Updating CHANGELOG.md
+- **Per-release doc-honesty pass — every spec doc's `**Status:**` /
+  front-matter banner is in scope, not just the living docs.** The
+  per-release reconciliation MUST re-sweep the *static* spec-corpus
+  Status/NOTE headers (Docs 01–25), the README "Project Status"/Roadmap,
+  Doc 07's index, and any root-level report — not only the living set
+  (ROADMAP/CHANGELOG/Doc 00 §11/GATE/metrics). Each spec's Status line
+  reads "Implemented vX / Planned vX / Spec-only" and is reconciled to
+  shipped reality at every `vX.Y.0` tag. (Root cause of the 2026-05-16
+  `DOCS-CURRENT-WITH-NOTES` finding: the living docs were reconciled
+  per-release but the static front-matter was frozen at the v1.0 pass and
+  drifted two minors stale — a first-contact-surface lie. The same
+  verify-vs-shipped rigor the living docs already get applies to every
+  Status banner.)
 - Surfacing learned lessons as new `feedback_*.md` memory entries
 
 ### 11.1 Mandatory post-merge verification (v1.1.0 — PD-5)
