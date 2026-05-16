@@ -41,7 +41,21 @@
         ],
         "mimetypes": [
           "text/x-fsm-lang"
-        ]
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "fsm-lang",
+        "scopeName": "source.fsm",
+        "path": "./syntaxes/fsm-lang.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "fsm-lang",
+        "path": "./snippets/fsm-lang.json"
       }
     ],
     "configuration": {

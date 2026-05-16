@@ -1,0 +1,113 @@
+{
+  "Machine": {
+    "prefix": "machine",
+    "body": [
+      "machine ${1:Name} {",
+      "    context {",
+      "        ${2:field}: ${3:u32} = ${4:0};",
+      "    }",
+      "",
+      "    events { ${5:EVENT} }",
+      "",
+      "    initial ${6:Idle}",
+      "",
+      "    state ${6:Idle} {",
+      "        on ${5:EVENT} -> ${7:Next}",
+      "    }",
+      "",
+      "    state ${7:Next} {",
+      "        $0",
+      "    }",
+      "}"
+    ],
+    "description": "New FSM machine declaration"
+  },
+  "State": {
+    "prefix": "state",
+    "body": [
+      "state ${1:Name} {",
+      "    entry: { ${2:onEntry();}  }",
+      "    exit:  { ${3:onExit();} }",
+      "",
+      "    on ${4:EVENT} -> ${5:Target};",
+      "    $0",
+      "}"
+    ],
+    "description": "New simple state"
+  },
+  "Composite State": {
+    "prefix": "composite",
+    "body": [
+      "composite ${1:Name} {",
+      "    initial ${2:Sub}",
+      "",
+      "    state ${2:Sub} {",
+      "        $0",
+      "    }",
+      "}"
+    ],
+    "description": "New composite state"
+  },
+  "Parallel State": {
+    "prefix": "parallel",
+    "body": [
+      "parallel ${1:Name} {",
+      "    region ${2:First} {",
+      "        initial ${3:Idle}",
+      "        state ${3:Idle} { $0 }",
+      "    }",
+      "",
+      "    region ${4:Second} {",
+      "        initial ${5:Idle}",
+      "        state ${5:Idle} { }",
+      "    }",
+      "}"
+    ],
+    "description": "New parallel state with two regions"
+  },
+  "Transition with guard": {
+    "prefix": "on",
+    "body": [
+      "on ${1:EVENT} [${2:guard()}] -> ${3:Target};"
+    ],
+    "description": "Transition with guard"
+  },
+  "After timer": {
+    "prefix": "after",
+    "body": [
+      "after ${1:1000}ms -> ${2:Timeout};"
+    ],
+    "description": "One-shot timer transition"
+  },
+  "Every timer": {
+    "prefix": "every",
+    "body": [
+      "every ${1:100}ms: { ${2:poll();} }"
+    ],
+    "description": "Periodic timer with inline action"
+  },
+  "Guard with else": {
+    "prefix": "choice",
+    "body": [
+      "choice ${1:Name} {",
+      "    [${2:condition()}] -> ${3:Branch1};",
+      "    [else]             -> ${4:Branch2};",
+      "}"
+    ],
+    "description": "Choice pseudo-state with branches"
+  },
+  "Pure extern guard": {
+    "prefix": "pure extern",
+    "body": [
+      "pure extern ${1:checkCondition}(${2:threshold: u32}) : bool"
+    ],
+    "description": "Pure extern guard declaration"
+  },
+  "Extern action": {
+    "prefix": "extern",
+    "body": [
+      "extern ${1:doAction}(${2:param: u32})"
+    ],
+    "description": "Extern action declaration"
+  }
+}

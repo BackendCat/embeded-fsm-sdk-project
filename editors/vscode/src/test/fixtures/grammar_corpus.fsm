@@ -1,0 +1,26 @@
+language fsm 2.0
+
+/// Doc comment line — this is the `///` documentation scope.
+// Plain line comment — the `//` (not `///`) scope.
+/* block
+   comment */
+machine Sample {
+    context {
+        count: u32 = 0;
+    }
+
+    events { GO }
+
+    initial Idle
+
+    extern pure checkReady() : bool
+
+    state Idle {
+        entry: { resetCount(); }
+        on GO [count > 3] -> Active;
+    }
+
+    state Active {
+        after 1000 ms -> Idle;
+    }
+}
