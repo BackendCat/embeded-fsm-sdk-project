@@ -39,3 +39,30 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace
+
+  # Software-composition analysis (RustSec advisory scan). Part of the
+  # pre-tag reliability checklist (Doc 00 §11.48 — operationalises the
+  # self-dropped v1.0 AUDIT_2026_05_14 cargo-audit recommendation; it
+  # caught RUSTSEC-2026-0009 pre-v1.2.0-tag, §11.42).
+  #
+  # NON-OBVIOUS, PROVEN recipe: this job must NOT run on the project's
+  # pinned rustc 1.75 (rust-toolchain.toml). The 1.75-buildable
+  # cargo-audit 0.21.1 cannot parse the modern CVSS-4.0 advisory DB; a
+  # separate recent `stable` toolchain is required just to build/run
+  # cargo-audit. The 1.75 pin is unchanged — `stable` is additive and
+  # used ONLY for the auditor binary. Kept a DISTINCT job so it never
+  # gates the 1.75 build matrix above.
+  sca:
+    name: sca / cargo-audit (stable toolchain)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install a recent stable toolchain (additive; does not touch the 1.75 pin)
+        run: rustup toolchain install stable
+
+      - name: Install cargo-audit on stable
+        run: cargo +stable install cargo-audit --locked
+
+      - name: cargo audit
+        run: cargo audit

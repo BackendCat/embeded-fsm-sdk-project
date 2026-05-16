@@ -14,24 +14,29 @@ retired to `deprecated::DeprecatedCode` in v1.1 (defer runtime shipped)
 and `FSM-W0500` in v1.2-FU-DEAD-CODES (vestigial, never emitted), each
 −1. Retired codes are not live variants and so are not rows here; their
 numbers are permanent and they still parse in suppression / `allow`
-contexts (Doc 10 §14). _Note: the `FSM-E0903` row below is a pre-existing
-v1.1 drift — it was retired but the row was never removed; left as-is,
-out of this wave's scope, flagged for the next coverage-map pass._
+contexts (Doc 10 §14). _Note: the `FSM-E0903` row below was a pre-existing
+v1.1 drift (retired but the row was never removed); **reconciled in the
+v1.2 batched doc-honesty pass** — it is now a struck
+`~~FSM-E0903~~` RETIRED marker exactly like `~~FSM-W0500~~`, so the
+table no longer carries a live-looking row for a retired code._
 
 ## Summary
 
-Row counts over the table below (75 rows total): the table carries one
-struck `~~FSM-W0500~~` RETIRED marker and one stale `FSM-E0903` row (the
-pre-existing v1.1 drift noted above), so **live enum = 75 − W0500 − E0903
-= 73** (matches the `all_codes_matches_expected_count` lock test). G7
-"≥1 test per code" is judged over live codes only; the W0200 IMPLEMENT
-moved it Tested→ and added formal conformance coverage.
+Row counts over the table below (75 rows total): the table carries **two**
+struck RETIRED markers — `~~FSM-W0500~~` and `~~FSM-E0903~~` — which are
+**not** live variants, so **live enum = 75 − W0500 − E0903 = 73**
+(matches the `all_codes_matches_expected_count` lock test in
+`fsm-diagnostics`). G7 "≥1 test per code" is judged over live codes only;
+the W0200 IMPLEMENT moved it Tested→ and added formal conformance
+coverage. (The E0903 RETIRED marker keeps a note that the now-deprecated
+code still parses in suppression / `allow` — Doc 10 §14 — but it is no
+longer counted as a tested live code.)
 
 | Status      | Count |
 | ----------- | ----- |
-| Tested (rows with a test path) | 40 |
+| Tested (rows with a test path) | 39 |
 | **UNTESTED** | 34 |
-| RETIRED marker (`~~FSM-W0500~~`, not a live code) | 1 |
+| RETIRED markers (`~~FSM-W0500~~`, `~~FSM-E0903~~` — not live codes) | 2 |
 | **Total rows** | 75 |
 
 ## Per-code map
@@ -89,7 +94,7 @@ moved it Tested→ and added formal conformance coverage.
 | FSM-E0610 | Error | **UNTESTED** — feature-flag missing emission missing test |
 | FSM-E0750 | Error | **UNTESTED** — fork-target not parallel region missing test |
 | FSM-E0900 | Error | **UNTESTED** — completion-event chain too deep (runtime safety; needs runtime test) |
-| FSM-E0903 | Error | `crates/fsm-analyzer/src/checks/defer.rs` (unit test inside checker) |
+| ~~FSM-E0903~~ | — | **RETIRED** v1.1 (the `defer EVENT` runtime shipped, removing the v1.0 "defer not supported" hard-fail) → `deprecated::DeprecatedCode::E0903`. Not a live variant — excluded from the G7 live count. `crates/fsm-diagnostics/src/lib.rs::tests::deprecated_codes_display_and_parse` proves it still parses in suppression / `allow` (Doc 10 §14 rule 2). _(Was a stale live-looking row through v1.1; reconciled to a struck marker in the v1.2 batched doc-honesty pass — Doc 00 §11.47.)_ |
 | FSM-W0100 | Warning | **UNTESTED** — history-no-stored-no-default emission missing test |
 | FSM-W0101 | Warning | `crates/fsm-analyzer/tests/negative.rs::w0101_completion_after_else` |
 | FSM-W0200 | Warning | `crates/fsm-analyzer/tests/negative.rs::w0200_while_loop_in_transition_action_block`, `::w0200_for_loop_in_entry_action_block`, `::w0200_not_emitted_for_loop_free_action_block` (control), `tests/conformance/semantic/neg/004_loop_in_action/` |

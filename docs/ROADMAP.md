@@ -2,7 +2,7 @@
 
 **Status:** Living document. Updated each release; major edits are commit-tracked.
 **Owner:** TL/PM (in-conversation Claude under user-granted autonomy).
-**Last updated:** 2026-05-15.
+**Last updated:** 2026-05-16.
 
 This roadmap captures the strategic direction of FSM Studio beyond v1.0. It is informed by user product-strategy conversations, audit findings, and the spec corpus. Items are prioritized by user impact AND by what reduces the cost of subsequent features.
 
@@ -63,7 +63,7 @@ Adoption-blocking items first; UML completeness second.
 - **`likely` / `rare` transition annotations** → `__builtin_expect` codegen. ✅ **COMPLETE 2026-05-15** (W4 `300d1e4`): full vertical slice — contextual keyword (back-compat, lexer unchanged) → CST `BRANCH_HINT` → IR `TransitionObject.hint` (serde-default, schema-valid) → analyzer lowering → portable `<PFX>_LIKELY/_UNLIKELY` macro (`__builtin_expect` on GNU/clang, `(x)` fallback + `<PFX>_NO_BUILTIN_EXPECT` opt-out), both dispatch strategies, gcc -Werror -pedantic clean. Sim accepts+ignores (proven layout-only: sole `Motor.c` delta is the macro wrap; sim≡codegen + 5/5 traces unchanged). Spec'd in Doc 04 §8.8 + Doc 11 §28. +10 tests (589 total).
 
 ### Test + conformance hardening
-- Populate the 39 untested diagnostic codes with conformance fixtures (G7 evidence becomes 75/75 in the formal suite, not just crate-level).
+- Populate the untested diagnostic codes with conformance fixtures (G7 evidence becomes full formal-suite coverage, not just crate-level). _(Target is **all live codes**; the live count is now **73** — `FSM-E0903` retired v1.1, `FSM-W0500` retired v1.2; the original "75/75" wording predates those retirements. See `tests/conformance/COVERAGE_MAP.md` + Doc 00 §11.47.)_
 - Add cross-architecture gcc cross-compile test (ARM Cortex-M0 + AVR + RISC-V) for at least the Motor example.
 - Add a fuzzing harness for the parser (cargo-fuzz integration).
 
@@ -97,15 +97,27 @@ Codified post-release step (this section's own "How the roadmap evolves" rule). 
 
 ---
 
-## v1.2 — Developer tooling
+## v1.2 — Developer tooling — ✅ SHIPPED (pending tag `v1.2.0`, 2026-05-16, local)
 
-**Theme: Editor & IDE experience.**
+**Theme: The `fsm-lsp` Language Server.**
 
-- **LSP server** (Doc 14): `tower-lsp`-based. Hover, diagnostics, go-to-definition, completion, rename, code actions. Required substrate for VS Code + Web IDE.
-- **VS Code extension** (Doc 22): TextMate grammar (Doc 21 already drafted), LSP client wiring, diagram WebviewPanel using @elklayout/core.
-- **C++17 code generator** (Doc 12): wraps generated C with `extern "C"` + adds a CRTP class API for embedded C++ users. No-STL profile per Doc 12 §3.
+> **Re-scoped 2026-05-16 (user-endorsed; Doc 00 §11.40).** `v1.2.0` ships **the LSP server only** — large, cohesive, independently valuable, and the substrate everything else (VS Code, Web IDE) needs. The **VS Code extension moved to v1.3** (its natural LSP-client home; Doc 27), the old v1.3 "Simulation & verification" theme to **v1.4**, and **C++17 codegen (Doc 12) to its own minor** (orthogonal backend, low coupling, lands in parallel/after without blocking anything). This keeps the validated small-tight-tagged cadence (v1.0/v1.1) and the post-v1.1 retrospective's LSP-first feed-forward; a mega-v1.2 (LSP + VS Code + C++17) would contradict the shippable-increment pattern. The re-version used this doc's own "propose-with-rationale" mechanism (§"How the roadmap evolves") under delegated product-owner autonomy; reversible.
 
-### v1.2 refinement — LSP-first sequencing (extraction pass, 2026-05-15)
+What shipped:
+- **LSP server** (`fsm-lsp`, Doc 14, Doc 26): `tower-lsp`-based; `initialize` (UTF-8/UTF-16 `positionEncoding` negotiation) + `publishDiagnostics` · `documentSymbol` · `foldingRange` · `hover` · `definition` · `completion` · `references` · `prepareRename`/`rename` · `semanticTokens` (full+range) · `codeAction` · `inlayHint` — the full L1–L7 epic. **All fed by ONE `analyze()`** byte-consistent with `fsm check` (editor squiggles can never disagree with the CLI), `tower-lsp`-client behaviourally tested, phase-audited (L1 + L5, both PROCEED with structural verification), `#![forbid(unsafe_code)]` workspace 10/10. Single-file in v1.2 (cross-file workspace intelligence is v1.3 with the Web IDE story). Detail: CHANGELOG `[1.2.0]`, Doc 00 §11.32–§11.38.
+- v1.2-gate debt cleared: FU#67 (`fsm.toml [compiler] allow/deny` now wired), FU#68 (`unreachable_pub` self-enforcing), DRIFT-2 (one byte→line/col core), DRIFT-1/-3/-4/-5 (Doc 20 reconciled to shipped reality), FU-DEAD-CODES (W0200 implemented, W0500 retired — live code count **73**), SEC-FU (RUSTSEC-2026-0009 eliminated; SCA wired into CI). Doc 00 §11.41–§11.48.
+
+Known v1.2 limitations / accepted-tracked debt:
+- `analyzer → parser-CST coupling` (~15 files) deferred out of the release critical path to a tracked post-v1.2 wave — arch-audit-rated ship-acceptable & non-behavioural; a big refactor of the most behaviourally-critical crate at a release boundary is worse-EV (v1.1 shipped the same debt class tracked the same way). Doc 00 §11.49.
+- Cross-file/workspace LSP intelligence, the `wasm32` build of `fsm-lsp`, and `workspaceSymbol` remain v1.3 (no in-tree project-index substrate; single-file in v1.2, shipping Doc 14 §8's own cross-file degradation message). Doc 26 §9.
+
+See CHANGELOG `[1.2.0]` for the full surface and `docs/00-Decisions-And-Reconciliation.md` §11.32–§11.49 for the implementation-time decisions log. `docs/GATE_VERIFICATION_v1_2.md` (canonical gate evidence, citing live code count **73**) is authored at tag-time.
+
+### v1.2 — what was deliberately NOT in this minor (moved out by the 2026-05-16 re-scope)
+- **VS Code extension** → **v1.3** (Doc 27): an LSP client — its language intelligence comes free over `vscode-languageclient` now the LSP shipped; only the diagram Webview is substantive-new.
+- **C++17 code generator** (Doc 12) → **its own minor**: wraps the already-correct C emitter with `extern "C"` + a CRTP class API (no-STL profile per Doc 12 §3). Self-contained, low coupling — lands in parallel/after without blocking anything.
+
+### v1.2 refinement — LSP-first sequencing (extraction pass, 2026-05-15 — historical context for the re-scope above)
 
 The v1.1 retrospective feed-forward (b) recommended LSP-first over C++17; the extraction-first-for-epics discipline (FSM-PROC-SUBAGENT) then produced a deep-extraction architecture pass scoped against the *current code at HEAD `0a657d4`*. Result: **`docs/26-LSP-Architecture.md`** (FSM-ARCH-LSP v1.0.0) — the authoritative LSP crate shape + wave plan; it refines (does not contradict) Doc 20 §9.
 
@@ -129,14 +141,36 @@ Phase-boundary audits (FSM-PROC-SUBAGENT §11.3) after L1 and after L5.
 
 ---
 
-## v1.3 — Simulation & verification
+## v1.3 — VS Code extension
+
+**Theme: First-class editor experience on top of the shipped LSP.**
+
+Re-scoped here 2026-05-16 (Doc 00 §11.40): the VS Code extension is the natural consumer of the v1.2 LSP server. Architecture + wave plan: **`docs/27-VSCode-Extension-Architecture.md`** (FSM-ARCH-VSCE) — the V1–V6 plan + a capability-reuse map (all language intelligence comes **free** over `vscode-languageclient` now the LSP shipped; only the ELK diagram Webview is substantive-new) + a Doc-22-vs-shipped-LSP reconciliation table.
+
+- **VS Code extension** (Doc 22 / Doc 27): packaged extension wiring `vscode-languageclient` to `fsm-lang-server`, the Doc 21 TextMate grammar, syntax/semantic highlighting, and a diagram `WebviewPanel` (ELK-laid-out). Per Doc 27 V1–V6.
+- **`wasm32` build of `fsm-lsp`** (Doc 26 §9): the analysis core is tokio-free and WASM-compatible by design; this is the compile/packaging work that also unlocks the Web IDE.
+- **Cross-file / workspace LSP intelligence** (Doc 26 §4.6/§9): the project-index substrate enabling cross-file `definition`/`references`/`rename`, `workspaceSymbol`, and the startup workspace scan — single-file was the explicit v1.2 contract; this is where it grows up (paired with the Web IDE multi-file story).
+
+---
+
+## v1.4 — Simulation & verification
 
 **Theme: Trustable behavioral validation.**
+
+> Was "v1.3 — Simulation & verification"; pushed to v1.4 by the 2026-05-16 re-scope (Doc 00 §11.40) when the VS Code extension took the v1.3 slot. Content unchanged.
 
 - **Simulator WebSocket protocol** (Doc 13): JSON-RPC 2.0 server lets VS Code / Web IDE drive the simulator interactively. Step-debugging, breakpoints, watchpoints.
 - **Web IDE** (Doc 05): Monaco editor + WASM-compiled toolchain + ELK-laid-out diagram. Demo target: edit FSM in browser, immediate diagram, immediate trace.
 - **Model checking integration**: dispatch every reachable state×event pair, prove deadlock-free; report unreachable transitions (extend the existing dead-transition analyzer).
 - **Trace replay & differential testing**: capture a trace from one v1.x; replay against a new v1.y; flag any divergence — protects against silent semantic drift across releases.
+
+---
+
+## C++17 code generator — its own minor (between v1.3 and v2.0; orthogonal, unscheduled)
+
+Re-scoped out of v1.2 (Doc 00 §11.40) into a self-contained minor of its own — it does not block, and is not blocked by, the LSP/VS Code/simulation line.
+
+- **C++17 code generator** (Doc 12): wraps the already-correct generated C with `extern "C"` + a CRTP class API for embedded C++ users. No-STL profile per Doc 12 §3. Low coupling — no new pipeline semantics; may land in parallel with any of the above.
 
 ---
 
@@ -176,9 +210,10 @@ See `docs/00-Decisions-And-Reconciliation.md` §10 + §11 for the full set of re
 
 ## How the roadmap evolves
 
-- After each tag (v1.0, v1.1, ...): pre-tag audit + post-tag retrospective update this doc with empirical lessons. v1.1 may get reshuffled based on what v1.0 customers want.
+- After each tag (v1.0, v1.1, v1.2, ...): pre-tag audit + post-tag retrospective update this doc with empirical lessons. Later minors may get reshuffled based on what current customers want.
 - Strategic conversations with the user (recorded in `memory/project_user_messages_*.md`) feed into roadmap revisions.
 - Audit findings drive priority shifts: a P1 from a fresh audit that affects user value typically gets fast-tracked into the next minor.
+- **Worked example (2026-05-16, Doc 00 §11.40):** v1.2 was re-scoped from a mega-minor (LSP + VS Code + C++17) to LSP-only via the propose-with-rationale process below — VS Code → v1.3, the old v1.3 "Simulation & verification" → v1.4, C++17 → its own minor; user-endorsed, reversible. This is the mechanism working as designed, not an exception to it.
 
 If you (a future maintainer / agent / contributor) think a feature should jump versions, propose the move with: (a) what user value it unlocks, (b) what dependency chain it sits on, (c) what risk it adds. The orchestrator weighs and updates.
 

@@ -399,6 +399,40 @@ pub struct Scope {
 // agree) — not a Hindley-Milner environment.
 ```
 
+> **DRIFT-5 — reality check (§5.4 + §5.5 phase-narrative).** DRIFT-4
+> reconciled the §5.2/§5.3 *layout/types* and noted the §5.1/§5.4/§5.5
+> phase-narrative survives only as the *conceptual* model, not an on-disk
+> `phase{1,2}_*` split; this is that follow-up, plus the stale per-step
+> code claims (verified read-only against the analyzer source at this
+> HEAD, annotate-not-delete; cf. §11.45/§11.46 and Doc 00 §11.47). The
+> **shipped pipeline is a single pass**, not a strict two-phase one:
+> `SymbolTable::build` (`crates/fsm-analyzer/src/symbol_table.rs:179`,
+> emitting the duplicate-name FSM-E0020..E0024/E0025) → `checks::run_all`
+> (`crates/fsm-analyzer/src/checks/mod.rs` — name resolution first, then
+> the `checks/*` family in dependency order) → `lower_file`
+> (`crates/fsm-analyzer/src/lower/mod.rs:153`, AST→IR). The §5.4/§5.5
+> step-list below is the *design intent / conceptual grouping*, kept for
+> orientation; **two specific per-step claims are stale**:
+> - **§5.5 step 2 does NOT emit `FSM-E0301`.** Per Doc 00 **B-07** (and
+>   Doc 00 G-11) guarded completion transitions are *explicitly allowed*;
+>   `crates/fsm-analyzer/src/checks/completion.rs` states verbatim "the
+>   analyzer DOES NOT emit FSM-E0301" — that module instead emits
+>   `FSM-E0401` (composite external self-transition) and `FSM-W0101`
+>   (dead completion transition). Determinism (`checks/determinism.rs`)
+>   emits `FSM-E0300`/`W0300` as described; only the E0301 implication is
+>   wrong.
+> - **§5.5 step 3 (forward reachability → `FSM-E0400`) is NOT
+>   implemented.** `FSM-E0400` ("unreachable state") is catalogued in
+>   `crates/fsm-diagnostics/src/lib.rs` but has **zero emission sites**
+>   in `crates/fsm-analyzer/` and is `UNTESTED` in
+>   `tests/conformance/COVERAGE_MAP.md` (there is no `checks/reachability`
+>   module; `util.rs`'s "reachable" helper is just an AST state iterator,
+>   not a reachability analysis). It is a documented-but-unimplemented
+>   step, recorded here (the prose-vs-code / P0-1 honesty discipline) —
+>   not silently presented as shipped. Step 1 (type checking,
+>   `checks/type_check.rs`) and step 4 (history/fork/join invariants,
+>   `checks/history.rs` + `checks/parallel.rs`) are accurate.
+
 ## 5.4 Phase 1 — Structural Validation
 
 Walk the AST in declaration order. For each declaration:
@@ -826,10 +860,16 @@ This means the Web IDE has zero backend dependency — it runs fully in the brow
 > _Updated 2026-05-14 in v1.0 doc reconciliation per Doc 00 §11.1; see CHANGELOG._
 >
 > The foundation crate `fsm-diagnostics` (zero workspace deps; owns `Span`,
-> `SourceLocation`, `Severity`, `DiagnosticCode` — 75 variants — and
-> `Diagnostic`) was added in Wave 1.0 / commit `db5ef83` to break cyclic
-> dep risk. Every pipeline crate consumes it instead of redefining
-> diagnostic types locally (rust-analyzer / Roslyn precedent).
+> `SourceLocation`, `Severity`, `DiagnosticCode` — 75 variants *at Wave
+> 1.0 / `db5ef83`* — and `Diagnostic`) was added in Wave 1.0 / commit
+> `db5ef83` to break cyclic dep risk. Every pipeline crate consumes it
+> instead of redefining diagnostic types locally (rust-analyzer / Roslyn
+> precedent). _(Forward note: the **live** `DiagnosticCode` count is now
+> **73** — `FSM-E0903` retired v1.1, `FSM-W0500` retired v1.2 to
+> `deprecated::DeprecatedCode`; the historical "75 at `db5ef83`" above is
+> left intact as a pinned statement. See `tests/conformance/COVERAGE_MAP.md`
+> + Doc 00 §11.47; the `all_codes_matches_expected_count` lock test is the
+> live source of truth.)_
 >
 > v1.0 ships **9 crates** (added `fsm-diagnostics`). The crates
 > `fsm-lsp`, `fsm-codegen-cpp`, and `fsm-wasm` previously listed are

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-05-16
+
+**Theme: Developer tooling — the `fsm-lsp` Language Server.**
+
+> **v1.2 re-scoping (user-endorsed; `docs/00-Decisions-And-Reconciliation.md` §11.40):** `v1.2.0` ships **the LSP server only**. The VS Code extension moved to **v1.3** (its natural LSP-client home; architecture in `docs/27-VSCode-Extension-Architecture.md`), the old v1.3 "Simulation & verification" theme to **v1.4**, and C++17 codegen (Doc 12) to its **own minor**. This keeps the validated small-tight-tagged cadence (v1.0/v1.1) and the post-v1.1 retrospective's LSP-first feed-forward; a mega-v1.2 would contradict the shippable-increment pattern. Reversible via the ROADMAP's own re-versioning mechanism.
+
 ### Added
 
 - **`fsm-lsp` — Language Server (LSP) spine** (v1.2-LSP-L1): a new
@@ -203,6 +209,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this wave the v1.2 LSP capability set is **feature-complete**. See
   `docs/26-LSP-Architecture.md` §8 L7 and
   `docs/00-Decisions-And-Reconciliation.md` §11.38.
+- **`FSM-W0200` ("loop in action block") is now emitted** (FU-DEAD-CODES):
+  the code was catalogued but had **zero emission sites** anywhere in the
+  toolchain (a documented diagnostic that could never fire — surfaced
+  writing the L7 `codeAction`). Four normative docs mandate it (Doc 02
+  §9.2, Doc 04 §8.7.2, Doc 11 §18, Doc 10's W0200 catalog entry), so a
+  single emission site was added (`fsm-analyzer` `checks/action_lint.rs`:
+  one `FSM-W0200` per `while`/`for` loop whose ancestor chain contains an
+  `ACTION_BLOCK`) — a style nudge, not an error; loops remain permitted.
+  Formal conformance fixture `tests/conformance/semantic/neg/004_loop_in_action/`
+  added (suite 25→26). See
+  `docs/00-Decisions-And-Reconciliation.md` §11.47.
+
+### Removed
+
+- **`FSM-W0500` ("extern declared but never used") retired** (FU-DEAD-CODES):
+  it was vestigial — no normative spec mandates it and it was **emitted
+  nowhere**. Moved to `fsm_diagnostics::deprecated::DeprecatedCode::W0500`;
+  it is **not a behavioural break** — it still parses in suppression
+  annotations and `fsm check --allow FSM-W0500` / `fsm.toml [compiler]
+  allow` (Doc 10 §14 rule 2 — the FU#67 allow/deny contract is preserved,
+  test-pinned). The live `DiagnosticCode` count moves **74 → 73** (the
+  `all_codes_matches_expected_count` lock test). See
+  `docs/00-Decisions-And-Reconciliation.md` §11.47.
+
+### Security
+
+- **RUSTSEC-2026-0009 eliminated** (SEC-FU; `time` ≤0.3.36 DoS via stack
+  exhaustion, CVSS 6.8) — found by a pre-tag SCA scan (itself a
+  *self-dropped* recommendation from the v1.0 `AUDIT_2026_05_14` pass, now
+  operationalised; see *Known limitations* and Doc 00 §11.48). `time` was
+  transitive-only via `jsonschema 0.17 ← fsm-ir` (the W0 IR-schema gate).
+  The advisory's literal remedy (`time ≥0.3.47`) was infeasible — every
+  such `time` needs rustc ≥1.88 / Cargo `edition2024`, which the
+  deliberate load-bearing **1.75** toolchain pin cannot parse. Fixed at
+  the **root** by bumping `jsonschema` 0.17 → 0.22 in
+  `crates/fsm-ir/Cargo.toml` (0.22.0 dropped the `time` edge outright;
+  MSRV 1.70 still satisfies the 1.75 pin; the deprecated `JSONSchema::compile`
+  shim migrated to `jsonschema::options()/.build()/Validator`). W0
+  schema-gate behaviour byte-identical; re-scan reports **0
+  vulnerabilities**; the 1.75 pin is unchanged (the stable toolchain is
+  additive — it builds `cargo-audit` only). See
+  `docs/00-Decisions-And-Reconciliation.md` §11.42.
+
+### Fixed
+
+- **`fsm.toml [compiler] allow/deny` was parsed but never applied** (FU#67,
+  mild P0-1 silent-no-op class — a documented option that did nothing):
+  `CompilerSection.{allow,deny}` are now finalized in `cmd::check` and
+  projected post-analysis by `diagnostics::apply_allow_deny` (allow →
+  suppressed/exit 0; deny → error/exit 1; allow+deny → allow wins; an
+  unknown code → loud exit-4; a retired code → accepted; a control code →
+  unchanged), matched on the parsed `DiagnosticCode` (never a substring
+  match on source). +13 tests. Doc 18 §6/§6.1. See
+  `docs/00-Decisions-And-Reconciliation.md` §11.41.
 
 ### Changed
 
@@ -213,16 +273,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged). The `unreachable_pub` lint wiring is deferred — residual
   warnings are confined to shared integration-test helpers, not `src/`
   (see `docs/00-Decisions-And-Reconciliation.md` §11.31).
+- **`unreachable_pub` is now wired workspace-wide and self-enforcing**
+  (FU#68): §11.31's manual sweep narrowed the 170 over-`pub` `src/` items
+  but deferred the lint. `[workspace.lints.rust] unreachable_pub = "warn"`
+  is now set with every crate opting in (`[lints] workspace = true`) and
+  the shared per-test-binary helpers explicitly `#![allow(unreachable_pub)]`'d
+  (the legitimate test-only idiom); the 14 residuals it surfaced (the
+  `fsm-lsp` `semantic_tokens.rs` legend/modifier consts) were downgraded
+  `pub → pub(crate)` (no external consumer, behaviour-inert). Combined with
+  the quad's `clippy -D warnings`, accidental `src/` over-`pub` now fails
+  the gate instead of silently re-accreting. See
+  `docs/00-Decisions-And-Reconciliation.md` §11.43.
+- **The two divergent byte→line/col implementations converged** (DRIFT-2):
+  `fsm_analyzer::util::compute_line_col` (bytes, 1-based) and
+  `fsm_cli::cmd::check::line_col` (Unicode scalars, 1-based) now both
+  delegate to ONE
+  `fsm_diagnostics::compute_line_col(src, pos, LineColUnit::{Byte|Scalar})`
+  core (each behaviour-identical to its old self — proven byte-for-byte on
+  all three contracts incl. multibyte, plus a cold-verified quad). The
+  LSP's `position.rs::LineIndex` is a structurally different algorithm
+  (precomputed line-start table, 0-based, encoding-negotiated) and is
+  **deliberately left-and-explained, not folded in** (forcing it into the
+  linear-scan core would worsen clarity for zero behaviour gain — the new
+  `SUBAGENT_CONVENTIONS` §10 refactor-to-number anti-pattern, which
+  DRIFT-2 codifies by practising). No new deps. See
+  `docs/00-Decisions-And-Reconciliation.md` §11.44.
 - Docs: `docs/20-Architecture-Overview.md` reconciled to shipped reality
-  (DRIFT-1). §4.5 / §12.2 advertised an incremental-CST-reparse pipeline
-  and a `parse_incremental(old_tree, edit)` API that **do not exist** —
-  `fsm-parser` does a **full** re-parse only (`parse`/`parse_with_limits`/
-  `parse_with_tokens`). These (plus the §4.1 + ADR-004 mentions) are now
-  explicitly annotated as a **v1.3+ deferred optimisation, not
-  implemented**, with the design intent preserved as the future target;
-  the v1.2 LSP epic deliberately built on full re-parse-on-debounce (Doc
-  26 §4.3–§4.5). No code change. See
-  `docs/00-Decisions-And-Reconciliation.md` §11.39.
+  (DRIFT-1/-3/-4/-5; annotate-not-delete, design intent labelled
+  historical, every claim cited to `file:line`). §4.5 / §12.2 advertised
+  an incremental-CST-reparse pipeline and a `parse_incremental(old_tree,
+  edit)` API that **do not exist** — `fsm-parser` does a **full** re-parse
+  only (`parse`/`parse_with_limits`/`parse_with_tokens`); these (plus §4.1
+  + ADR-004 and the §12.3 `analyze_incremental` analogue) are annotated as
+  a **v1.3+ deferred optimisation, not implemented**, design intent
+  preserved as the future target (DRIFT-1 §11.39, DRIFT-3 §11.45). §4.2
+  module layout / §4.3 `ParseResult` and §5.2 analyzer layout / §5.3
+  `AnalysisResult`/`SymbolTable`/`Scope` types reconciled — the §5.2
+  listing's two-`phase{1,2}_*` directory tree, `ir_builder.rs`, `tests.rs`
+  and `DiagnosticAccumulator` do not exist; the shipped analyzer is flat
+  (`symbol_table.rs` + a `checks/` family + the AD-3 `lower/` tree;
+  diagnostics are a plain `Vec<Diagnostic>`), the two-phase split kept as
+  the *conceptual* model (DRIFT-3 §11.45, DRIFT-4 §11.46). §5.4/§5.5's
+  strict-2-phase narrative + stale per-step code claims reconciled the
+  same way (DRIFT-5): the real pipeline is `SymbolTable::build` →
+  `checks::run_all` → `lower_file`; **`FSM-E0301` is not emitted** (Doc 00
+  B-07 explicitly allows guarded completions — `checks/completion.rs`) and
+  the §5.5 forward-reachability/`FSM-E0400` step is **not implemented**
+  (catalogued, zero emission sites, `COVERAGE_MAP` `UNTESTED`). The v1.2
+  LSP epic deliberately built on full re-parse-on-debounce (Doc 26
+  §4.3–§4.5). No code change. See
+  `docs/00-Decisions-And-Reconciliation.md` §11.39 / §11.45 / §11.46.
+- **`docs/processes/SUBAGENT_CONVENTIONS.md` §10** gains the
+  *refactor-to-number anti-pattern* row (the one design take-away of the
+  external-kit evaluation, Doc 00 §11.48): do not split/merge code purely
+  to hit a metric if it worsens readability/clarity; if no clean
+  behaviour-safe restructuring exists, leave the violation and **explain
+  why** — exactly what DRIFT-2's left-and-explained LSP `LineIndex`
+  practised.
+- **`.github/workflows/ci.yml`** gains an SCA (software-composition-analysis)
+  job running `cargo audit` on a **separate recent stable toolchain**
+  (`rustup toolchain install stable` → `cargo +stable install cargo-audit
+  --locked` → `cargo audit`) — the 1.75-pinned `cargo-audit 0.21.1`
+  cannot parse the modern CVSS-4.0 advisory DB, so it is a distinct job
+  that does **not** gate the 1.75 build matrix. Operationalises the
+  self-dropped v1.0 audit recommendation that caught RUSTSEC-2026-0009
+  pre-tag (Doc 00 §11.48 / §11.42).
+
+### Known limitations (v1.2) — documented, diagnosed, tracked / accepted debt
+
+- **`analyzer → parser-CST coupling` (~15 files) is deferred — accepted,
+  tracked debt.** The architecture audit rated it explicitly
+  *ship-acceptable, non-behavioural* P1. A ~15-file refactor of the most
+  behaviourally-critical crate (`fsm-analyzer`) **at a release boundary**
+  is worse-EV than doing it cleanly post-tag (a tracked v1.2.1/early-v1.3
+  wave). **v1.1.0 shipped the same arch-debt class tracked + documented in
+  its `GATE_VERIFICATION_v1_1.md`** — deferring here is precedent-consistent
+  and lower-risk; it will be recorded in `GATE_VERIFICATION_v1_2.md` as
+  accepted-tracked-debt. Doc 00 §11.49.
+- **Live diagnostic-code count is 73** (not 75 — `FSM-E0903` retired in
+  v1.1 when the `defer` runtime shipped, `FSM-W0500` retired in v1.2 as
+  vestigial; each −1). The frozen `GATE_VERIFICATION_v1_0.md` /
+  `_v1_1.md` correctly cite "75" / "36/75" *at their pinned commits* (a
+  frozen attestation is not rewritten); `GATE_VERIFICATION_v1_2.md`
+  (authored at tag-time) will cite 73. Doc 00 §11.47.
+- **Conformance coverage:** 26/73 codes have formal `tests/conformance/`
+  fixtures (W0200 added one this release); the rest are exercised by
+  crate-level negative tests. No behavioural gap; formal-suite closure
+  remains tracked.
+- **CI matrix not yet exercised:** `.github/workflows/ci.yml` (now incl.
+  the SCA job) is configured but has not run against v1.2 commits (the
+  repo is unpushed by design — the user controls the remote). Pushing the
+  tag to exercise the matrix is the documented post-tag action.
+- **v1.2 re-scope:** the VS Code extension is **v1.3** (Doc 27), not part
+  of `v1.2.0`; C++17 codegen is its own minor; the old v1.3 "Simulation &
+  verification" theme is **v1.4**. Doc 00 §11.40.
 
 ## [1.1.0] — 2026-05-15
 
@@ -354,6 +498,7 @@ Pre-tag audits at `docs/AUDIT_*_2026_05_14.md`:
   AI-friendliness (`#![forbid(unsafe_code)]` everywhere; 14/14 Doc 00
   blockers traceable in code).
 
-[Unreleased]: https://github.com/BackendCat/embeded-fsm-sdk-project/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/BackendCat/embeded-fsm-sdk-project/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/BackendCat/embeded-fsm-sdk-project/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/BackendCat/embeded-fsm-sdk-project/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/BackendCat/embeded-fsm-sdk-project/releases/tag/v1.0.0

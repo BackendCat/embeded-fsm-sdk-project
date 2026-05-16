@@ -348,9 +348,13 @@ Code actions are offered when the cursor is within a diagnostic span.
 | FSM-E0107 (No initial) | `quickfix` | "Add initial declaration" | Inserts `initial FirstState` |
 | FSM-E0106 (Non-pure extern in guard) | `quickfix` | "Add `pure` to extern `X`" | Inserts `pure` modifier |
 | FSM-W0200 (Loop in action) | `quickfix` | "Suppress with comment" | Inserts `// fsm-lint:disable FSM-W0200` |
-| FSM-W0500 (Unused extern) | `quickfix` | "Remove unused extern `X`" | Deletes the extern declaration |
+| ~~FSM-W0500 (Unused extern)~~ | ~~`quickfix`~~ | ~~"Remove unused extern `X`"~~ | ~~Deletes the extern declaration~~ |
 | FSM-E0300 (Nondeterminism) | `quickfix` | "Add priority clauses" | Adds `priority 1` / `priority 2` to conflicting transitions |
 | FSM-E0022 (Duplicate event) | `quickfix` | "Remove duplicate event `X`" | Deletes the second declaration |
+
+> **Reconciliation (FU-DEAD-CODES, Doc 00 §11.47; annotate-not-delete — the DRIFT pattern).** This table is the *aspirational* §9 catalogue; what L7 actually ships is narrower and recorded in Doc 00 §11.38 — only **FSM-E0107** and **FSM-E0022** quick-fixes are produced (provably-mechanical), the rest scoped-out-and-flagged. Two §9 rows specifically:
+> - **`FSM-W0500` (struck above) is RETIRED** (→ `fsm_diagnostics::deprecated::DeprecatedCode::W0500`, v1.2 — vestigial, no normative spec, emitted nowhere): no diagnostic carries it, so this quick-fix row is dead by construction and is left struck for provenance, not deleted.
+> - **`FSM-W0200` is now genuinely backed** (v1.2 FU-DEAD-CODES IMPLEMENTed it — `fsm-analyzer` `checks/action_lint.rs`, one emission per loop in an action block; conformance `semantic/neg/004_loop_in_action/`). Its row is real, though L7 still scoped its quick-fix OUT (a suppress-comment insertion was judged a non-mechanical UX choice, not a corrupting one — Doc 00 §11.38).
 
 ### Refactor actions (cursor-position, not tied to diagnostics)
 

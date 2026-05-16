@@ -97,6 +97,8 @@ If any fails, the wave does NOT commit; it fixes the issue first. If it cannot f
 
 `--release` is forbidden unless a specific test requires it. Dev builds only by default.
 
+**Pre-tag reliability checklist (in addition to the per-wave quad):** an SCA (software-composition-analysis) scan — `cargo audit` on a *separate recent stable toolchain* (the pinned 1.75 cargo-audit cannot parse the CVSS-4.0 advisory DB) — is part of the pre-tag gate, wired as the distinct `sca` job in `.github/workflows/ci.yml`. It must report 0 vulnerabilities before a `vX.Y.0` tag (Doc 00 §11.48/§11.42).
+
 For waves touching codegen, an additional manual smoke is recommended when feasible:
 
 ```bash
@@ -218,6 +220,7 @@ The agent's context window is precious. Briefs maximize useful information densi
 | Auto-accepting insta snapshots without review | Locks in wrong output | Read each .snap.new; accept only verified-correct |
 | Editing fsm.toml or Cargo.toml in a scope-creep way | Workspace surface changes need dedicated waves | Defer to a workspace-config wave |
 | Touching another agent's worktree | Cross-contamination + race | NEVER. Each agent owns its own worktree. |
+| Refactoring to hit a number (split/merge code to satisfy a metric — CC ≤ N, a dedup count, "no two impls") when the restructure worsens readability/clarity | Optimises a proxy at the cost of the real goal; a contorted "deduplicated" or "low-CC" form is harder to read and maintain than the honest violation | Refactor only when a clean behaviour-safe restructuring genuinely improves clarity. If none exists, **leave the violation in place and explain why** in a code comment + the §11/commit record (e.g. DRIFT-2 left the LSP `LineIndex` as a structurally-different 3rd impl, not folded into the converged byte/scalar core, because forcing it in would worsen clarity for zero behaviour gain — Doc 00 §11.44/§11.48). |
 
 ---
 
