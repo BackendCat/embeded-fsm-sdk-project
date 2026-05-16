@@ -44,6 +44,23 @@
 //! `deltaStartChar`/`length` in the negotiated `positionEncoding` via L1's
 //! one authoritative `LineIndex` (no second converter).
 //!
+//! v1.5 W-A2 adds [`verify`] (the **custom** `fsm/verify` request — NOT a
+//! standard LSP method, registered via `LspService::build().custom_method`,
+//! Doc 31 §1 W-A2 / §2). It is the **only** verification-bearing capability
+//! and it is a *pure frontend* of `fsm-verify`: it runs the SAME single
+//! [`crate::analysis::analyze`] reuse seam, then calls the IDENTICAL
+//! `fsm_verify::{verify, reachability_diagnostics}` public functions
+//! `crates/fsm-cli/src/cmd/verify.rs` calls, and marshals the returned
+//! `VerifyOutcome` into the SAME documented `fsm-verify/v1` JSON shape the
+//! CLI emits (editor ≡ CLI ≡ CI by construction — the differential
+//! oracle). It re-implements **NO** reachability / deadlock /
+//! transition-selection / guard-eval / completion / exploration logic — a
+//! second verifier is the cardinal regression the keystone-in-UI invariant
+//! (Doc 31 §2) forbids. The trigger is explicit + debounced + large-FSM-
+//! ceiling-guarded **client-side** (it is a request, never an
+//! auto-on-every-keystroke analysis), so this handler stays a stateless
+//! `Ir → outcome` projection — the minimal auditable keystone surface.
+//!
 //! L7 adds [`code_action`] (`textDocument/codeAction`, Doc 14 §9) and
 //! [`inlay_hints`] (`textDocument/inlayHint`, Doc 14 §11) — the final
 //! capabilities of the v1.2 LSP epic. Both are pure projections of the
@@ -72,3 +89,4 @@ pub mod references;
 pub mod rename;
 pub mod resolve;
 pub mod semantic_tokens;
+pub mod verify;

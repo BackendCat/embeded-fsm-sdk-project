@@ -45,6 +45,19 @@ fsm-ir = { path = "../fsm-ir" }
 # is byte-identical to the one `fsm-parser` produces (a divergent rowan
 # would make the trees incompatible).
 rowan = { workspace = true }
+# v1.5 W-A2 — THE single Rust-layer enabling change of the entire v1.5 epic
+# (Doc 31 §1 W-A2 / §2 the keystone-in-UI invariant; GT-4 verified this dep
+# was ABSENT before A2). The `fsm/verify` LSP request calls the EXACT same
+# `fsm_verify::{verify, reachability_diagnostics}` public functions
+# `crates/fsm-cli/src/cmd/verify.rs` calls — there is NO reachability /
+# deadlock / transition-selection / guard-eval / completion / exploration
+# logic re-implemented in `fsm-lsp`; the server only *calls into* this crate
+# and marshals its `VerifyOutcome` into the SAME documented `fsm-verify/v1`
+# JSON shape `verify.rs` builds (editor ≡ CLI ≡ CI by construction — the
+# differential oracle). A second verifier is the cardinal regression this
+# epic guards against. `fsm-verify` already `#![forbid(unsafe_code)]`, so
+# this dep edge adds NO new forbid-unsafe crate root (count unchanged).
+fsm-verify = { path = "../fsm-verify" }
 
 # LSP framework + async runtime. Sanctioned by Doc 26 §2.1 — `fsm-lsp` is
 # a developer-host tool, never compiled into firmware, so the embedded G2

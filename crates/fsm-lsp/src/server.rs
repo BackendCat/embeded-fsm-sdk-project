@@ -200,6 +200,43 @@ impl Backend {
                 .await;
         });
     }
+
+    /// `fsm/verify` — the v1.5 W-A2 **custom** LSP request (Doc 31 §1 W-A2 /
+    /// §2; registered via `LspService::build().custom_method`, NOT a
+    /// standard LSP method). The keystone-in-UI capability: it is a *pure
+    /// frontend* of `fsm-verify` — the SAME single `analyze` reuse seam,
+    /// then the IDENTICAL `fsm_verify::{verify, reachability_diagnostics}`
+    /// the CLI calls, marshalled into the SAME documented `fsm-verify/v1`
+    /// JSON the CLI emits (the differential oracle — editor ≡ CLI ≡ CI by
+    /// construction). It re-implements NO reachability / deadlock /
+    /// transition / guard / completion / exploration logic; that all lives
+    /// in `fsm-verify`, exactly as it does for `fsm verify` (Doc 31 §2 — a
+    /// second verifier is the cardinal regression).
+    ///
+    /// The trigger is explicit + debounced + large-FSM-ceiling-guarded
+    /// **client-side** (this is a request, never auto-on-keystroke), so the
+    /// handler is a stateless `params → outcome` projection. The (sync,
+    /// CPU-bound) `fsm-verify` call runs on `spawn_blocking` so a large
+    /// in-language model never blocks the LSP async executor (the bound is
+    /// `fsm-verify`'s own `max_states`/`max_steps` — an explosive model
+    /// returns `inconclusive` within the bound, never a hang). A malformed
+    /// request (missing `uri`/`text`) is an honest JSON-RPC invalid-params,
+    /// never a verify of empty/wrong input.
+    pub async fn verify_request(&self, params: serde_json::Value) -> RpcResult<serde_json::Value> {
+        let parsed = crate::capabilities::verify::VerifyRequestParams::from_value(&params)
+            .map_err(RpcError::invalid_params)?;
+        // Verification is synchronous + CPU-bound (bounded by `fsm-verify`'s
+        // own ceiling). Offload it so the async runtime stays responsive
+        // for other LSP traffic while a large model is explored — the
+        // standard "CPU work off the reactor" discipline.
+        tokio::task::spawn_blocking(move || crate::capabilities::verify::run_verify(&parsed))
+            .await
+            .map_err(|e| {
+                let mut err = RpcError::internal_error();
+                err.message = format!("fsm/verify worker join error: {e}").into();
+                err
+            })
+    }
 }
 
 #[tower_lsp::async_trait]

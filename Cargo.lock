@@ -509,6 +509,7 @@ dependencies = [
  "fsm-diagnostics",
  "fsm-ir",
  "fsm-parser",
+ "fsm-verify",
  "futures",
  "rowan",
  "serde_json",
