@@ -1,0 +1,34 @@
+// Acceptance fixture for case (a): a genuinely UNREACHABLE state.
+//
+// `Island` is declared but no transition anywhere targets it and it is not
+// the initial state, so no execution path can ever enter it. The
+// interpreter-driven exploration will never produce a configuration
+// containing `Island`, so the reachable-set fact (the honest backing for
+// FSM-E0400 — Doc 30 §1.3) must list `Island` as unreachable.
+//
+// The reachable part (Idle <-> Active) is deadlock-free, so the deadlock
+// verdict here is ProvenNoDeadlock — reachability and deadlock are
+// independent properties and this fixture isolates the reachability one.
+language fsm 2.0
+
+machine WithIsland {
+    events {
+        GO
+        BACK
+    }
+
+    initial Idle
+
+    state Idle {
+        on GO -> Active
+    }
+
+    state Active {
+        on BACK -> Idle
+    }
+
+    // Unreachable: nothing targets it, not initial.
+    state Island {
+        on GO -> Idle
+    }
+}

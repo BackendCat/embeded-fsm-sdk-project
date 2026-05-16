@@ -439,6 +439,7 @@ dependencies = [
  "fsm-lexer",
  "fsm-parser",
  "fsm-simulator",
+ "fsm-verify",
  "miette",
  "predicates",
  "serde",
@@ -538,6 +539,19 @@ dependencies = [
  "fsm-parser",
  "insta",
  "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "fsm-verify"
+version = "0.1.0"
+dependencies = [
+ "fsm-analyzer",
+ "fsm-diagnostics",
+ "fsm-ir",
+ "fsm-parser",
+ "fsm-simulator",
  "serde_json",
  "thiserror",
 ]

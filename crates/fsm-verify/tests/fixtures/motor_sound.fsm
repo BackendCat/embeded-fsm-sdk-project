@@ -1,0 +1,44 @@
+// Acceptance fixture for case (c) + (d) + (e): a SOUND machine.
+//
+// Motor-style start/stop/recover cycle. Every state is reachable; every
+// non-final state has at least one enabled transition (no guards — all
+// unconditional event transitions), so there is no deadlock anywhere in the
+// reachable space. There is no `final` state, so the machine runs forever
+// (cycling) — that is the opposite of a deadlock (always progress
+// available), and the explorer must `ProvenNoDeadlock` it within a generous
+// bound and find every state reachable.
+//
+// Used for:
+//   (c) deadlock-free ⇒ Verdict::ProvenNoDeadlock, all states reachable;
+//   (d) with max_states = 1 ⇒ Verdict::Inconclusive (the honest-bound
+//       guard: NOT a false ProvenNoDeadlock);
+//   (e) determinism: byte-equal --json over two runs.
+language fsm 2.0
+
+machine Motor {
+    context {
+        count: u32 = 0
+    }
+
+    events {
+        START
+        STOP
+        RESET
+    }
+
+    initial Idle
+
+    state Idle {
+        on START -> Running
+    }
+
+    state Running {
+        on STOP -> Stopped
+        on RESET -> Idle
+    }
+
+    state Stopped {
+        on START -> Running
+        on RESET -> Idle
+    }
+}

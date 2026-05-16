@@ -1,0 +1,49 @@
+// Acceptance fixture (a) / case (b): a GENUINE deadlock.
+//
+// `Trap` is reachable (Idle --GO--> Trap). Its only outgoing transition is
+// guarded `[ctx.gate == 1]`. `gate` defaults to 0 and is NEVER assigned by
+// any entry/exit/transition action anywhere in the machine, so on every
+// reachable path `ctx.gate == 0` — the guard is statically unsatisfiable on
+// the reachable context. `Trap` therefore has NO enabled transition for any
+// declared event and is NOT a final state ⇒ a real deadlock per Doc 08 §3.1
+// (no enabled transition ⇒ event discarded, configuration unchanged) +
+// Doc 30 §4.1's deadlock definition.
+//
+// Hand-verified against Doc 08 (the cross-check the §5.4 gate requires —
+// against the SPEC, not just "the simulator said so"):
+//   • Doc 08 §1: a transition is enabled iff source∈C ∧ trigger matches ∧
+//     guard true. From config {Trap}, event UNSTICK matches the only
+//     transition, but its guard `ctx.gate == 1` is false (gate≡0). So
+//     select_transitions = ∅.
+//   • Doc 08 §3.1: select_transitions = ∅ ⇒ RTC_step returns, config
+//     unchanged. No other declared event (GO) has a source in {Trap}.
+//   • Doc 08 §9.1: Trap is `simple`, not `final`; entering it enqueues a
+//     completion event, but Trap has no completion (`done ->`) transition,
+//     so the completion is discarded and the config is still {Trap} after
+//     the interpreter's drain. No pending completion remains.
+//   ⇒ {Trap} is a reachable, non-final, no-progress configuration = a
+//     deadlock. Witness: [GO].
+language fsm 2.0
+
+machine GuardTrap {
+    context {
+        gate: u8 = 0
+    }
+
+    events {
+        GO
+        UNSTICK
+    }
+
+    initial Idle
+
+    state Idle {
+        on GO -> Trap
+    }
+
+    // The sink. Reachable, not final, and its single guarded exit can never
+    // be taken on the reachable context.
+    state Trap {
+        on UNSTICK [ctx.gate == 1] -> Idle
+    }
+}

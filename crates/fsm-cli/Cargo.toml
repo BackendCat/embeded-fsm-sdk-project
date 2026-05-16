@@ -30,6 +30,11 @@ fsm-analyzer = { path = "../fsm-analyzer" }
 fsm-ir = { path = "../fsm-ir" }
 fsm-codegen-c = { path = "../fsm-codegen-c" }
 fsm-simulator = { path = "../fsm-simulator" }
+# v1.4-W1: the verification core, surfaced as the `fsm verify` subcommand
+# (the canonical pipeline interface — Doc 30 top-section TL decision +
+# the pipeline-before-UI bar). The CLI is a thin frontend over this lib;
+# the editor/LSP later reuse the SAME crate ⇒ CLI ≡ editor by construction.
+fsm-verify = { path = "../fsm-verify" }
 fsm-formatter = { path = "../fsm-formatter" }
 
 clap = { workspace = true }

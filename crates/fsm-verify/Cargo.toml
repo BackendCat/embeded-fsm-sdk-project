@@ -1,0 +1,42 @@
+[package]
+name = "fsm-verify"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "FSM Studio verification core — bounded explicit-state reachability + deadlock detection driving the shipped interpreter as the semantic oracle"
+
+# Inherits the workspace lint policy (root `[workspace.lints.rust]`):
+# `unreachable_pub = "warn"`. Doc 00 §11.4x (the §11.31 deferral closed).
+[lints]
+workspace = true
+
+[dependencies]
+# THE KEYSTONE (Doc 30 §4.1): the explorer DRIVES `fsm_simulator::Interpreter`
+# as the single, spec-conformant transition oracle. `fsm-verify` NEVER
+# re-implements transition selection / LCA / completion / guard evaluation —
+# that would be a forbidden second semantics (the P0-1 / MV5-1 anti-pattern).
+fsm-simulator = { path = "../fsm-simulator" }
+# Structural IR reads only (declared events, final-state kinds) — no
+# semantics. The IR is data; "which transition fires" stays in the
+# interpreter.
+fsm-ir = { path = "../fsm-ir", default-features = false }
+# Emitting the now-honestly-backed FSM-E0400 / FSM-W0602 reachability
+# diagnostics (Doc 30 §1.3 catalog-drift close).
+fsm-diagnostics = { workspace = true }
+# Deterministic digest of the interpreter snapshot: the snapshot is
+# all-Vec/BTreeMap/scalar, so canonical serde_json is byte-stable (the same
+# Doc 13 §11 wire-format contract trace.rs relies on). Visited-set keys are
+# digests, NOT retained full snapshots (the Doc 30 §3.2 memory foot-gun).
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# Acceptance tests parse + analyze real `.fsm` fixtures through the real
+# pipeline (Doc 30 §5.4 — behavioural acceptance on real FSMs, NOT
+# symbol-presence). These are the same crates `fsm-simulator`'s own
+# integration tests use as dev-deps for the identical reason.
+fsm-parser = { path = "../fsm-parser" }
+fsm-analyzer = { path = "../fsm-analyzer" }
