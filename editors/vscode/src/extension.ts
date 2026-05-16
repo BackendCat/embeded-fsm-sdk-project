@@ -51,6 +51,7 @@ import {
 } from "vscode-languageclient/node";
 
 import { registerCommands } from "./commands";
+import { registerVerify } from "./commands/verify";
 import { registerOpenDiagram } from "./diagram";
 import { FsmExplorerHandle, registerFsmExplorer } from "./tree";
 import { FsmErrorHandler } from "./crashRecovery";
@@ -143,6 +144,24 @@ export async function activate(
   // undefined). `getClient` reads the module-level `client` set by V1's
   // (unaltered) spawn path; this call adds command registrations only.
   registerCommands(context, {
+    getClient: () => client,
+    outputChannel,
+    restartServer,
+    extensionPath: context.extensionPath,
+  });
+
+  // v1.5 W-A1: register `fsm.verify` / `fsm.baseline` (Doc 31 §1 W-A1).
+  // Done HERE — before the no-binary early-return — for the SAME reason
+  // the V3 commands are: the verify/baseline data source is the `fsm` CLI
+  // (`fsm verify --json` / `fsm baseline --json`), NOT `fsm-lang-server`,
+  // so these commands are functional even with no language-SERVER binary
+  // (resolved by the SAME V3 `cliBinary.ts` seam, not the server
+  // resolver). An additive call site identical in shape to V3's
+  // `registerCommands` / V4's `registerOpenDiagram` — it adds two command
+  // registrations + a read-only result-doc provider + a reachability
+  // `DiagnosticCollection` only, and does NOT touch V1's (unaltered)
+  // client-spawn / `serverOptions` / the V3 command set / the V4 diagram.
+  registerVerify(context, {
     getClient: () => client,
     outputChannel,
     restartServer,

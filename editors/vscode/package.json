@@ -119,6 +119,18 @@
         "title": "Refresh Events",
         "icon": "$(refresh)",
         "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.verify",
+        "title": "Verify (Deadlock-Freedom + Reachability)",
+        "icon": "$(shield)",
+        "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.baseline",
+        "title": "Baseline Regression Check",
+        "icon": "$(history)",
+        "category": "FSM Studio"
       }
     ],
     "keybindings": [
@@ -192,6 +204,16 @@
           "command": "fsm.copyIR",
           "when": "editorLangId == fsm-lang",
           "group": "fsm@6"
+        },
+        {
+          "command": "fsm.verify",
+          "when": "editorLangId == fsm-lang",
+          "group": "fsm@2"
+        },
+        {
+          "command": "fsm.baseline",
+          "when": "editorLangId == fsm-lang",
+          "group": "fsm@7"
         }
       ],
       "explorer/context": [
@@ -202,6 +224,11 @@
         },
         {
           "command": "fsm.generateC99",
+          "when": "resourceExtname == .fsm",
+          "group": "fsm"
+        },
+        {
+          "command": "fsm.verify",
           "when": "resourceExtname == .fsm",
           "group": "fsm"
         }
@@ -229,6 +256,14 @@
         },
         {
           "command": "fsm.copyIR",
+          "when": "editorLangId == fsm-lang"
+        },
+        {
+          "command": "fsm.verify",
+          "when": "editorLangId == fsm-lang"
+        },
+        {
+          "command": "fsm.baseline",
           "when": "editorLangId == fsm-lang"
         },
         {

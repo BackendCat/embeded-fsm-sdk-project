@@ -1,0 +1,40 @@
+// `unreachable.fsm` — the §5.4 (d) reachability-defect fixture for the
+// W-A1 Extension-Host acceptance (Doc 31 §1 W-A1 (5)).
+//
+// WHY this fixture is added under editors/vscode/ (a disclosed judgment
+// call — Doc 31 §1 W-A1 (d) explicitly permits it): the in-repo
+// known-good `examples/verify/{clean,deadlocks}.fsm` are W4a-verified for
+// the verified / property-violated cases, but NEITHER yields an
+// FSM-E0400, and the §5.4 (d) acceptance needs a fixture whose
+// `fsm verify --json` `properties.reachability.diagnostics[]` is
+// non-empty with a concrete line/col. It lives HERE — under
+// `editors/vscode/src/test/fixtures/` (copied to `out/test/fixtures/` by
+// `copy-fixtures.mjs`, the established test-fixture path) — NOT under
+// `crates/`, so A1's defining ZERO `crates/**` delta is preserved
+// (`git diff --name-only` stays `editors/vscode/**`-only).
+//
+// Shape: `Reachable` is the initial state with no outgoing transition
+// (a terminal sink — that is fine, it is reachable). `Orphan` is declared
+// but NO transition anywhere targets it and it is not the initial state,
+// so on every exhaustive path it is never entered ⇒ the bounded search
+// EXHAUSTS (small finite space) and the reachability analysis proves
+// `Orphan` unreachable ⇒ an FSM-E0400 with `Orphan`'s declaration
+// line/col. The CLI is the sole oracle for the exact code/line/col; the
+// test recomputes them by spawning the real binary on THIS file and
+// asserts the DiagnosticCollection entry matches byte-for-byte.
+language fsm 2.0
+
+machine UnreachDemo {
+    events {
+        GO
+    }
+
+    initial Reachable
+
+    state Reachable {
+    }
+
+    state Orphan {
+        on GO -> Reachable
+    }
+}
