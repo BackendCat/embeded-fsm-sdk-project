@@ -1,0 +1,45 @@
+# What `vsce package` EXCLUDES from the .vsix (Doc 28 §3-V6 / Doc 27
+# §8-V6). The duck-principle bar: a genuinely installable VSIX that is
+# lean (no source / no node_modules / no test corpus) yet REAL (the
+# esbuild `dist/` runtime bundle AND the bundled `bin/<host-triple>/`
+# native binaries that V1's Rule-2 resolver loads ARE shipped).
+#
+# Anything NOT matched here is included. `dist/**` (the esbuild output,
+# the extension `main`) and `bin/**` (the bundled host-triple `fsm` +
+# `fsm-lang-server`) are deliberately NOT excluded — they are the
+# functional payload. `package.json`, `language-configuration.json`,
+# `snippets/`, `syntaxes/`, `assets/`, `README`/`LICENSE`-class metadata
+# are kept by vsce by default.
+
+# --- TypeScript sources & build inputs (the runtime is the esbuild
+# `dist/` bundle, NOT `src/` — shipping `src/` would bloat the VSIX with
+# code the host never loads). ---
+src/**
+out/**
+.vscode-test/**
+*.vsix
+**/*.ts
+**/*.map
+tsconfig.json
+tsconfig.webview.json
+esbuild.mjs
+copy-fixtures.mjs
+scripts/**
+
+# --- node_modules: the extension is esbuild-bundled (esbuild.mjs bundles
+# the language client + deps INTO dist/extension.js), so the VSIX needs
+# ZERO runtime node_modules — excluding it is the single biggest size win
+# and is correctness-safe here precisely because of the esbuild bundle. ---
+node_modules/**
+
+# --- Lint / VCS / editor / CI metadata (never user-facing). ---
+.eslintrc*
+.gitignore
+.vscodeignore
+.github/**
+**/.DS_Store
+
+# --- Anything that would re-introduce the cargo target trough or test
+# fixtures into the package. ---
+**/*.rs
+**/fixtures/**

@@ -315,13 +315,17 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run bundle",
+    "vscode:prepublish": "npm run bundle && npm run populate:bin",
     "compile": "tsc -p ./ && node copy-fixtures.mjs",
     "typecheck": "tsc --noEmit -p ./ && tsc --noEmit -p ./tsconfig.webview.json",
     "lint": "eslint src --ext ts",
     "bundle": "node esbuild.mjs",
+    "populate:bin": "node scripts/populate-bin.mjs",
+    "package": "vsce package --no-dependencies --out fsm-lang.vsix",
     "pretest": "tsc -p ./ && tsc --noEmit -p ./tsconfig.webview.json && node copy-fixtures.mjs && node esbuild.mjs",
-    "test": "node ./out/test/runTest.js"
+    "test": "node ./out/test/runTest.js",
+    "pretest:v6": "tsc -p ./ && node copy-fixtures.mjs && node esbuild.mjs",
+    "test:v6": "node ./out/test/runTestV6.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.6",
@@ -330,6 +334,7 @@
     "@typescript-eslint/eslint-plugin": "^7.7.0",
     "@typescript-eslint/parser": "^7.7.0",
     "@vscode/test-electron": "^2.3.9",
+    "@vscode/vsce": "^2.24.0",
     "esbuild": "^0.20.2",
     "eslint": "^8.57.0",
     "glob": "^10.3.12",

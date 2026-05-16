@@ -32,3 +32,11 @@ editors/vscode/out/
 editors/vscode/dist/
 editors/vscode/.vscode-test/
 editors/vscode/*.vsix
+
+# V6 bundled host-triple binaries (Doc 28 §3-V6). `bin/<host-triple>/`
+# holds the ~12 MB release `fsm` + `fsm-lang-server` the VSIX packages and
+# V1's Rule-2 resolver loads. It is a BUILD ARTIFACT produced fresh by
+# `scripts/populate-bin.mjs` at package time — committing a native binary
+# to git is a cardinal repo-bloat sin (the brief's hard NO-HUGE-BINARIES
+# discipline). NOT tracked; rebuilt deterministically on the pinned 1.75.
+editors/vscode/bin/
