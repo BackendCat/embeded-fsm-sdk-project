@@ -486,7 +486,7 @@ and walking up to the filesystem root (similar to `.gitignore` / `cargo.toml`).
 [compiler]
 max_errors = 100
 warn_as_error = false
-allow = ["FSM-W0500"]     # Suppress globally
+allow = ["FSM-W0200"]     # Suppress globally (e.g. the loop-in-action style nudge)
 deny  = []
 
 [generate]
@@ -540,7 +540,7 @@ resolved independently using **last-writer-wins** semantics.
 |---|---|---|
 | Scalar values (`target`, `strategy`, `indent_size`, `port`, etc.) | **Replace** — higher-priority value overwrites lower | CLI `--target cpp17` overwrites `fsm.toml` `target = "c99"` |
 | Boolean flags (`warn_as_error`, `isr_safe`, `virtual_clock`) | **Replace** | `--warn-as-error` overrides `warn_as_error = false` in config |
-| Array values (`allow`, `deny`) | **Append** — higher-priority arrays are concatenated after lower | User-global `allow = ["FSM-W0500"]` + project `allow = ["FSM-W0200"]` → `["FSM-W0500", "FSM-W0200"]` |
+| Array values (`allow`, `deny`) | **Append** — higher-priority arrays are concatenated after lower | User-global `allow = ["FSM-W0201"]` + project `allow = ["FSM-W0200"]` → `["FSM-W0201", "FSM-W0200"]` |
 | `out` (output directory) | **Replace** with path resolution: relative paths resolve relative to the config file that declares them | Project `fsm.toml` with `out = "generated/"` resolves to `<project-root>/generated/` |
 
 **Precedence rules:**

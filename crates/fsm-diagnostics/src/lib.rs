@@ -348,7 +348,18 @@ macro_rules! for_each_code {
             W0201 => (Warning, "FSM-W0201", "action block complexity"),
             W0300 => (Warning, "FSM-W0300", "transition priority used to resolve conflict"),
             W0401 => (Warning, "FSM-W0401", "timer duration unusually large"),
-            W0500 => (Warning, "FSM-W0500", "extern declared but never used"),
+            //   W0500 retired -> deprecated module (v1.2-FU-DEAD-CODES,
+            //   2026-05-16): "extern declared but never used" was a bare
+            //   catalog title — no Severity/Description/Fix specified (unlike
+            //   the W0501 sibling and every emitted W-code), NO normative
+            //   "the compiler emits" statement anywhere (cf. W0200 which
+            //   Doc 02 §9.2 / Doc 04 §8.7.2 / Doc 11 §18 all mandate), the
+            //   one module that considered it (`fsm-analyzer` import.rs)
+            //   explicitly judged it "not quite right" and declined it, and
+            //   its whole "unused declaration" family (incl. W0501) was
+            //   never implemented. Vestigial / over-catalogued — retired
+            //   per Doc 10 §14. The wire form still parses in suppression
+            //   annotations via DeprecatedCode (Doc 10 §14 rule 2).
             W0501 => (Warning, "FSM-W0501", "event declared but never used"),
             W0600 => (Warning, "FSM-W0600", "region with single state"),
             W0601 => (Warning, "FSM-W0601", "timer duration exceeds 24 hours"),
@@ -497,6 +508,15 @@ pub mod deprecated {
     //!      runtime now ships in codegen-c + the simulator (Doc 08 §10).
     //!      `defer` is accepted; only `E0310` (defer-vs-transition
     //!      conflict) remains. Supersedes docs/00 §11.7.
+    //!   - `W0500` "Extern declared but never used" — retired in
+    //!      v1.2-FU-DEAD-CODES (2026-05-16). Vestigial: a bare catalog
+    //!      title with no specified Severity/Description/Fix and no
+    //!      normative "the compiler emits" statement; zero emission sites;
+    //!      the one module that considered it explicitly declined it; its
+    //!      whole "unused declaration" family was never built. The honest
+    //!      counterpart to `W0200`, which the SAME wave IMPLEMENTed because
+    //!      the corpus *does* mandate it (Doc 02 §9.2 / Doc 04 §8.7.2 /
+    //!      Doc 11 §18).
     use core::fmt;
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -506,6 +526,7 @@ pub mod deprecated {
         E0304,
         W0400,
         E0903,
+        W0500,
     }
 
     impl fmt::Display for DeprecatedCode {
@@ -515,6 +536,7 @@ pub mod deprecated {
                 DeprecatedCode::E0304 => "FSM-E0304",
                 DeprecatedCode::W0400 => "FSM-W0400",
                 DeprecatedCode::E0903 => "FSM-E0903",
+                DeprecatedCode::W0500 => "FSM-W0500",
             })
         }
     }
@@ -531,6 +553,7 @@ pub mod deprecated {
                 "FSM-E0304" => Some(DeprecatedCode::E0304),
                 "FSM-W0400" => Some(DeprecatedCode::W0400),
                 "FSM-E0903" => Some(DeprecatedCode::E0903),
+                "FSM-W0500" => Some(DeprecatedCode::W0500),
                 _ => None,
             }
         }
@@ -778,17 +801,23 @@ mod tests {
         assert!(DiagnosticCode::from_str("FSM-W0400").is_none());
         // E0903 retired in v1.1 (defer runtime shipped):
         assert!(DiagnosticCode::from_str("FSM-E0903").is_none());
+        // W0500 retired in v1.2-FU-DEAD-CODES (vestigial; never emitted):
+        assert!(DiagnosticCode::from_str("FSM-W0500").is_none());
     }
 
     // --- all_codes() vs variant count ---
 
     #[test]
     fn all_codes_matches_expected_count() {
-        // Live variants: 74 (51 E + 13 W + 4 I + 6 H).
+        // Live variants: 73 (51 E + 12 W + 4 I + 6 H).
         // E0903 retired to `deprecated` in v1.1 (defer runtime shipped),
         // dropping the Error count from 52 to 51.
+        // W0500 retired to `deprecated` in v1.2-FU-DEAD-CODES (vestigial,
+        // never emitted, no normative spec), dropping the Warning count
+        // from 13 to 12. Its honest counterpart W0200 was IMPLEMENTed
+        // (not retired) in the same wave because the corpus mandates it.
         // If a new code is added, update this constant in lockstep.
-        const EXPECTED: usize = 74;
+        const EXPECTED: usize = 73;
         let table = DiagnosticCode::all_codes();
         assert_eq!(
             table.len(),
@@ -855,6 +884,15 @@ mod tests {
         assert_eq!(
             DeprecatedCode::from_str("FSM-E0903"),
             Some(DeprecatedCode::E0903)
+        );
+        // W0500 retired in v1.2-FU-DEAD-CODES (vestigial, never emitted)
+        // but still accepted in suppression annotations so a project that
+        // pinned `// fsm-lint:disable FSM-W0500` does not start failing
+        // (Doc 10 §14 rule 2).
+        assert_eq!(DeprecatedCode::W0500.to_string(), "FSM-W0500");
+        assert_eq!(
+            DeprecatedCode::from_str("FSM-W0500"),
+            Some(DeprecatedCode::W0500)
         );
         assert_eq!(DeprecatedCode::from_str("FSM-E0001"), None);
     }

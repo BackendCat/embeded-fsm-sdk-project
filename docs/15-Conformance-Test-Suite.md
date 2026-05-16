@@ -357,7 +357,7 @@ Negative tests MUST cover every diagnostic code in FSM-SPEC-DIAG:
 | All FSM-E04xx (reachability) | E0400 |
 | All FSM-E05xx (submachine) | E0500–E0502 |
 | FSM-E0900 (runtime protection) | E0900 |
-| All FSM-Wxxx | W0100, W0101, W0200, W0201, W0300, W0400, W0401, W0500, W0501 |
+| All FSM-Wxxx | W0100, W0101, W0200, W0201, W0300, W0401, W0501 (W0400 retired→E0410; W0500 retired v1.2-FU-DEAD-CODES, vestigial). W0200 conformance fixture: `semantic/neg/004_loop_in_action/` (the §"Warning test companion" example below). |
 
 ---
 

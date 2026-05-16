@@ -166,6 +166,15 @@
           "normative": true,
           "expectedCodes": ["FSM-E0600"],
           "tags": ["parallel"]
+        },
+        {
+          "id": "SEM-NEG-004",
+          "kind": "negative",
+          "path": "semantic/neg/004_loop_in_action/",
+          "description": "A `while` loop in a transition action block triggers FSM-W0200 (warning only; compilation succeeds, code is still generated — Doc 02 §9.2 / Doc 04 §8.7.2 / Doc 11 §18 / Doc 15 §5)",
+          "normative": true,
+          "expectedCodes": ["FSM-W0200"],
+          "tags": ["action", "lint"]
         }
       ]
     },

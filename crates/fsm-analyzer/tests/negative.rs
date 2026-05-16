@@ -537,3 +537,134 @@ machine M {
     let res = analyze(&pr);
     assert!(has_code(&res.diagnostics, DiagnosticCode::E0205));
 }
+
+// ---------------------------------------------------------------------------
+// W0200 — loop in action block (Doc 02 §9.2 / Doc 04 §8.7.2 / Doc 10
+// §FSM-W0200). IMPLEMENTed by v1.2-FU-DEAD-CODES: the corpus mandates the
+// compiler emit it ("The compiler emits FSM-W0200 … when a loop appears in
+// an action block"), so the analyzer SHOULD — and now does. §5.4: a real
+// `analyze()` over a triggering fixture must surface W0200 (Warning, not
+// blocking) with the exact catalog message; a control with NO loop must NOT.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn w0200_while_loop_in_transition_action_block() {
+    // `while` in a transition `:` action block — the canonical W0200 case
+    // (Doc 04 §8.7.2 "Loops: while, for (emit FSM-W0200 …)").
+    let pr = parse(
+        r#"language fsm 2.0
+machine M {
+    context { n : u8 = 3 }
+    events { E }
+    initial S
+    state S { on E -> S : while (ctx.n) { ctx.n = ctx.n - 1 } }
+}"#,
+    );
+    let res = analyze(&pr);
+    assert!(
+        has_code(&res.diagnostics, DiagnosticCode::W0200),
+        "while-in-action must emit FSM-W0200; got: {:?}",
+        res.diagnostics
+            .iter()
+            .map(|d| d.code.to_string())
+            .collect::<Vec<_>>()
+    );
+    // It is a Warning (compilation continues; code is still generated —
+    // Doc 11 §18), and carries the exact Doc 10 §FSM-W0200 "Message".
+    let d = res
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::W0200)
+        .unwrap();
+    assert_eq!(d.severity, fsm_diagnostics::Severity::Warning);
+    assert!(
+        d.message.contains("Loop in action block")
+            && d.message.contains("bounded-execution analysis"),
+        "unexpected W0200 message: {:?}",
+        d.message
+    );
+}
+
+#[test]
+fn w0200_for_loop_in_entry_action_block() {
+    // `for` in a state `entry:` action block — exercises the entry/exit
+    // ACTION_BLOCK path (not just transition `:` actions).
+    let pr = parse(
+        r#"language fsm 2.0
+machine M {
+    context { i : u8 = 0, sum : u8 = 0 }
+    initial S
+    state S {
+        entry: for (ctx.i = 0; ctx.i < 10; ctx.i = ctx.i + 1) { ctx.sum = ctx.sum + ctx.i }
+    }
+}"#,
+    );
+    let res = analyze(&pr);
+    assert!(
+        has_code(&res.diagnostics, DiagnosticCode::W0200),
+        "for-in-entry-action must emit FSM-W0200; got: {:?}",
+        res.diagnostics
+            .iter()
+            .map(|d| d.code.to_string())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn w0200_not_emitted_for_loop_free_action_block() {
+    // CONTROL: an action block with assignments + an `if` but NO loop must
+    // NOT emit W0200 (proves the check is loop-specific, not "any action").
+    let pr = parse(
+        r#"language fsm 2.0
+machine M {
+    context { x : u8 = 0 }
+    events { E }
+    initial S
+    state S {
+        entry: ctx.x = 1
+        on E -> S : if (ctx.x > 0) { ctx.x = ctx.x - 1 }
+    }
+}"#,
+    );
+    let res = analyze(&pr);
+    assert!(
+        !has_code(&res.diagnostics, DiagnosticCode::W0200),
+        "loop-free action must NOT emit FSM-W0200; got: {:?}",
+        res.diagnostics
+            .iter()
+            .map(|d| d.code.to_string())
+            .collect::<Vec<_>>()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// W0500 — "extern declared but never used" was RETIRED by
+// v1.2-FU-DEAD-CODES (vestigial: a bare catalog title, no normative "the
+// compiler emits" statement, zero emitters, the one module that considered
+// it declined it, its whole "unused declaration" family unbuilt). §5.4
+// (RETIRE arm): the previously-"would-trigger" input — an `extern` declared
+// but never referenced — must now produce the CORRECT behaviour, i.e.
+// *nothing* (no W0500 and no other spurious diagnostic; not a silent
+// change to some other code). The catalog-absence + still-parses-in-
+// suppression assertions live in fsm-diagnostics' own unit tests.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unused_extern_is_clean_w0500_retired_no_substitute_diagnostic() {
+    // Two externs declared, neither referenced anywhere — the exact shape
+    // the never-implemented W0500 "unused extern" check would have flagged.
+    // Post-retirement the correct behaviour is a fully clean analysis.
+    let pr = parse(
+        "language fsm 2.0\nmachine M {\npure extern is_ready() : bool\nextern do_step()\ninitial S\nstate S { }\n}",
+    );
+    let res = analyze(&pr);
+    assert!(
+        res.diagnostics.is_empty(),
+        "unused-extern source must analyze cleanly after W0500 retirement \
+         (no W0500, no silent substitute diagnostic); got: {:?}",
+        res.diagnostics
+            .iter()
+            .map(|d| d.code.to_string())
+            .collect::<Vec<_>>()
+    );
+}

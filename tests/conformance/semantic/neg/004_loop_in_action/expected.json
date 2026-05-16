@@ -1,0 +1,9 @@
+{
+  "exitCode": 0,
+  "expectedDiagnostics": [
+    {
+      "code": "FSM-W0200",
+      "messageContains": "Loop in action block"
+    }
+  ]
+}

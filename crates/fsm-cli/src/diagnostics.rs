@@ -74,7 +74,7 @@ impl std::fmt::Display for UnknownLintCode {
         write!(
             f,
             "fsm.toml [compiler] {} lists unknown diagnostic code {:?} \
-             (expected a code like \"FSM-W0500\")",
+             (expected a code like \"FSM-W0201\")",
             self.key, self.code
         )
     }
@@ -245,6 +245,20 @@ mod tests {
         let mut ds = vec![w(DiagnosticCode::W0600)];
         apply_allow_deny(&mut ds, &["FSM-E0301".to_owned()], &[]).unwrap();
         assert_eq!(ds.len(), 1, "E0301 not present, nothing suppressed");
+    }
+
+    #[test]
+    fn retired_w0500_in_allow_is_still_accepted_not_a_config_error() {
+        // FU-DEAD-CODES retired W0500 from the live enum. Doc 18 §6's own
+        // example is `allow = ["FSM-W0500"] # Suppress globally`; a project
+        // that pinned it before retirement must NOT start failing with the
+        // FU#67 exit-4 "unknown code" error (Doc 10 §14 rule 2). It parses
+        // via DeprecatedCode; nothing carries W0500 anymore so nothing is
+        // suppressed — accepted, inert, never a hard error.
+        let mut ds = vec![w(DiagnosticCode::W0600)];
+        apply_allow_deny(&mut ds, &["FSM-W0500".to_owned()], &[])
+            .expect("retired W0500 must be accepted in [compiler] allow");
+        assert_eq!(ds.len(), 1, "W0500 not present, nothing suppressed");
     }
 
     #[test]
