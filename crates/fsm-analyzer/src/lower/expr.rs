@@ -17,6 +17,22 @@ use fsm_ir::{
     GuardOperand, Literal, Statement, Type, UnaryOp,
 };
 use fsm_parser::ast::{self, AstNode};
+// **W0 / Doc 29 §3.4 (R-3 — the canonical leave-and-explain residual).**
+// This whole file deliberately retains `fsm_parser::cst`. The action/guard
+// sublanguage typed AST is **intentionally shallow** (`Expr`/`Stmt` are
+// `cast`/`syntax`-only discriminated unions with zero structural accessors,
+// by design — `ast/mod.rs`). Folding this would require ~12 new parser
+// accessors (`ExprBinary::{op,lhs,rhs}`, `StmtIf::{cond,then,else}`,
+// `ArgList::exprs()`, …) whose bodies are *the same CST walks moved across
+// the crate boundary* — relocating, NOT eliminating, the shape dependency
+// (the analyzer would still depend on the expression shape, just via more
+// indirection) — and would add a large `fsm-parser` public surface in a
+// wave whose contract is non-behavioural / 0-new-API-intended. That is
+// precisely the "contort to hit zero coupling" anti-pattern SUBAGENT §10 +
+// Doc 00 §11.44/§11.49 forbid; it is the dominant blast-radius driver.
+// Left-and-explained — the DRIFT-2 `LineIndex` precedent verbatim. (The
+// operator-token → IR-op mapping is internal-to-analyzer translation, not
+// parser-shape coupling — it stays here regardless.)
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use super::ids::IdMinter;

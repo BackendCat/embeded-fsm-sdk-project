@@ -2,6 +2,21 @@
 
 use fsm_diagnostics::{LineColUnit, SourceLocation, Span};
 use fsm_parser::ast;
+// **W0 / Doc 29 §3.4 (R-4 — the Archetype-C leave-and-explain residual).**
+// This file legitimately retains `fsm_parser::cst` for the *positional*
+// helpers: `span_of(&SyntaxNode) -> Span` is pure rowan-positional
+// (`node.text_range()` — the byte-range bridge to `fsm-diagnostics`, used by
+// 79 `span_of(x.syntax())` call sites crate-wide); `loc_of` builds on it;
+// `submachine_ref_is_nested` is a `.parent()`-walk structural predicate
+// (the W2a P1-2 defence-in-depth). There is **no typed-AST equivalent** for
+// "the byte range of any node" / "is this ref nested" and inventing one
+// would be a positional-API reimplementation. These `pub` fns have **zero
+// cross-crate callers** (verified: the only cross-crate `fsm_analyzer::util`
+// use is `compute_line_col` in `fsm-lsp/hover.rs`, unrelated to the CST
+// seam) — de-facto crate-internal, not a public contract. Threading a typed
+// wrapper through 79 call sites would be massive non-behavioural churn for
+// zero clarity gain — explicitly the DRIFT-2 anti-pattern (Doc 00
+// §11.44/§11.49, the `LineIndex` precedent). Left-and-explained.
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 /// Yield every [`ast::StateDecl`] reachable from `m` — top-level states,

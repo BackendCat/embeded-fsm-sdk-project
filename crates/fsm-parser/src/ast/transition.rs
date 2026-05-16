@@ -1,5 +1,7 @@
 //! Typed AST accessors for transition / guard / priority / action-block.
 
+use crate::cst::{SyntaxKind, SyntaxNode};
+
 use super::{ast_node, children, first_ident, AstChildren, AstNode};
 
 ast_node!(TransitionDecl, TRANSITION_DECL);
@@ -33,6 +35,61 @@ impl BranchHintNode {
     }
 }
 
+impl PriorityClause {
+    /// The integer value inside a `priority N` clause, e.g. `7` in
+    /// `priority 7`. `None` when the clause carries no integer literal
+    /// (parse-error recovery).
+    ///
+    /// **W0 (Doc 29 §3.2 B-clean):** body is the *exact* CST walk the
+    /// analyzer's `extract_priority` performed verbatim (find the first
+    /// `IntLiteral` token, strip `_`, decimal `parse`), relocated to its
+    /// correct home. Deliberately decimal-only `str::parse` — NOT
+    /// `parse_int_literal_i64` (no hex/binary): a `priority 0x10` would
+    /// have parsed to `None` (default priority) before, so changing the
+    /// radix handling here would alter lowered-IR bytes. Behaviour-inert
+    /// by construction; the W0 §4.2 byte-identity gate proves it.
+    pub fn value(&self) -> Option<i64> {
+        let tok = self
+            .0
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .find(|t| t.kind() == SyntaxKind::IntLiteral)?;
+        let s: String = tok.text().chars().filter(|c| *c != '_').collect();
+        s.parse().ok()
+    }
+}
+
+/// Best-effort scan of a transition-flavour node for an
+/// `IDENT '(' IDENT ')'` pattern immediately after the leading trigger.
+/// Returns the second ident (the payload-binding name in `on E(p) -> …`).
+/// The grammar produces no typed node for the binding, so the green-tree
+/// tokens are walked directly here — the parser's CST is the right home
+/// for this parser-shape knowledge (W0 / Doc 29 §3.2 B-clean; ported
+/// verbatim from the analyzer's old `extract_trigger_payload_binding`,
+/// behaviour-inert).
+fn payload_binding_of(node: &SyntaxNode) -> Option<String> {
+    let mut tokens = node
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .filter(|t| !t.kind().is_trivia());
+    // Token sequence we expect: KwOn IDENT LParen IDENT RParen ...
+    let _on = tokens.next()?;
+    let _trigger = tokens.next()?;
+    let lparen = tokens.next()?;
+    if lparen.kind() != SyntaxKind::LParen {
+        return None;
+    }
+    let binding = tokens.next()?;
+    if binding.kind() != SyntaxKind::Ident {
+        return None;
+    }
+    let rparen = tokens.next()?;
+    if rparen.kind() != SyntaxKind::RParen {
+        return None;
+    }
+    Some(binding.text().to_string())
+}
+
 /// Common interface for the four transition-flavour nodes — they all carry
 /// optional guard / priority / action-block children but differ in trigger
 /// semantics. Accessors are duplicated rather than abstracted with a trait
@@ -56,6 +113,11 @@ impl TransitionDecl {
         // not a direct token, so the indices are unaffected by W4.
         nth_ident(&self.0, 1)
     }
+    /// Payload-binding ident in `on E(p) -> …` (W0 / Doc 29 §3.2). `None`
+    /// when the trigger has no `(binding)`.
+    pub fn payload_binding(&self) -> Option<String> {
+        payload_binding_of(&self.0)
+    }
     pub fn guard(&self) -> Option<GuardClause> {
         super::child(&self.0)
     }
@@ -75,6 +137,10 @@ impl TransitionDecl {
 impl InternalDecl {
     pub fn trigger(&self) -> Option<String> {
         first_ident(&self.0)
+    }
+    /// Payload-binding ident in `internal on E(p): …` (W0 / Doc 29 §3.2).
+    pub fn payload_binding(&self) -> Option<String> {
+        payload_binding_of(&self.0)
     }
     pub fn guard(&self) -> Option<GuardClause> {
         super::child(&self.0)
@@ -97,6 +163,10 @@ impl LocalDecl {
     }
     pub fn target(&self) -> Option<String> {
         nth_ident(&self.0, 1)
+    }
+    /// Payload-binding ident in `local on E(p) ~> …` (W0 / Doc 29 §3.2).
+    pub fn payload_binding(&self) -> Option<String> {
+        payload_binding_of(&self.0)
     }
     pub fn guard(&self) -> Option<GuardClause> {
         super::child(&self.0)

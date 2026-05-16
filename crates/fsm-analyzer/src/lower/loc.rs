@@ -8,6 +8,13 @@
 
 use fsm_diagnostics::Span;
 use fsm_ir::SourceLocation;
+// **W0 / Doc 29 §3.4 (R-4 leave-and-explain — transitive).** `LocCtx::loc`
+// takes a `&SyntaxNode` purely to feed `util::span_of` (the pure positional
+// byte-range bridge — R-4). There is no typed-AST equivalent for "the byte
+// range of any node"; this is the parser's *public* CST type used for its
+// intended positional purpose. Folding it would mean threading a typed
+// wrapper through every lowerer's `loc(x.syntax())` call for zero clarity
+// gain — the DRIFT-2 anti-pattern (Doc 00 §11.44/§11.49). Left-and-explained.
 use fsm_parser::cst::SyntaxNode;
 
 use crate::util::{compute_line_col, span_of};

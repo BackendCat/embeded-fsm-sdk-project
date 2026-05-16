@@ -14,6 +14,23 @@ use fsm_ir::{
     TargetConfig, Type,
 };
 use fsm_parser::ast::{self, AstNode};
+// **W0 / Doc 29 §3.4 (R-1 + R-3 leave-and-explain).** Retains
+// `fsm_parser::cst` for: (R-1) `lower_type_ref_node` — the OPAQUE-BUG-1
+// fix. The typed `Param::ty()`/`FieldDecl::ty()`/`ExternDecl::return_type()`
+// cast only to `TypeRef` and *cannot see* an `OPAQUE_TYPE_REF` sibling, so
+// they returned `None` and the param/field silently vanished with no
+// diagnostic (a P0-1-class silent-data-loss bug — documented at
+// `lower_type_ref_node`). Resolving from the *parent* node is *more
+// correct* than the typed accessor; adding a `TypeOrOpaque` enum to
+// `fsm_parser::ast` is defensible but is a **new public type on the most
+// behaviourally-critical seam** in a non-behavioural wave — the
+// conservative call is leave-and-explain (the option is recorded for a
+// later dedicated parser-API wave; removing the coupling here would risk
+// re-introducing the exact P0-1-class regression W0 is forbidden from
+// causing — C-2); (R-3) `lower_literal`'s shallow-expr literal walks.
+// Folding either worsens clarity / risks the P0-1 regression class for
+// zero behaviour gain — Doc 00 §11.44/§11.49, the DRIFT-2 `LineIndex`
+// precedent. Left-and-explained.
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use crate::symbol_table::SymbolTable;

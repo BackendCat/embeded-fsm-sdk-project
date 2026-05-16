@@ -22,6 +22,17 @@ use std::collections::HashMap;
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
+// **W0 / Doc 29 §3.4 (R-3 leave-and-explain).** This file deliberately
+// retains `fsm_parser::cst` for the guard-shape classification internals
+// (`classify_binary` / `lhs_field` / `literal_value` — operand/operator
+// extraction over the *deliberately shallow* `Expr` AST). A full typed
+// accessor layer (`ExprBinary::{op,lhs,rhs}`, …) would relocate — not
+// eliminate — these CST walks into `fsm-parser` and add a large parser
+// public surface in a 0-new-API-intended wave (the SUBAGENT §10 / Doc 00
+// §11.44 contort-to-zero trap). The dispatch is already typed
+// (`walk_all_states` + typed transition iterators); only the shallow-AST
+// guard-shape residual stays. The `priority N` extraction WAS relocated to
+// the typed `PriorityClause::value()` accessor (W0 §3.2 B-clean).
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use crate::symbol_table::SymbolTable;
@@ -130,7 +141,10 @@ fn make_trans(
     Trans {
         span: span_of(node),
         guard: guard.map(|g| classify_guard(&g)),
-        priority: priority.and_then(|p| extract_priority(p.syntax())),
+        // W0 (Doc 29 §3.2 B-clean): typed accessor — same decimal-only
+        // `IntLiteral` parse the old local `extract_priority` did, relocated
+        // to `fsm_parser::ast`.
+        priority: priority.and_then(|p| p.value()),
         node: node.clone(),
     }
 }
@@ -290,15 +304,6 @@ fn literal_value(node: &SyntaxNode) -> Option<LitVal> {
         }
         _ => None,
     }
-}
-
-fn extract_priority(node: &SyntaxNode) -> Option<i64> {
-    let tok = node
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .find(|t| t.kind() == SyntaxKind::IntLiteral)?;
-    let s: String = tok.text().chars().filter(|c| *c != '_').collect();
-    s.parse().ok()
 }
 
 fn analyze_group(transitions: &[Trans], out: &mut Vec<Diagnostic>) {

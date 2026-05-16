@@ -9,6 +9,19 @@
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
+// **W0 / Doc 29 §3.4 (R-2 leave-and-explain, generalized to this check).**
+// `check` walks `m.syntax().descendants()` in rowan **document pre-order**
+// and dispatches SHALLOW/DEEP_HISTORY_DECL. History pseudo-states can nest
+// arbitrarily deep under states/regions; the typed AST has per-kind
+// iterators but no whole-subtree-preorder iterator, and the emitted
+// diagnostic vector is **unsorted** (neither `run_all` nor the CLI's
+// `emit_json_aggregate` sorts) — so when ≥2 history decls miss a `default`
+// the E0111 *order* is byte-load-bearing for the W0 §4.2 gate. Reproducing
+// `descendants()` order via typed accessors would need the typed ordered
+// heterogeneous-child iterator Doc 29 §3.4-R-2 rejects as the
+// refactor-to-number trap; folding it would risk the P0-1 byte-identity
+// regression class for zero behaviour gain — Doc 00 §11.44/§11.49, the
+// DRIFT-2 `LineIndex` precedent. Left-and-explained.
 use fsm_parser::cst::SyntaxKind;
 
 use crate::symbol_table::SymbolTable;

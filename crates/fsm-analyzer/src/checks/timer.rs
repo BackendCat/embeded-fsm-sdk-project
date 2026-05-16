@@ -13,6 +13,21 @@
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
+// **W0 / Doc 29 §3.4 (R-2 + R-3 leave-and-explain, generalized to this
+// check).** Retains `fsm_parser::cst` for: (R-2) the document-pre-order
+// `m.syntax().descendants()` dispatch over AFTER/EVERY/EVERY_INTERNAL_DECL
+// — the unsorted diagnostic vector (neither `run_all` nor the CLI sorts)
+// makes traversal order byte-load-bearing for the W0 §4.2 gate, and the
+// typed AST has no whole-subtree-preorder iterator; (R-3) `resolve_const_expr`
+// / `resolve_expr_value`'s const-fold over the deliberately-shallow
+// expression CST (`EXPR_LITERAL`/`EXPR_UNARY`/`EXPR_PAREN`/`EXPR_NAME_REF`,
+// resolving file consts the parser cannot see). A typed accessor layer
+// would relocate — not eliminate — these walks and add a large parser
+// surface in a 0-new-API-intended wave. Folding either worsens clarity /
+// risks the P0-1 byte-identity regression class for zero behaviour gain —
+// Doc 00 §11.44/§11.49, the DRIFT-2 `LineIndex` precedent. (The typed
+// timer `duration()`/`action_block()` accessors W0 added are consumed by
+// the *lowerer*; this *check* does its own const-fold so it stays.)
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use crate::symbol_table::SymbolTable;

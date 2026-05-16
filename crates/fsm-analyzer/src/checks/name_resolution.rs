@@ -17,6 +17,36 @@
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
+// **W0 / Doc 29 §3.4 (R-2 + R-3 leave-and-explain, generalized from the
+// lowering-side residuals to this check).** This file deliberately retains
+// `fsm_parser::cst` for two reasons that make folding it worse-EV:
+//
+// 1. **Document-order dispatch (R-2 class).** `check_machine` walks
+//    `m.syntax().descendants()` in rowan **document pre-order** and
+//    `check_node` dispatches by kind. The emitted diagnostic vector is
+//    **unsorted** (`fsm_analyzer::checks::run_all` appends in pass order;
+//    `fsm-cli`'s `emit_json_aggregate` emits in collected order — neither
+//    sorts), so the *traversal order across heterogeneous node kinds is
+//    byte-load-bearing* for the diagnostics stream the W0 §4.2 gate pins.
+//    The typed AST exposes per-kind iterators but no single ordered
+//    heterogeneous-child / whole-subtree-preorder iterator; reproducing
+//    `descendants()` order through typed accessors would need the typed
+//    `enum StateChild` ordered iterator Doc 29 §3.4-R-2 explicitly rejects
+//    as the refactor-to-number trap (a large new parser API whose only
+//    consumers are these document-order walks).
+// 2. **Shallow-AST expression name resolution (R-3 class).**
+//    `check_expr` / `call_name` / `check_stmt_*` walk the *deliberately
+//    shallow* `Expr`/`Stmt` CST (matching `EXPR_FIELD_REF`/`EXPR_CALL`/…,
+//    `Dot`/`Ident` tokens). A full typed accessor layer would relocate —
+//    not eliminate — these walks into `fsm-parser` (the analyzer would
+//    still depend on the shape) and add a large public surface in a
+//    0-new-API-intended wave.
+//
+// Folding either would worsen clarity / risk the P0-1 byte-identity
+// regression class for zero behaviour gain — Doc 00 §11.44/§11.49, the
+// DRIFT-2 `LineIndex` precedent. Left-and-explained (a success of the C-1
+// discipline, not a failure). The clean Archetype-A removals + B-clean
+// accessor relocations land elsewhere in W0.
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use crate::scope::Scope;
@@ -33,23 +63,23 @@ pub fn check(file: &ast::File, st: &SymbolTable, out: &mut Vec<Diagnostic>) {
 
 fn check_machine(m: &ast::MachineDecl, scope: &Scope, st: &SymbolTable, out: &mut Vec<Diagnostic>) {
     // Initial declarations -------------------------------------------------
-    let initial_count = m
-        .syntax()
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::INITIAL_DECL)
-        .count();
+    // W0 (Doc 29 §3.3 "A-with-a-tiny-B-accessor"): typed `initials()`
+    // iterator replaces the `children()+kind()` CST walk. `AstChildren<
+    // InitialDecl>` is `children().filter_map(InitialDecl::cast)` — the
+    // *same elements in the same source order* (rowan child order == source
+    // order for same-kind siblings), so `.count()` and the enumerated
+    // E0108-at-`span_of` emission are byte-identical. This sub-block is
+    // order-safe (single kind); the surrounding descendants-dispatch +
+    // expression walks stay the R-2/R-3 residual (see module header).
+    let initials: Vec<_> = m.initials().collect();
+    let initial_count = initials.len();
     if initial_count == 0 && m.states().count() > 0 {
         // Empty machines (no state) elide the initial — Doc 04 §6.
         out.push(Diagnostic::new(DiagnosticCode::E0107, span_of(m.syntax())));
     } else if initial_count > 1 {
-        for (i, c) in m
-            .syntax()
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::INITIAL_DECL)
-            .enumerate()
-        {
+        for (i, c) in initials.iter().enumerate() {
             if i > 0 {
-                out.push(Diagnostic::new(DiagnosticCode::E0108, span_of(&c)));
+                out.push(Diagnostic::new(DiagnosticCode::E0108, span_of(c.syntax())));
             }
         }
     }

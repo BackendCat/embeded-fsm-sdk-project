@@ -16,6 +16,21 @@ use fsm_ir::{
     DEFAULT_TRANSITION_PRIORITY,
 };
 use fsm_parser::ast::{self, AstNode, BranchHint as AstBranchHint};
+// **W0 / Doc 29 §3.4 (R-2 + R-3 leave-and-explain).** This file
+// deliberately retains `fsm_parser::cst` for: (R-2) `lower_state_children`'s
+// `children()+kind()` dispatch over INITIAL/STATE/REGION/FINAL/HISTORY/
+// CHOICE/JUNCTION/FORK/JOIN children in **exact source order across
+// heterogeneous kinds** — the IR id-minter is order-sensitive
+// (`lower_split_byte_identity.rs` pins it byte-for-byte); the typed AST has
+// per-kind iterators but no ordered heterogeneous-child iterator, and adding
+// a typed `enum StateChild` ordered iterator whose only consumer is this one
+// loop is the refactor-to-number trap; (R-3) the `eval_i64` timer-duration
+// const-fold over the deliberately-shallow expression CST. Folding either
+// would worsen clarity / risk the P0-1 byte-identity regression class for
+// zero behaviour gain — Doc 00 §11.44/§11.49, the DRIFT-2 `LineIndex`
+// precedent. The single-construct scans were relocated to typed parser
+// accessors (see the free-helpers section below); only the order-critical /
+// shallow-AST residuals stay.
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use super::expr::{lower_action_block, lower_guard_clause};
@@ -436,11 +451,11 @@ fn lower_external(
     source_name: &str,
 ) -> Option<TransitionObject> {
     let trigger_name = t.trigger()?;
-    let payload_binding = extract_trigger_payload_binding(t.syntax());
+    let payload_binding = t.payload_binding();
     let target_name = t.target().unwrap_or_default();
     let priority = t
         .priority()
-        .and_then(|p| extract_priority(p.syntax()))
+        .and_then(|p| p.value())
         .unwrap_or(i64::from(DEFAULT_TRANSITION_PRIORITY));
     let guard = t.guard().map(|g| lower_guard_clause(ids, locs, &g));
     let actions = t
@@ -473,10 +488,10 @@ fn lower_internal(
     source_id: &str,
 ) -> Option<TransitionObject> {
     let trigger_name = t.trigger()?;
-    let payload_binding = extract_trigger_payload_binding(t.syntax());
+    let payload_binding = t.payload_binding();
     let priority = t
         .priority()
-        .and_then(|p| extract_priority(p.syntax()))
+        .and_then(|p| p.value())
         .unwrap_or(i64::from(DEFAULT_TRANSITION_PRIORITY));
     let guard = t.guard().map(|g| lower_guard_clause(ids, locs, &g));
     let actions = t
@@ -509,11 +524,11 @@ fn lower_local(
     source_id: &str,
 ) -> Option<TransitionObject> {
     let trigger_name = t.trigger()?;
-    let payload_binding = extract_trigger_payload_binding(t.syntax());
+    let payload_binding = t.payload_binding();
     let target_name = t.target().unwrap_or_default();
     let priority = t
         .priority()
-        .and_then(|p| extract_priority(p.syntax()))
+        .and_then(|p| p.value())
         .unwrap_or(i64::from(DEFAULT_TRANSITION_PRIORITY));
     let guard = t.guard().map(|g| lower_guard_clause(ids, locs, &g));
     let actions = t
@@ -548,7 +563,7 @@ fn lower_completion(
     let target_name = c.target().unwrap_or_default();
     let priority = c
         .priority()
-        .and_then(|p| extract_priority(p.syntax()))
+        .and_then(|p| p.value())
         .unwrap_or(i64::from(DEFAULT_TRANSITION_PRIORITY));
     let guard = c.guard().map(|g| lower_guard_clause(ids, locs, &g));
     let actions = c
@@ -632,9 +647,10 @@ fn lower_timers(
     let mut timers = Vec::new();
     let mut transitions = Vec::new();
     for (kind_idx, a) in state.after().enumerate() {
-        if let Some(ms) = duration_ms(a.syntax()) {
+        if let Some(ms) = a.duration().and_then(|ce| duration_ms(&ce)) {
             let target = a.target();
-            let actions = action_block_under(a.syntax())
+            let actions = a
+                .action_block()
                 .map(|ab| lower_action_block(ids, locs, &ab))
                 .unwrap_or_default();
             let timer_id = ids.next_pseudo_id("timer");
@@ -671,9 +687,10 @@ fn lower_timers(
         }
     }
     for (kind_idx, e) in state.every().enumerate() {
-        if let Some(ms) = duration_ms(e.syntax()) {
+        if let Some(ms) = e.duration().and_then(|ce| duration_ms(&ce)) {
             let target = e.target();
-            let actions = action_block_under(e.syntax())
+            let actions = e
+                .action_block()
                 .map(|ab| lower_action_block(ids, locs, &ab))
                 .unwrap_or_default();
             let timer_id = ids.next_pseudo_id("timer");
@@ -710,8 +727,9 @@ fn lower_timers(
         }
     }
     for (kind_idx, e) in state.every_internal().enumerate() {
-        if let Some(ms) = duration_ms(e.syntax()) {
-            let actions = action_block_under(e.syntax())
+        if let Some(ms) = e.duration().and_then(|ce| duration_ms(&ce)) {
+            let actions = e
+                .action_block()
                 .map(|ab| lower_action_block(ids, locs, &ab))
                 .unwrap_or_default();
             let timer_id = ids.next_pseudo_id("timer");
@@ -777,8 +795,29 @@ fn lower_defers(ids: &mut IdMinter, locs: &LocCtx, state: &ast::StateDecl) -> Ve
 
 // ---------------------------------------------------------------------------
 // Free helpers — pure tree scans, no IdMinter / LocCtx state needed.
+//
+// **W0 (Doc 29 §3.2/§6):** the single-construct CST scans (`extract_priority`,
+// `extract_trigger_payload_binding`, `action_block_under`, and the
+// CONST_EXPR-find of `duration_ms`) were RELOCATED to their correct home as
+// behaviour-inert typed accessors on `fsm_parser::ast` (`PriorityClause::value`,
+// `{Transition,Internal,Local}Decl::payload_binding`,
+// `{After,Every,EveryInternal}Decl::{action_block,duration}`). What remains
+// here is the **R-2/R-3 leave-and-explain residual** (Doc 00 §11.44/§11.49,
+// the DRIFT-2 `LineIndex` precedent — left-and-explained, NOT folded to hit a
+// zero-`cst` count).
 // ---------------------------------------------------------------------------
 
+/// **R-2 residual (Doc 29 §3.4).** This deliberately retains the
+/// `children()+kind()` CST dispatch over the *heterogeneous*
+/// SHALLOW/DEEP_HISTORY_DECL children. The typed AST exposes per-kind
+/// iterators but no single ordered heterogeneous-child iterator, and the IR
+/// id-minter (`lower_state_children`) is order-sensitive — `lower_history`
+/// shares the minting path, so the *first* history child in **source order**
+/// is the one bound to the composite. A typed `enum StateChild` ordered
+/// iterator would be a substantial new `fsm-parser` API whose only consumer
+/// is this one helper (the refactor-to-number trap SUBAGENT §10 / Doc 00
+/// §11.44 forbid); folding it would obscure the order-critical intent for
+/// zero behaviour gain. Left-and-explained.
 fn extract_history(
     state: &ast::StateDecl,
     ids: &mut IdMinter,
@@ -806,46 +845,21 @@ fn extract_history(
     found
 }
 
-/// Best-effort scan of a transition AST node for an `IDENT '(' IDENT ')'`
-/// pattern immediately after the leading `on`. Captures the second ident as
-/// the payload-binding name. The current grammar does not produce a typed
-/// node for the binding, so we walk the green-tree tokens directly.
-fn extract_trigger_payload_binding(node: &SyntaxNode) -> Option<String> {
-    let mut tokens = node
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .filter(|t| !t.kind().is_trivia());
-    // Token sequence we expect: KwOn IDENT LParen IDENT RParen ...
-    let _on = tokens.next()?;
-    let _trigger = tokens.next()?;
-    let lparen = tokens.next()?;
-    if lparen.kind() != SyntaxKind::LParen {
-        return None;
-    }
-    let binding = tokens.next()?;
-    if binding.kind() != SyntaxKind::Ident {
-        return None;
-    }
-    let rparen = tokens.next()?;
-    if rparen.kind() != SyntaxKind::RParen {
-        return None;
-    }
-    Some(binding.text().to_string())
-}
-
-/// Locate the ACTION_BLOCK child of a timer / completion node (`after`,
-/// `every`, etc.) — these AST nodes do not yet expose a typed accessor.
-fn action_block_under(node: &SyntaxNode) -> Option<ast::ActionBlock> {
-    node.children()
-        .find(|c| c.kind() == SyntaxKind::ACTION_BLOCK)
-        .and_then(ast::ActionBlock::cast)
-}
-
-fn duration_ms(node: &SyntaxNode) -> Option<u32> {
-    let ce = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::CONST_EXPR)?;
-    let expr = ce.children().next()?;
+/// Const-fold a timer's typed `CONST_EXPR` node (from the W0
+/// `{After,Every,EveryInternal}Decl::duration()` accessor) to a `u32`
+/// milliseconds value, or `None` if it is negative / non-foldable.
+///
+/// **R-3 residual (Doc 29 §3.4).** `eval_i64` walks the *deliberately
+/// shallow* expression CST (`EXPR_LITERAL`/`EXPR_UNARY`/`EXPR_PAREN`). The
+/// `Expr` typed AST is `cast`/`syntax`-only by design (no structural
+/// accessors); a full typed accessor layer would relocate — not eliminate —
+/// this walk into `fsm-parser` (the analyzer would still depend on the
+/// shape, just via more indirection) and add a large parser public surface
+/// in a 0-new-API-intended wave. This is internal-to-analyzer const folding
+/// over the parser's *public* CST type used for its intended purpose; it is
+/// left-and-explained, the canonical SUBAGENT §10 / Doc 00 §11.44 case.
+fn duration_ms(ce: &ast::ConstExpr) -> Option<u32> {
+    let expr = ce.syntax().children().next()?;
     let v = eval_i64(&expr)?;
     if v < 0 {
         return None;
@@ -880,13 +894,4 @@ fn eval_i64(node: &SyntaxNode) -> Option<i64> {
         }
         _ => None,
     }
-}
-
-fn extract_priority(node: &SyntaxNode) -> Option<i64> {
-    let tok = node
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .find(|t| t.kind() == SyntaxKind::IntLiteral)?;
-    let s: String = tok.text().chars().filter(|c| *c != '_').collect();
-    s.parse().ok()
 }

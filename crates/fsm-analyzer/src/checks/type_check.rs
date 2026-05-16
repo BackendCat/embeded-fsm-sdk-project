@@ -8,6 +8,22 @@
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
+// **W0 / Doc 29 §3.4 (R-1 + R-2 + R-3 leave-and-explain).** Retains
+// `fsm_parser::cst` for: (R-1) `ty_primitive_name` resolving the type token
+// from the type-ref node — sibling of the OPAQUE-BUG-1 parent-node
+// resolution; adding a `TypeOrOpaque` typed accessor is a new public type
+// on the most behaviourally-critical seam, deferred to a dedicated
+// parser-API wave (removing the coupling here risks the P0-1-class
+// silent-data-loss regression); (R-2) the document-pre-order
+// `machine.syntax().descendants()` STMT_ASSIGN/GUARD_CLAUSE dispatch — the
+// unsorted diagnostic vector makes traversal order byte-load-bearing for
+// the W0 §4.2 gate, no typed whole-subtree-preorder iterator exists; (R-3)
+// `check_assign`/`check_guard`/`resolve_simple_literal` over the
+// deliberately-shallow `Expr` CST. A typed accessor layer would relocate —
+// not eliminate — these walks and add a large parser surface in a
+// 0-new-API-intended wave. Folding any worsens clarity / risks the P0-1
+// regression class for zero behaviour gain — Doc 00 §11.44/§11.49, the
+// DRIFT-2 `LineIndex` precedent. Left-and-explained.
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use crate::scope::Scope;

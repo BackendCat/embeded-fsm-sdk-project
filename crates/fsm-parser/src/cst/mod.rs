@@ -1,9 +1,27 @@
 //! Lossless CST built on top of the [`rowan`] green-tree library.
 //!
 //! Per Doc 20 §4.1, the CST is the parser's primary output: it preserves
-//! every token including trivia (whitespace, comments) so the formatter and
-//! the LSP incremental-reparse pipeline can reconstruct the source byte for
-//! byte.
+//! every token including trivia (whitespace, comments) so a consumer can
+//! reconstruct the source byte for byte.
+//!
+//! **Intended consumers of the raw CST view (verified at HEAD, W0 /
+//! Doc 29 §3.4 / AUDIT_B P1-A1):**
+//! - **`fsm-lsp`** — incremental-reparse + positional capabilities
+//!   (hover/definition/rename/semantic-tokens/…). This is the legitimate
+//!   primary `fsm_parser::cst::*`-path consumer (12 modules).
+//! - **`fsm-formatter`** does **not** consume this `cst::` module path: it
+//!   reconstructs source byte-for-byte via the top-level
+//!   `fsm_parser::{SyntaxNode, SyntaxToken}` re-exports (the lossless tree),
+//!   not the `cst::` path. (The earlier "for the formatter and LSP"
+//!   framing in AUDIT_B:115 / Doc 00 §11.49 was stale — a W0
+//!   verify-the-record correction.)
+//! - **`fsm-analyzer`** consumes the typed [`crate::ast`] view and uses
+//!   `cst` only for the documented W0 / Doc 29 §3.4 leave-and-explain
+//!   residuals (R-1 OPAQUE-BUG-1 parent-node type resolution, R-2
+//!   document-order/heterogeneous-child dispatch, R-3 the deliberately
+//!   shallow expression/statement sublanguage, R-4 `util::span_of`-family
+//!   positional helpers) — never for routine traversal, which goes through
+//!   `ast::*` typed accessors.
 //!
 //! Type aliases provided here let downstream crates spell out concrete
 //! `SyntaxNode` / `SyntaxToken` types without re-deriving the `Language`

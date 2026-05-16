@@ -13,7 +13,6 @@
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
-use fsm_parser::cst::SyntaxKind;
 
 use crate::symbol_table::SymbolTable;
 use crate::util::span_of;
@@ -51,11 +50,11 @@ fn walk_state(state: &ast::StateDecl, out: &mut Vec<Diagnostic>) {
 }
 
 fn check_region(region: &ast::RegionDecl, out: &mut Vec<Diagnostic>) {
-    // The region MUST declare an initial.
-    let has_initial = region
-        .syntax()
-        .children()
-        .any(|c| c.kind() == SyntaxKind::INITIAL_DECL);
+    // The region MUST declare an initial. W0 (Doc 29 §3.3): typed
+    // `initials()` iterator replaces the old `children()+kind()` CST
+    // predicate — a behaviour-identical existence check (the diagnostic is
+    // keyed by the region span; the result is order-independent).
+    let has_initial = region.initials().next().is_some();
     if !has_initial {
         out.push(
             Diagnostic::new(DiagnosticCode::E0600, span_of(region.syntax())).with_message(format!(

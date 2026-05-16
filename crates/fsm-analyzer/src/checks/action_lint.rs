@@ -26,6 +26,17 @@
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
+// **W0 / Doc 29 §3.4 (R-2 + R-4 leave-and-explain).** Retains
+// `fsm_parser::cst` for: (R-2) the document-pre-order
+// `machine.syntax().descendants()` over STMT_WHILE/STMT_FOR — loops live
+// arbitrarily deep inside action blocks, the `Stmt` AST is deliberately
+// shallow (no whole-subtree-preorder iterator), and the unsorted
+// diagnostic vector makes order byte-load-bearing for the W0 §4.2 gate;
+// (R-4) `in_action_block` is a pure `.ancestors()` positional predicate —
+// the Archetype-C / R-4 shape (rowan positional API, no typed equivalent).
+// Folding either worsens clarity / risks the byte-identity regression
+// class for zero behaviour gain — Doc 00 §11.44/§11.49, the DRIFT-2
+// `LineIndex` precedent. Left-and-explained.
 use fsm_parser::cst::SyntaxKind;
 
 use crate::symbol_table::SymbolTable;

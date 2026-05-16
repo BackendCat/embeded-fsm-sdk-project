@@ -44,6 +44,20 @@ use std::collections::{HashMap, HashSet};
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode};
 use fsm_parser::ast::{self, AstNode};
+// **W0 / Doc 29 §3.4 (R-2 + R-4 leave-and-explain).** Retains
+// `fsm_parser::cst` for: (R-2) the document-pre-order
+// `file.syntax().descendants()` filtered to SUBMACHINE_DECL/SUBMACHINE_REF
+// (the E0610 feature gate + the per-ref E0103/E0500/E0501 scan, which must
+// also see refs nested inside submachine *templates*, not just machines) —
+// the unsorted diagnostic vector makes traversal order byte-load-bearing
+// for the W0 §4.2 gate, and no typed whole-subtree-preorder iterator spans
+// `file.machines()` ∪ `file.submachines()`; (R-4) `state_has_completion`
+// is a pure `.parent()`-walk structural predicate — the exact Archetype-C /
+// R-4 shape of `util::submachine_ref_is_nested` (positional rowan API with
+// no typed equivalent; inventing one is a positional-API reimplementation).
+// Folding either worsens clarity / risks the byte-identity regression class
+// for zero behaviour gain — Doc 00 §11.44/§11.49, the DRIFT-2 `LineIndex`
+// precedent. Left-and-explained.
 use fsm_parser::cst::SyntaxKind;
 
 use crate::symbol_table::SymbolTable;

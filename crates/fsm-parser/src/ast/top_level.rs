@@ -220,6 +220,16 @@ impl MachineDecl {
     pub fn initial(&self) -> Option<InitialDecl> {
         super::child(&self.0)
     }
+    /// **W0 (Doc 29 §3.3):** every direct `initial` decl under this machine
+    /// (in source order — rowan child order == source order). The singular
+    /// [`MachineDecl::initial`] returns only the first; the multiple-initial
+    /// diagnostic (FSM-E0108) needs to see all of them. A 3-line typed-child
+    /// iterator mirroring the ~30 existing `AstChildren` accessors;
+    /// behaviour-identical to the old `children().filter(kind ==
+    /// INITIAL_DECL)` CST walk.
+    pub fn initials(&self) -> AstChildren<InitialDecl> {
+        children(&self.0)
+    }
     pub fn states(&self) -> AstChildren<crate::ast::StateDecl> {
         children(&self.0)
     }

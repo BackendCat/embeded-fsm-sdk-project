@@ -96,6 +96,13 @@ impl RegionDecl {
     pub fn states(&self) -> AstChildren<StateDecl> {
         children(&self.0)
     }
+    /// **W0 (Doc 29 §3.3):** every direct `initial` decl under this region.
+    /// Used by the parallel-region check (FSM-E0600 "region has no
+    /// `initial`"). 3-line typed-child iterator; behaviour-identical to the
+    /// old `children().any(kind == INITIAL_DECL)` CST predicate.
+    pub fn initials(&self) -> AstChildren<crate::ast::InitialDecl> {
+        children(&self.0)
+    }
 }
 
 impl ShallowHistoryDecl {
@@ -228,6 +235,49 @@ impl EveryDecl {
     pub fn branch_hint(&self) -> Option<crate::ast::BranchHint> {
         super::child::<crate::ast::BranchHintNode>(&self.0).and_then(|h| h.kind())
     }
+    /// W0 (Doc 29 §3.2): action block of an `every` timer. See the timer
+    /// accessor block below for the shared rationale.
+    pub fn action_block(&self) -> Option<crate::ast::ActionBlock> {
+        action_block_child(&self.0)
+    }
+    pub fn duration(&self) -> Option<crate::ast::ConstExpr> {
+        super::child(&self.0)
+    }
+}
+
+// W0 (Doc 29 §3.2 B-clean): the timer decls (`after` / `every` /
+// `every_internal`) carry an action block and a `N ms` duration as
+// children. Before W0 the analyzer dropped to CST for both (`lower::state`
+// `action_block_under` / `duration_ms`). These accessors are the typed
+// home, mirroring the `EntryDecl::action_block` precedent above exactly.
+// Each body is the *exact* CST walk the analyzer performed, relocated —
+// behaviour-inert by construction (the W0 §4.2 byte-identity gate proves
+// it). `duration()` returns the typed `CONST_EXPR` node; const-folding it
+// stays the analyzer's job (it threads file consts the parser cannot see).
+impl AfterDecl {
+    pub fn action_block(&self) -> Option<crate::ast::ActionBlock> {
+        action_block_child(&self.0)
+    }
+    pub fn duration(&self) -> Option<crate::ast::ConstExpr> {
+        super::child(&self.0)
+    }
+}
+
+impl EveryInternalDecl {
+    pub fn action_block(&self) -> Option<crate::ast::ActionBlock> {
+        action_block_child(&self.0)
+    }
+    pub fn duration(&self) -> Option<crate::ast::ConstExpr> {
+        super::child(&self.0)
+    }
+}
+
+/// First `ACTION_BLOCK` child of a timer node — the verbatim relocation of
+/// the analyzer's old `action_block_under` helper (W0 / Doc 29 §3.2).
+fn action_block_child(n: &SyntaxNode) -> Option<crate::ast::ActionBlock> {
+    n.children()
+        .find(|c| c.kind() == crate::cst::SyntaxKind::ACTION_BLOCK)
+        .and_then(crate::ast::ActionBlock::cast)
 }
 
 // EntryDecl / ExitDecl: action-block is the only non-trivial child; expose

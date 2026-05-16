@@ -15,6 +15,23 @@ use std::collections::HashMap;
 
 use fsm_diagnostics::{Diagnostic, DiagnosticCode, RelatedInfo, Span};
 use fsm_parser::ast::{self, AstNode};
+// **W0 / Doc 29 §3.4 (R-1 + R-2 leave-and-explain).** This file
+// deliberately retains a minimal `fsm_parser::cst::{SyntaxNode,SyntaxKind}`
+// use (fully-qualified at the few sites below, not a blanket top-level
+// import) for: (R-1) `primitive_type_text` — same OPAQUE-BUG-1-adjacent
+// type-ref-token resolution as `lower::machine::lower_type_ref_node`
+// (adding a `TypeOrOpaque` typed accessor is a new public type on the most
+// behaviourally-critical seam, deferred to a dedicated parser-API wave);
+// (R-2) `build_submachine_entry`'s document-pre-order
+// `sm.syntax().descendants()` harvest and `collect_pseudo_states`'
+// heterogeneous-kind dispatch over FINAL/HISTORY/CHOICE/JUNCTION/FORK/JOIN/
+// ENTRY_POINT/EXIT_POINT — the typed AST exposes per-kind iterators for
+// nested states/regions only (no whole-subtree-preorder / all-pseudo-state
+// iterator), and the emitted duplicate-name diagnostics are unsorted so
+// traversal order is byte-load-bearing for the W0 §4.2 gate. Folding
+// either worsens clarity / risks the P0-1 byte-identity regression class
+// for zero behaviour gain — Doc 00 §11.44/§11.49, the DRIFT-2 `LineIndex`
+// precedent. Left-and-explained.
 
 use crate::scope::Scope;
 use crate::util::span_of;
