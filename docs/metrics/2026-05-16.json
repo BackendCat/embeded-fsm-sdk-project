@@ -1,0 +1,281 @@
+{
+  "$comment": "FSM Studio metrics snapshot at the v1.2.0 tag. Phase D.8 of the autonomy plan. Companion to the v1.1.0 snapshot docs/metrics/2026-05-15-v1.1.0.json (NOT overwritten). 'deltas_vs_prev' carries v1.1->v1.2 movement; 'attention:true' marks a metric the next status report must examine. Reproducible: every metric has a 'method'.",
+  "date": "2026-05-16",
+  "milestone": "v1.2.0 tagged (annotated, local)",
+  "tag_topology": {
+    "v1_2_0_tag_commit": "7104393",
+    "v1_2_0_tag_commit_full": "710439354deef1061bec4b8927ce3b740c0d5a30",
+    "v1_2_0_tag_subject": "docs: GATE_VERIFICATION_v1_2 + Doc 10 E0903 retired-banner parity (D-F)",
+    "checkpoint_2026_05_16_commit": "7104393",
+    "note": "quad-commit == tag-commit == checkpoint/2026-05-16. This is the first release achieving §11.30 prospectively (gate-doc commit → cold quad → tag, all at the same commit), not retroactively reconciled as v1.1 was. Canonical record: docs/GATE_VERIFICATION_v1_2.md. Cold-from-source run: rustc 1.75.0; cargo build zero-warning; cargo test --workspace 806 passed / 0 failed / 108 binaries; fsm test tests/conformance 26/26; gcc -Werror battery green; clippy -D warnings 0; fmt no diff; 0 vulns (RUSTSEC-2026-0009 eliminated pre-tag at e509734).",
+    "v1_2_0_tag_object": "3b37db7c",
+    "v1_1_0_commit": "abc70044", "v1_1_0_tag_object": "9634c7e2",
+    "v1_0_0_commit": "b4800036", "v1_0_0_tag_object": "13e2ac6c",
+    "tag_object_vs_commit_note": "Release tags are ANNOTATED: `git rev-parse <tag>` yields the tag-OBJECT sha; `git rev-list -1 <tag>` yields the COMMIT. They differ and must not be conflated. v1.2.0: tag-object 3b37db7c -> commit 71043935 (== checkpoint/2026-05-16, lightweight, object==commit). v1.1.0: 9634c7e2 -> abc70044 (== checkpoint/2026-05-15). v1.0.0: 13e2ac6c -> b4800036. Both recorded per Doc 00 §11.30 / GATE_VERIFICATION_v1_2 §8 so no future wave misreads a tag-object sha as a mismatched commit (the exact confusion those sections exist to prevent)."
+  },
+
+  "tests": {
+    "total_passing": 806,
+    "total_failing": 0,
+    "authoritative_source": "cold-from-source quad at 7104393 per GATE_VERIFICATION_v1_2.md §4; 108 test binaries",
+    "per_crate_markers": {
+      "fsm-analyzer": 119,
+      "fsm-cli": 145,
+      "fsm-codegen-c": 103,
+      "fsm-diagnostics": 25,
+      "fsm-formatter": 25,
+      "fsm-ir": 49,
+      "fsm-lexer": 45,
+      "fsm-lsp": 77,
+      "fsm-parser": 107,
+      "fsm-simulator": 76,
+      "_marker_sum": 771,
+      "_runtime_total": 806,
+      "_gap_note": "35-item gap between marker count (771) and runtime count (806): cargo test counts each conformance fixture item and each parametrized table entry as a separate test item at runtime; the markers count only the #[test]/#[tokio::test] attribute sites. Method is identical to the v1.1.0 snapshot so the delta is apples-to-apples at the marker level."
+    },
+    "method": "per_crate_markers: `grep -r '#[test]|#[tokio::test]'` per crates/<c>/ tree (src/ + tests/). total_passing: cold-quad authoritative figure from GATE_VERIFICATION_v1_2.md §4 (cargo test --workspace output). APPROXIMATE at crate granularity — the 35-item gap is runtime-test-item inflation, not a discrepancy.",
+    "new_crate_v1_2": "fsm-lsp (77 markers: 35 in-process tower-lsp client acceptance tests in tests/lsp_client_acceptance.rs, plus unit tests in src/analysis.rs, src/position.rs, src/refs.rs, src/capabilities/*.rs)"
+  },
+
+  "loc": {
+    "src_excl_tests_per_crate": {
+      "fsm-analyzer": 6182,
+      "fsm-cli": 4396,
+      "fsm-codegen-c": 7472,
+      "fsm-diagnostics": 1077,
+      "fsm-formatter": 3184,
+      "fsm-ir": 2091,
+      "fsm-lexer": 1795,
+      "fsm-lsp": 8717,
+      "fsm-parser": 5648,
+      "fsm-simulator": 5058
+    },
+    "src_excl_tests_total": 45620,
+    "v1_1_src_total": 36321,
+    "lsp_epic_added": 8717,
+    "method": "`find crates/<c>/src -name '*.rs' | xargs wc -l`. APPROXIMATE: counts whole src/ files; inline `#[cfg(test)] mod tests` blocks inside src/ are not subtracted. Method identical to v1.1.0 snapshot — delta is apples-to-apples.",
+    "interpretation": "+9299 LOC from v1.1 (+25.6%). The increment is fsm-lsp (8717 LOC, new crate) plus minor additions in fsm-cli (+246, allow/deny wiring FU#67) and fsm-analyzer (+60, W0200 emission site FU-DEAD-CODES) and fsm-diagnostics (+267, DRIFT-2 compute_line_col core). All growth is proportionate to the LSP epic deliverable."
+  },
+
+  "api_surface": {
+    "pub_fn_struct_enum_trait_strict_per_crate": {
+      "fsm-analyzer": 48,
+      "fsm-cli": 0,
+      "fsm-codegen-c": 86,
+      "fsm-diagnostics": 16,
+      "fsm-formatter": 5,
+      "fsm-ir": 70,
+      "fsm-lexer": 7,
+      "fsm-lsp": 55,
+      "fsm-parser": 202,
+      "fsm-simulator": 108
+    },
+    "pub_fn_struct_enum_trait_strict_total": 597,
+    "pub_broad_total_incl_const_type_mod_use_static": 787,
+    "pub_crate_items": 121,
+    "attention": false,
+    "method": "STRICT = `grep -rhoE '\\bpub(\\(...\\))? (fn|struct|enum|trait) '` in src/, excluding pub(crate)/pub(super)/pub(in). BROAD = same plus const|type|mod|use|static. pub_crate_items = `grep -rhoE '\\bpub(crate) (fn|struct|enum|trait) '` across all crates/*/src/.",
+    "interpretation": "NOT a v1.2 regression vs v1.1. On the comparable STRICT method: 638 (v1.1) -> 597 (v1.2), DOWN 41. On BROAD method: 826 (v1.1) -> 787 (v1.2), DOWN 39. The v1.2 #64 pub-hygiene wave (pub->pub(crate) narrowing, unreachable_pub self-enforcing via FU#68) carried through this release. fsm-lsp adds 55 strict items (the tower-lsp protocol surface) but the continued hygiene effect of #64 in existing crates more than offsets it. fsm-parser DOWN from 230 to 202 strict — the primary over-exposer target from v1.1. pub_crate_items 14->121 confirms the pub-hygiene graduation: items correctly scoped pub(crate) are now self-enforced by the unreachable_pub lint. attention:false: the carried P1 over-exposure debt from v1.1 has been actively reduced this release; fsm-parser is still the largest contributor but trending correct."
+  },
+
+  "mutation_density": {
+    "mut_self_methods_per_crate": {
+      "fsm-analyzer": 4,
+      "fsm-cli": 0,
+      "fsm-codegen-c": 4,
+      "fsm-diagnostics": 0,
+      "fsm-formatter": 9,
+      "fsm-ir": 21,
+      "fsm-lexer": 24,
+      "fsm-lsp": 3,
+      "fsm-parser": 21,
+      "fsm-simulator": 17
+    },
+    "mut_self_methods_total": 103,
+    "total_fn_workspace": 1701,
+    "mut_ratio_workspace": 0.061,
+    "lowering_mut_self_in_src_lower_dirs": 6,
+    "lowering_note": "ids.rs (4) + loc.rs (1) + mod.rs (1) = 6 total in crates/fsm-analyzer/src/lower/. ids.rs is the intentional stateful id-allocator counter; loc.rs and mod.rs reflect DRIFT-2 convergence additions. Still architecturally healthy (v1.1 had 1; the DRIFT-2 refactor added 2 intentional new sites — both documented).",
+    "method": "mut_self = `grep -roE 'fn [a-z_]+[^(]*\\(\\s*&mut self'` per crate src/. ratio = mut_self / all `fn [a-zA-Z_]` in src/. lowering metric = occurrences of '&mut self' in crates/fsm-analyzer/src/lower/ files.",
+    "attention": false,
+    "interpretation": "Architecturally stable. v1.2 adds 3 &mut self sites vs v1.1: fsm-lsp (3, the tower-lsp Server struct methods — inherently stateful backend). Ratio 0.071 -> 0.061 (IMPROVED) because the +8717 LOC fsm-lsp is predominantly functional. Lowering 1 -> 6 is the DRIFT-2 convergence side effect (intentional, documented in Doc 00 §11.44); not a god-object regression. Remains well below the v1.0 baseline (278 / ratio 0.399)."
+  },
+
+  "conformance": {
+    "manifest_fixtures_total": 26,
+    "manifest_by_category": { "parser": 6, "validator": 6, "semantic": 7, "codegen-c": 4, "formatter": 3 },
+    "v1_1_baseline_fixtures": 25,
+    "added_v1_2": "SEM-NEG-004 (W0200 loop-in-action conformance fixture, FU-DEAD-CODES wave 0747321)",
+    "method": "AUTHORITATIVE source = tests/conformance/MANIFEST.json (`fsm test tests/conformance/` walks the manifest, NOT the dir tree). Gate cold run = 26/26. Category breakdown re-derived from MANIFEST.json id-prefix counts.",
+    "coverage_map_formal_vs_crate_split": {
+      "formal_conformance_tested": 39,
+      "untested_in_formal_harness": 34,
+      "retired_codes": 2,
+      "total_live_diagnostic_codes": 73,
+      "total_including_retired": 75,
+      "note": "COVERAGE_MAP arithmetic: 39 Tested + 34 UNTESTED + 2 RETIRED = 75 historical total; live = 75 - 2 = 73 (GATE_VERIFICATION_v1_2 Lens D confirms). The formal-harness count grew 36->39 (SEM-NEG-004 for W0200 + LSP L1 diagnostic reuse verified behaviourally against fsm check). G7 partial posture unchanged: not every live code has a formal fixture, but every new v1.2 surface (LSP epic, W0200, FU#67 allow/deny) is behaviourally tested."
+    }
+  },
+
+  "safety": {
+    "crates_forbid_unsafe": 10,
+    "crate_roots_with_forbid_unsafe": 11,
+    "crates_total": 10,
+    "root_files": [
+      "crates/fsm-diagnostics/src/lib.rs",
+      "crates/fsm-lexer/src/lib.rs",
+      "crates/fsm-ir/src/lib.rs",
+      "crates/fsm-parser/src/lib.rs",
+      "crates/fsm-formatter/src/lib.rs",
+      "crates/fsm-analyzer/src/lib.rs",
+      "crates/fsm-codegen-c/src/lib.rs",
+      "crates/fsm-simulator/src/lib.rs",
+      "crates/fsm-lsp/src/lib.rs",
+      "crates/fsm-lsp/src/main.rs",
+      "crates/fsm-cli/src/main.rs"
+    ],
+    "method": "`grep -rl '#![forbid(unsafe_code)]' crates/<c>/src/`. fsm-lsp is a lib+bin crate with two roots (lib.rs + main.rs); fsm-cli is a binary crate with one root (main.rs, not lib.rs). Counting crate-roots correctly: 11 root files across 10 crates.",
+    "unsafe_blocks": 0,
+    "attention": false,
+    "interpretation": "v1.1 had 9/9 crates (9 roots). v1.2 adds fsm-lsp (2 roots: lib.rs P3-1 fix from L2 audit; main.rs per fsm-cli bin-crate precedent) -> 10 crates / 11 roots. GATE_VERIFICATION_v1_2 Lens B independently confirmed '11 roots / 10 crates'. invariant holds for all new v1.2 surfaces."
+  },
+
+  "diagnostic_codes": {
+    "live_count": 73,
+    "retired_count": 6,
+    "retired_codes": ["E0301", "E0304", "W0400", "E0903", "W0500"],
+    "v1_2_retirement": "W0500 (FU-DEAD-CODES wave, 0747321; vestigial entry with no normative emission mandate). W0200 was IMPLEMENTED in the same wave (one site: fsm-analyzer/src/checks/action_lint.rs).",
+    "ci_lock": "all_codes_matches_expected_count test asserts count==73; updated in lockstep with W0500 retirement (0747321).",
+    "method": "Count entries in `for_each_code!` macro body in crates/fsm-diagnostics/src/lib.rs. Verified: 73 variant lines in the macro body at 7104393. Retired codes live in `pub mod deprecated::DeprecatedCode` (still parsed in suppression annotations per Doc 10 §14).",
+    "attention": false
+  },
+
+  "decisions_ledger": {
+    "section_11_total_rows": 49,
+    "v1_2_rows_range": "§11.30 - §11.49",
+    "v1_2_rows_count": 20,
+    "v1_1_rows_count": 11,
+    "method": "Counted `§11.N` distinct row numbers in docs/00-Decisions-And-Reconciliation.md. v1.2 span: §11.30 (§11.30 prospective ordering rule, the first one) through §11.49 (tag-time gate doc). Includes LSP L1-L7 waves (§11.32-38), DRIFT-1/2/3/4/5 (§11.39-44 range), re-scoping (§11.40), FU#67 (§11.41), SEC-FU (§11.42), FU#68 (§11.43), kit-evaluation (~§11.46), FU-DEAD-CODES (§11.47), SCA-ci (§11.48), GATE_VERIFICATION (§11.49)."
+  },
+
+  "behavioural_acceptance_tests": {
+    "gcc_compile_and_run_test_files": 27,
+    "shared_gcc_run_harness": "crates/fsm-cli/tests/common/mod.rs",
+    "method": "`grep -rl 'gcc' crates/*/tests/` = 27 files (same count as v1.1 baseline). No new gcc-RUN acceptance tests were added in v1.2 (the LSP epic's §5.4 suite uses in-process tower-lsp client tests, not gcc). The v1.1 battery remains intact and unmodified.",
+    "lsp_behavioural_acceptance": {
+      "method": "in-process tower-lsp client tests in crates/fsm-lsp/tests/lsp_client_acceptance.rs; each asserts wire protocol responses (decode-delta-array, byte-range oracle, diagnostic parity with fsm check)",
+      "test_file_count": 1,
+      "note": "35 #[tokio::test] items in lsp_client_acceptance.rs per GATE_VERIFICATION_v1_2 Lens B; additional unit tests in src/capabilities/*.rs"
+    }
+  },
+
+  "architecture_debt": {
+    "tracked_deferred": {
+      "item": "analyzer->parser-CST coupling cleanup (WB)",
+      "description": "fsm-analyzer directly imports and walks Rowan CST node types from fsm-parser (~15 files). The correct seam is analyzer consuming the parser's typed AST API only. Architecture audit rated it ship-acceptable / non-behavioural P1.",
+      "decision": "Deferred post-v1.2.0 tag (TL product-owner decision 2026-05-16, Doc 00 §11.49). Rationale: a ~15-file refactor of the most behaviorally-critical crate at a release boundary is worse-EV than doing it cleanly post-tag. v1.1.0 shipped the same class of arch-debt (pub over-exposure) tracked+documented in its GATE_VERIFICATION — deferring here is consistent + lower-risk.",
+      "precedent": "v1.1.0 GATE_VERIFICATION carried pub over-exposure as accepted-tracked-debt with documented rationale; same discipline applied here.",
+      "target": "v1.2.1 or early v1.3 wave; DRIFT-2-grade discipline (dedicated refactor wave, structural verification, no behaviour change)"
+    }
+  },
+
+  "gate_status": {
+    "cleanly_met": 7,
+    "acceptable_partial": 2,
+    "blocked": 0,
+    "detail": "GATE_VERIFICATION_v1_2.md §1: G1-G6, G8 clean (G8 = cold-from-source 806/0, first prospective §11.30-clean release). G7 (formal conformance 26 fixtures, not all 73 live codes) + G9 (remote CI never run, repo unpushed by design, SCA ci.yml step added but unexercised) are the same acceptable-partial posture as v1.0/v1.1. 0 open P0 (RUSTSEC-2026-0009 eliminated pre-tag at e509734)."
+  },
+
+  "pre_tag_audit_outcome": {
+    "lenses": 4,
+    "release_record_P0": 0,
+    "lsp_structural_P0": 0,
+    "correctness_P0": 0,
+    "coherence_P0": 0, "coherence_P2": 1, "coherence_P3": 2,
+    "note": "4-lens pre-tag audit (docs/AUDIT_PRE_TAG_v1_2_2026_05_16.md, bca1411). Lens A: release-record 0 P0/P1/P2/P3. Lens B: LSP epic 0 P0/P1/P2/P3. Lens C: correctness 0 P0/P1/P2/P3. Lens D: coherence 0 P0/P1, 1 P2 (self-resolving: the gate-doc itself was the deliverable), 2 P3 (D-F fixed in tag commit 7104393; D-G cosmetic no-action). Verdict TAG-CLEAR."
+  },
+
+  "security": {
+    "known_vulns": 0,
+    "rustsec_fixed": "RUSTSEC-2026-0009 (time <=0.3.36 DoS, transitive via jsonschema); root fix = jsonschema 0.17->0.22 (e509734)",
+    "cargo_audit_toolchain_note": "cargo audit >=0.22 required to parse the modern CVSS-4.0 advisory DB; rustc-1.75-pinned 0.21.1 cannot. Recipe: rustup toolchain install stable --no-self-update && cargo +stable install cargo-audit --locked. See docs/processes/SUBAGENT_CONVENTIONS.md §10 SCA row.",
+    "ci_yml_sca_step": "added at a74bdb0 (line ci.yml:55 'sca:') per §11.42/§11.48; unexercised in CI (repo unpushed, G9)"
+  },
+
+  "deltas_vs_prev": {
+    "_prev_milestone": "v1.1.0 (2026-05-15, docs/metrics/2026-05-15-v1.1.0.json)",
+    "tests_total_passing": {
+      "v1_1": 673, "v1_2": 806, "delta": 133,
+      "attention": false,
+      "note": "+133 across the LSP epic (L1-L7) + FU#67 (+13) + FU-DEAD-CODES (+1 conformance fixture). All with tower-lsp client or gcc-RUN §5.4 behavioural acceptance."
+    },
+    "loc_src_excl_tests": {
+      "v1_1": 36321, "v1_2": 45620, "delta": 9299,
+      "attention": false,
+      "note": "+25.6% from the fsm-lsp new crate (8717 LOC) plus minor additions in fsm-cli/fsm-analyzer/fsm-diagnostics. Proportionate to the LSP epic deliverable."
+    },
+    "api_surface_pub_strict": {
+      "v1_1": 638, "v1_2": 597, "delta": -41,
+      "attention": false,
+      "note": "DOWN 41 despite new fsm-lsp crate (+55). v1.2 #64 pub-hygiene + FU#68 unreachable_pub self-enforcement continued to narrow existing over-exposure. Not a regression."
+    },
+    "api_surface_pub_broad": {
+      "v1_1": 826, "v1_2": 787, "delta": -39,
+      "attention": false,
+      "note": "DOWN 39 on comparable broad method. Same hygiene story as strict. The carried P1 from v1.1 is actively trending correct."
+    },
+    "mutation_density_mut_self": {
+      "v1_1": 100, "v1_2": 103, "delta": 3,
+      "attention": false,
+      "note": "UP 3 (fsm-lsp adds 3 stateful tower-lsp Server methods — inherently necessary). Ratio 0.071 -> 0.061 IMPROVED due to the large LOC addition being predominantly functional. Not a regression."
+    },
+    "lowering_mut_self": {
+      "v1_1": 1, "v1_2": 6, "delta": 5,
+      "attention": false,
+      "note": "UP 5 from DRIFT-2 convergence (compute_line_col now lives in fsm-diagnostics/lower context; ids.rs + loc.rs + mod.rs additions are intentional, documented in Doc 00 §11.44). Not a god-object regression — still 6 total in lower/ dirs vs the v1.0 baseline of 27."
+    },
+    "conformance_fixtures": {
+      "v1_1": 25, "v1_2": 26, "delta": 1,
+      "attention": false,
+      "note": "SEM-NEG-004 (W0200 loop-in-action) added by FU-DEAD-CODES."
+    },
+    "live_diagnostic_codes": {
+      "v1_1": 74,
+      "v1_1_note": "v1.1 retired E0903 (the P0-5 option-b stopgap); v1.1 snapshot recorded 75 as historical total including retired",
+      "v1_2": 73, "delta": -1,
+      "attention": false,
+      "note": "W0500 retired in v1.2-FU-DEAD-CODES (vestigial entry with no normative emission mandate); W0200 IMPLEMENTED in the same wave. Net live = -1. CI-lock updated in lockstep."
+    },
+    "forbid_unsafe_roots": {
+      "v1_1": 9, "v1_2": 11, "delta": 2,
+      "attention": false,
+      "note": "fsm-lsp adds 2 roots (lib.rs + main.rs bin root, following fsm-cli precedent). P3-1 from the L2 post-phase audit fixed main.rs in L2. 10 crates / 11 roots; all 10 crates covered."
+    },
+    "decisions_section_11_rows": {
+      "v1_1": 29, "v1_2": 49, "delta": 20,
+      "attention": false,
+      "note": "+20 rows §11.30-§11.49 covering the LSP epic (L1-L7), DRIFT-1/2/3/4/5, re-scoping, FU#67, SEC-FU, FU#68, kit-evaluation, FU-DEAD-CODES, SCA-CI, gate-verification. Each row commit/branch-verified."
+    },
+    "regression_flags": "NONE — no metric crossed into attention-territory this release. The +3 mut_self is fsm-lsp inherent backend state; the +5 lowering mut_self is DRIFT-2 documented side-effect; both explained, not concerning. pub surface is DOWN across both methods. test count UP. conformance UP. diagnostic codes correctly DOWN (retirement)."
+  },
+
+  "process": {
+    "v1_2_waves": 21,
+    "sprint_theme": "LSP epic (fsm-lsp Language Server, L1-L7: diagnostics, documentSymbol, foldingRange, hover, definition, completion, references, prepareRename/rename, semanticTokens, codeAction, inlayHint) + pub-hygiene (#64) + SCA gate + DRIFT-1/2/3/4/5 + FU#67/68/FU-DEAD-CODES",
+    "subagent_conventions_doc": "docs/processes/SUBAGENT_CONVENTIONS.md v1.2.0 (§10 SCA row added: separate-stable-rustup-toolchain recipe for cargo-audit >=0.22)",
+    "roadmap_doc": "docs/ROADMAP.md (v1.3 = VS Code extension per Doc 27; C++17 own minor; old v1.3 Simulation verification -> v1.4)",
+    "canonical_release_record": "docs/GATE_VERIFICATION_v1_2.md (at 7104393 = tag commit, §11.30 prospective ordering satisfied)",
+    "frozen_pre_tag_audit": "docs/AUDIT_PRE_TAG_v1_2_2026_05_16.md (4 lenses, bca1411; TAG-CLEAR)",
+    "phase_boundary_audits": [
+      "docs/AUDIT_PHASE_LSP_L1_2026-05-15.md (L1 PROCEED, structural keystone-reuse verify)",
+      "docs/AUDIT_PHASE_LSP_L5_2026-05-15.md (L5 PROCEED, rename-safety structurally re-derived independently)"
+    ],
+    "key_process_refinements": [
+      "Batched doc/ledger writes: waves report §11 row text to orchestrator; single controlled batch-append eliminates parallel-append conflicts (generalisation of v1.1-W8 pattern)",
+      "Stale-artifact protocol: after worktree removal, `cargo clean -p <first-party>` + rebuild from main before any quad — stale -wt-baked-path test binaries caught this sprint",
+      "SCA gate: cargo audit >=0.22 via separate stable toolchain (1.75-pinned 0.21.1 cannot parse CVSS-4.0 DB); real check caught RUSTSEC-2026-0009 pre-tag",
+      "Kit evaluation pattern: separate unbiased agent evaluates external process kits; adopt load-bearing minimum only"
+    ],
+    "disk_during_snapshot": "15.4% free (verified, per GATE_VERIFICATION_v1_2.md §4; safe, well above 5% policy floor)"
+  }
+}
