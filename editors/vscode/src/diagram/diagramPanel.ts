@@ -24,6 +24,7 @@
 // `postMessage` JSON only — the structural model in, click/navigate events
 // out (mapped back to editor reveals via the IR `SourceLocation`).
 
+import { randomBytes } from "crypto";
 import * as path from "path";
 
 import * as vscode from "vscode";
@@ -358,13 +359,16 @@ export class DiagramController {
   }
 }
 
-/** Cryptographically-unpredictable CSP nonce (per webview render). */
+/**
+ * Cryptographically-unpredictable CSP nonce (per webview render).
+ *
+ * Sourced from Node's CSPRNG (`crypto.randomBytes`, the extension host is
+ * Node) — NOT `Math.random()`, whose output is a predictable non-crypto
+ * PRNG and is unfit to seed a Content-Security-Policy nonce (the v1.3
+ * carried GT-9 nit). 24 random bytes → a 32-char base64url token (≈192
+ * bits of entropy; comfortably exceeds the W3C "at least 128 bits"
+ * CSP-nonce recommendation).
+ */
 function makeNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let s = "";
-  for (let i = 0; i < 32; i++) {
-    s += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return s;
+  return randomBytes(24).toString("base64url");
 }

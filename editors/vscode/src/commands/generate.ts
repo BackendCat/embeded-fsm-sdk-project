@@ -56,6 +56,39 @@ function resolveStrategy(): string {
   return s.length > 0 ? s : "switch";
 }
 
+/**
+ * The remaining `fsm generate` knobs the CLI honours, surfaced as the
+ * v1.5 W-B1 JC-3 settings (`fsmLang.codegen.{queueSize,license,emitIr,
+ * reportMemory}`). Declaring a setting the handler then ignores would be
+ * a discoverability lie in the other direction — these are passed to the
+ * CLI exactly when set, never invented (`--import-header` is deliberately
+ * NOT a setting: it is a repeatable per-invocation path list with
+ * documented trusted-invoker security semantics whose proper home is
+ * `fsm.toml [generate] import_headers`, not a global editor setting).
+ */
+function appendOptionalCodegenFlags(args: string[]): void {
+  const cfg = vscode.workspace.getConfiguration("fsmLang");
+
+  const queueSize = cfg.get<number | null>("codegen.queueSize");
+  if (typeof queueSize === "number" && Number.isInteger(queueSize)) {
+    args.push("--queue-size", String(queueSize));
+  }
+
+  // Only pass --license when it diverges from the CLI's own "MIT"
+  // default, so an unchanged setting never alters the invocation.
+  const license = (cfg.get<string>("codegen.license") ?? "MIT").trim();
+  if (license.length > 0 && license !== "MIT") {
+    args.push("--license", license);
+  }
+
+  if (cfg.get<boolean>("codegen.emitIr") === true) {
+    args.push("--emit-ir");
+  }
+  if (cfg.get<boolean>("codegen.reportMemory") === true) {
+    args.push("--report-memory");
+  }
+}
+
 async function runGenerate(
   target: Target,
   deps: CommandDeps,
@@ -86,8 +119,11 @@ async function runGenerate(
     outDir,
     "--strategy",
     strategy,
-    fsmPath,
   ];
+  appendOptionalCodegenFlags(args);
+  // The CLI requires the .fsm path(s) as the trailing positional arg(s)
+  // (`#[arg(required = true)] files`), so it goes last, after any flags.
+  args.push(fsmPath);
   deps.outputChannel.appendLine(
     `[fsm] fsm.generate${target === "c99" ? "C99" : "Cpp17"}: ` +
       `${cli.command} ${args.join(" ")}`,

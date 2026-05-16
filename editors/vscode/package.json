@@ -1,13 +1,25 @@
 {
   "name": "fsm-lang",
   "displayName": "FSM Studio",
-  "description": "FSM-Lang language support, diagrams, and simulator for embedded state machines.",
-  "version": "0.1.0",
+  "description": "FSM-Lang language support, diagrams, verification, and codegen for embedded state machines.",
+  "version": "1.0.0",
   "publisher": "fsmstudio",
   "license": "MIT",
+  "icon": "assets/icon.png",
+  "keywords": [
+    "fsm",
+    "state machine",
+    "statechart",
+    "embedded",
+    "codegen",
+    "verification",
+    "model checking",
+    "C",
+    "language server"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/fsmstudio/sm-sdk"
+    "url": "https://github.com/BackendCat/embeded-fsm-sdk-project"
   },
   "galleryBanner": {
     "color": "#0D1117",
@@ -330,6 +342,55 @@
           "type": "boolean",
           "default": true,
           "description": "Show human-readable duration next to timer ms values."
+        },
+        "fsmLang.codegen.outputDir": {
+          "type": "string",
+          "default": "generated",
+          "markdownDescription": "Output directory for the **Generate C99 Code** / **Generate C++17 Code** commands (maps to `fsm generate --out`). A relative path is rooted at the `.fsm` file's workspace folder (or, with no folder, the file's own directory).",
+          "scope": "resource"
+        },
+        "fsmLang.codegen.strategy": {
+          "type": "string",
+          "enum": [
+            "switch",
+            "table",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Emit a switch-based dispatcher.",
+            "Emit a table-driven dispatcher.",
+            "Let the compiler pick per machine (the CLI default)."
+          ],
+          "default": "switch",
+          "markdownDescription": "Transition-dispatch strategy for generated code (maps to `fsm generate --strategy`). A per-machine `[machine.<Name>] strategy` in `fsm.toml` overrides this.",
+          "scope": "resource"
+        },
+        "fsmLang.codegen.queueSize": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null,
+          "minimum": 1,
+          "maximum": 128,
+          "markdownDescription": "Event-queue capacity for generated code (maps to `fsm generate --queue-size`). Must be a power of two; leave empty to use the compiler/`fsm.toml` default.",
+          "scope": "resource"
+        },
+        "fsmLang.codegen.license": {
+          "type": "string",
+          "default": "MIT",
+          "markdownDescription": "SPDX license identifier embedded in every generated file's header (maps to `fsm generate --license`).",
+          "scope": "resource"
+        },
+        "fsmLang.codegen.emitIr": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Also write the IR JSON next to the generated sources (maps to `fsm generate --emit-ir`)."
+        },
+        "fsmLang.codegen.reportMemory": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Print the computed memory budget to the FSM Studio log after emission (maps to `fsm generate --report-memory`)."
         }
       }
     },
