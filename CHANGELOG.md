@@ -7,6 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-05-17
+
+**Theme: the "Convenience Layer" (UI/DX) — surface the v1.4 verification core in VS Code.**
+
+> **Scope (Doc 31, owner-pre-framed + owner-delegated):** with the headless
+> pipeline FACTORY-COMPLETE at v1.4 (the `[[feedback_embeded_fsm_pipeline_before_ui]]`
+> "pipeline before UI" bar satisfied), `v1.5.0` is the unblocked UI/DX
+> convenience layer: verification surfaced in VS Code via **two
+> keystone-honouring seams** (a CLI-spawn of the same `fsm` binary the CI
+> calls, *and* an `fsm-lsp`-embedded `fsm/verify` that calls the *same*
+> `fsm_verify::verify`/`reachability_diagnostics` the CLI calls — there is
+> **NO** verifier re-implementation in `crates/fsm-lsp/**` or
+> `editors/vscode/**`; the KEYSTONE-IN-UI invariant, independently re-derived
+> from source by the post-A2 audit, verdict `KEYSTONE-INTACT`), a
+> Marketplace-ready extension manifest, and a scoped TS frontend-practices
+> remediation. The v1.5 **Rust** delta vs v1.4 is **small and additive by
+> design** (`git diff --shortstat 3bbcd0f d5fba3c -- crates/ Cargo.toml
+> Cargo.lock` = 7 files / +933 / −1, confined to `crates/fsm-lsp/**`: the A2
+> single `fsm-verify` path edge + the `fsm/verify` LSP capability + its
+> acceptance test) with **0 new external dependencies**; the differential
+> oracle (`crates/fsm-verify/` + `crates/fsm-cli/`) is byte-untouched. The
+> headline surface is the TypeScript editor UX (TS delta 41 files /
+> +2693 / −1026). **D1** (the static docs/landing site — the only
+> droppable-from-tag item) **slipped to v1.6**.
+
+### Added
+
+- **Verification in VS Code (`fsm.verify` / `fsm.baseline` — CLI-spawn; A1):**
+  two contributed commands consuming the **existing** `fsm verify --json` /
+  `fsm baseline --json` (the `fsm-verify/v1` schema) via the proven
+  `cliRunner`/`cliBinary` seam — zero Rust delta, zero new spawn machinery.
+  INCONCLUSIVE / `bound.hit` rendered **honestly** (exit-2 shown as
+  inconclusive, **never** a false "verified" — the cardinal verification-UI
+  sin guard); the deadlock counterexample witness as a navigable list reusing
+  the diagram's click→source mechanism; reachability `FSM-E0400`/`FSM-W0602`
+  surfaced as a dedicated VS Code `DiagnosticCollection`. Host-tested to
+  byte-equality against a real `fsm`-binary differential oracle.
+- **Live verification in VS Code (`fsm.verifyLive` — LSP-embed; A2):** a new
+  `fsm/verify` LSP custom request — the **single Rust-layer change of the
+  epic** (one `fsm-verify = { path = "../fsm-verify" }` edge in
+  `crates/fsm-lsp/Cargo.toml`; **no new crate**). The capability is a **pure
+  frontend** of `fsm-verify` (the same `analyze` seam + the **identical**
+  `fsm_verify::verify`/`reachability_diagnostics` the CLI calls + verbatim
+  `VerifyOutcome` marshalling — **zero verification facts computed locally**).
+  The VS Code client is **debounced** + **large-FSM-ceiling-guarded** +
+  `State.Running`-honest-degrade (an auto-verify-on-every-keystroke of a large
+  FSM would hang the editor — the trigger is explicit/debounced; `fsm-verify`
+  is bounded-by-construction so an explosive model returns *inconclusive*
+  within bound, never a hang).
+- **Marketplace-ready VS Code extension (B1):** `editors/vscode/package.json`
+  made Marketplace-valid — `version` `0.1.0`→`1.0.0`, `icon` + `keywords`
+  added, `repository.url` corrected to the owner repo, a Marketplace-facing
+  README + a user-facing CHANGELOG. New `fsmLang.codegen.*` settings exposed
+  in `contributes.configuration`. A **lint-clean, installable VSIX** is the
+  shipped artifact (publishing is an owner credential action — **not**
+  published).
+- **`prettier` on the VS Code extension (C2 / C1-F2):** `prettier@3.8.3` +
+  `.prettierrc.json` + `.prettierignore` + `format`/`format:check` scripts;
+  the one-time mechanical reformat isolated in its own byte-behaviour-identity
+  commit.
+- **Extension-Host E2E for the live verify UX (C2 / C1-F1+C1-F9):** a real
+  headless-host test driving the registered `fsm.verifyLive` command
+  end-to-end against the real `fsm`-binary differential oracle — asserting the
+  witness list **and the INCONCLUSIVE-not-"verified" honesty guard
+  end-to-end** (not a renderer/unit mock); the *hardening* of the A1/A2 verify
+  UX (the CellWar "R6 — the only truth" standard in the correct primitive for
+  an extension). Extension-Host suite: 41 passing, green via
+  `xvfb-run @vscode/test-electron`.
+
+### Fixed
+
+- **The GT-2 wrong-repo-slug (B1):** `editors/vscode/package.json`
+  `repository.url` was the **concretely-wrong third-party slug**
+  `fsmstudio/sm-sdk` (a published extension would have linked users to a
+  stranger's/non-existent repo) — corrected to the owner remote
+  `https://github.com/BackendCat/embeded-fsm-sdk-project`.
+- **`makeNonce` `Math.random`→CSPRNG nonce (B1; the carried v1.3.x nit):**
+  `src/diagram/diagramPanel.ts` `makeNonce()` now uses
+  `randomBytes(24).toString("base64url")` (was `Math.random()` under a doc
+  comment claiming "cryptographically-unpredictable" — comment/code honesty
+  restored on the strict-CSP webview).
+
+### Known limitations
+
+- **D1 (docs/landing site) slipped to v1.6.** The static
+  EdgeForge-modeled docs/landing site was the **only droppable-from-tag
+  item** (owner pre-decision); its v1.5 agent run was output-content-filtered
+  and left uncommitted unreviewed work, which was **deliberately discarded
+  (not shipped, not built upon)**. Re-scoped to v1.6, carrying with it the
+  LICENSE/CONTRIBUTING/CoC gap and the client-trigger-policy doc-surfacing.
+- **The v1.6 FE-hygiene batch (deferred-tracked, not dropped):** the C1 audit
+  dispositioned the flat ESLint-9 migration (C1-F3), `madge` import-cycle
+  guard (C1-F7), and a `noUncheckedIndexedAccess` strictness delta as a
+  coherent **v1.6 "VS Code extension FE-hygiene" batch** — real-but-modest
+  value that must not ride the v1.5 Marketplace pass (the leave-and-explain
+  discipline; the surface is fundamentally sound).
+- **Carried owner-escalations (re-stated, not resolved):** the **G9** push of
+  the LOCAL `v1.0.0`–`v1.5.0` tags + checkpoints + commits + the CI matrix /
+  SCA / JS lane never run on a remote runner (the v1.5 JS lane is a binding
+  *local* gate but remote-unrun); **Marketplace publish** (now publish-*ready*
+  via B1, still owner-published); the **5-platform binary tail**
+  (blocked-on-G9; no cross toolchains on the box); the parked
+  **Certifiability / MISRA–CERT-C** track (owner-GO required); the top-level
+  **`LICENSE`/`CONTRIBUTING`/`CoC`** gap (owner/legal, now carried to v1.6
+  with D1); the mechanised **sim≡codegen-equivalence** proof (R7 — named
+  v1.4-stretch/later deferral, unchanged). The broader README/Doc-07/Doc-14
+  doc-honesty staleness pass is a **separate already-identified backlog item**
+  (flagged in `GATE_VERIFICATION_v1_5.md` §6.4, not fixed in this minor; only
+  the `docs/ROADMAP.md` "See also" stale pointer was reconciled here).
+- **G7 / G9 partials** are the same explicitly-tracked posture accepted at
+  v1.0–v1.4 (formal conformance = 26 fixtures, not all 73 live codes — the
+  v1.5 verify *surface* is behaviourally tested via the Extension-Host suite +
+  the LSP differential test; the remote CI matrix has never run). Neither is a
+  v1.5 regression.
+
+See `docs/GATE_VERIFICATION_v1_5.md` for the full release gate, the KEYSTONE-IN-UI evidence, the cold-quad + re-activated-JS-lane posture, and the carried owner-escalations.
+
 ## [1.4.0] — 2026-05-16
 
 **Theme: Trustable behavioral validation — the verification core (`fsm verify` + `fsm baseline`).**
