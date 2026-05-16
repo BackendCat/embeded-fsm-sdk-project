@@ -18,10 +18,7 @@ import { noCliBinaryMessage, resolveCliBinary } from "./cliBinary";
 import { runCli } from "./cliRunner";
 import { error, errorWithLog, info, warn } from "./notify";
 
-export function registerFormatDocument(
-  context: vscode.ExtensionContext,
-  deps: CommandDeps,
-): void {
+export function registerFormatDocument(context: vscode.ExtensionContext, deps: CommandDeps): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("fsm.formatDocument", async () => {
       const editor = vscode.window.activeTextEditor;
@@ -42,8 +39,7 @@ export function registerFormatDocument(
       const doc = editor.document;
       const original = doc.getText();
       deps.outputChannel.appendLine(
-        `[fsm] fsm.formatDocument: ${cli.command} fmt --stdin ` +
-          `(${doc.uri.fsPath})`,
+        `[fsm] fsm.formatDocument: ${cli.command} fmt --stdin ` + `(${doc.uri.fsPath})`,
       );
 
       const res = await runCli(cli.command, ["fmt", "--stdin"], {
@@ -51,9 +47,7 @@ export function registerFormatDocument(
       });
 
       if (res.spawnError) {
-        deps.outputChannel.appendLine(
-          `[fsm] format could not spawn the CLI: ${res.stderr}`,
-        );
+        deps.outputChannel.appendLine(`[fsm] format could not spawn the CLI: ${res.stderr}`);
         error(`FSM Studio: could not run fsm fmt — ${res.stderr.trim()}`);
         return;
       }
@@ -67,10 +61,7 @@ export function registerFormatDocument(
           res.stderr.trim().length > 0
             ? res.stderr.trim().split("\n")[0]
             : `fsm fmt exited with code ${res.code}`;
-        errorWithLog(
-          `FSM Studio: cannot format — ${detail}`,
-          deps.outputChannel,
-        );
+        errorWithLog(`FSM Studio: cannot format — ${detail}`, deps.outputChannel);
         return;
       }
 
@@ -82,17 +73,12 @@ export function registerFormatDocument(
 
       // Apply as ONE replace edit over the whole document so a single
       // undo reverts it and the buffer remains the source of truth.
-      const fullRange = new vscode.Range(
-        doc.positionAt(0),
-        doc.positionAt(original.length),
-      );
+      const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(original.length));
       const ok = await editor.edit((eb) => {
         eb.replace(fullRange, formatted);
       });
       if (ok) {
-        deps.outputChannel.appendLine(
-          "[fsm] document formatted (single replace edit).",
-        );
+        deps.outputChannel.appendLine("[fsm] document formatted (single replace edit).");
       } else {
         error("FSM Studio: failed to apply the formatting edit.");
       }

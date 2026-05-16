@@ -65,9 +65,7 @@ interface DiagramModel {
   regions: GraphRegion[];
 }
 
-type ExtToWebview =
-  | { type: "render"; model: DiagramModel }
-  | { type: "staleBanner"; text: string };
+type ExtToWebview = { type: "render"; model: DiagramModel } | { type: "staleBanner"; text: string };
 
 interface VsCodeApi {
   postMessage(msg: unknown): void;
@@ -79,9 +77,7 @@ const elk = new ELK();
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-function el<K extends keyof SVGElementTagNameMap>(
-  name: K,
-): SVGElementTagNameMap[K] {
+function el<K extends keyof SVGElementTagNameMap>(name: K): SVGElementTagNameMap[K] {
   return document.createElementNS(SVG_NS, name);
 }
 
@@ -126,9 +122,7 @@ async function renderModel(model: DiagramModel): Promise<{
     },
     children: model.nodes.map((n) => ({
       id: n.id,
-      width: PSEUDO_KINDS.has(n.kind)
-        ? 24
-        : Math.max(140, n.label.length * 9 + 24),
+      width: PSEUDO_KINDS.has(n.kind) ? 24 : Math.max(140, n.label.length * 9 + 24),
       height: PSEUDO_KINDS.has(n.kind) ? 24 : 44,
     })),
     edges: model.edges.map((e) => ({
@@ -148,10 +142,7 @@ async function renderModel(model: DiagramModel): Promise<{
   const h = Math.ceil(laid.height ?? 600);
   svg.setAttribute("viewBox", `0 0 ${w + 40} ${h + 40}`);
 
-  const pos = new Map<
-    string,
-    { x: number; y: number; w: number; h: number }
-  >();
+  const pos = new Map<string, { x: number; y: number; w: number; h: number }>();
   for (const c of laid.children ?? []) {
     pos.set(c.id, {
       x: c.x ?? 0,
@@ -175,9 +166,7 @@ async function renderModel(model: DiagramModel): Promise<{
       const p = el("path");
       p.setAttribute(
         "d",
-        `M ${x1} ${y1} C ${x1} ${(y1 + y2) / 2}, ${x2} ${
-          (y1 + y2) / 2
-        }, ${x2} ${y2}`,
+        `M ${x1} ${y1} C ${x1} ${(y1 + y2) / 2}, ${x2} ${(y1 + y2) / 2}, ${x2} ${y2}`,
       );
       g.appendChild(p);
       if (e.label) {

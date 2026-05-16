@@ -189,11 +189,7 @@ export function isVerified(v: VerifyJson): boolean {
  * virtual-document body). Pure formatting of CLI-provided data — every
  * value is read verbatim from `v`; nothing is recomputed.
  */
-export function renderVerifyReport(
-  v: VerifyJson,
-  fsmPath: string,
-  rawStdout: string,
-): string {
+export function renderVerifyReport(v: VerifyJson, fsmPath: string, rawStdout: string): string {
   // If the CLI output did not parse into the expected envelope, show the
   // raw CLI text verbatim (honest) rather than a fabricated summary.
   if (!v.schema || !v.schema.startsWith("fsm-verify/")) {
@@ -227,15 +223,9 @@ export function renderVerifyReport(
     // Make the INCONCLUSIVE state unmissable (Doc 31 §1 W-A1: "the
     // INCONCLUSIVE state unmissable"). This is NOT "verified".
     lines.push("");
-    lines.push(
-      "  ⚠ INCONCLUSIVE — a search bound was hit; the reachable",
-    );
-    lines.push(
-      "    state space was NOT fully explored. This is NOT a proof",
-    );
-    lines.push(
-      "    of correctness. Re-run with a larger --max-states /",
-    );
+    lines.push("  ⚠ INCONCLUSIVE — a search bound was hit; the reachable");
+    lines.push("    state space was NOT fully explored. This is NOT a proof");
+    lines.push("    of correctness. Re-run with a larger --max-states /");
     lines.push("    --max-steps to attempt a conclusive verdict.");
   }
   lines.push("");
@@ -278,9 +268,7 @@ export function renderVerifyReport(
         lines.push(`  ${i + 1}. ${ev}`);
       });
     } else {
-      lines.push(
-        "  Counterexample witness: (empty — the initial configuration",
-      );
+      lines.push("  Counterexample witness: (empty — the initial configuration");
       lines.push("    is itself the deadlock)");
     }
   }
@@ -300,17 +288,10 @@ export function renderVerifyReport(
   const diags = reach?.diagnostics ?? [];
   if (diags.length > 0) {
     lines.push("");
-    lines.push(
-      `  Reachability diagnostics (${diags.length}) — also in the`,
-    );
-    lines.push(
-      "  Problems panel, click to jump to source:",
-    );
+    lines.push(`  Reachability diagnostics (${diags.length}) — also in the`);
+    lines.push("  Problems panel, click to jump to source:");
     for (const d of diags) {
-      lines.push(
-        `    ${d.code} [${d.severity}] ${d.message} ` +
-          `(line ${d.line}, col ${d.col})`,
-      );
+      lines.push(`    ${d.code} [${d.severity}] ${d.message} ` + `(line ${d.line}, col ${d.col})`);
     }
   }
   lines.push("");
@@ -330,12 +311,8 @@ export function renderVerifyReport(
   }
   lines.push("");
   lines.push("─".repeat(48));
-  lines.push(
-    "This report is the verbatim render of `fsm verify --json`",
-  );
-  lines.push(
-    "(the same `fsm` binary the CI/factory runs). No verification",
-  );
+  lines.push("This report is the verbatim render of `fsm verify --json`");
+  lines.push("(the same `fsm` binary the CI/factory runs). No verification");
   lines.push("logic runs in the editor — it spawns the CLI and renders.");
   lines.push("");
   return lines.join("\n");
@@ -347,10 +324,7 @@ export function renderVerifyReport(
  * (no-drift / drift / inconclusive — "inconclusive" is NEVER shown as
  * "no-drift", mirroring the baseline schema's own honesty).
  */
-export function renderBaselineReport(
-  b: BaselineJson,
-  rawStdout: string,
-): string {
+export function renderBaselineReport(b: BaselineJson, rawStdout: string): string {
   if (!b.schema || !b.schema.startsWith("fsm-trace-diff/")) {
     return [
       "FSM Studio — Baseline (regression-replay) result",
@@ -386,12 +360,8 @@ export function renderBaselineReport(
   }
   if (b.verdict === "inconclusive") {
     lines.push("");
-    lines.push(
-      "  ⚠ INCONCLUSIVE — the baseline corpus was absent / unreadable /",
-    );
-    lines.push(
-      "    not fsm-trace/v1, so drift could be neither confirmed nor",
-    );
+    lines.push("  ⚠ INCONCLUSIVE — the baseline corpus was absent / unreadable /");
+    lines.push("    not fsm-trace/v1, so drift could be neither confirmed nor");
     lines.push("    denied. This is NOT a clean 'no-drift' result.");
   }
   lines.push("");
@@ -399,15 +369,10 @@ export function renderBaselineReport(
   lines.push(`─ Per-FSM (${fsms.length}) ─────────────────────────────`);
   for (const f of fsms) {
     lines.push(
-      `  ${f.result ?? "?"}  ${f.fsm ?? "(unknown)"}` +
-        (f.machine ? ` [${f.machine}]` : ""),
+      `  ${f.result ?? "?"}  ${f.fsm ?? "(unknown)"}` + (f.machine ? ` [${f.machine}]` : ""),
     );
     if (f.result === "drift" && f.firstMismatch) {
-      lines.push(
-        `      first mismatch at step ${
-          f.firstMismatch.step ?? "?"
-        }`,
-      );
+      lines.push(`      first mismatch at step ${f.firstMismatch.step ?? "?"}`);
     }
     if (f.result === "inconclusive" && f.reason) {
       lines.push(`      reason: ${f.reason}`);
@@ -415,9 +380,7 @@ export function renderBaselineReport(
   }
   lines.push("");
   lines.push("─".repeat(48));
-  lines.push(
-    "Verbatim render of `fsm baseline --json` (the CI/factory binary).",
-  );
+  lines.push("Verbatim render of `fsm baseline --json` (the CI/factory binary).");
   lines.push("");
   return lines.join("\n");
 }
@@ -428,9 +391,7 @@ export function renderBaselineReport(
  * echoes it. Read-only by construction (no `TextDocumentContentProvider`
  * write path exists) — the result is a report, never an editable buffer.
  */
-export class VerifyResultDocProvider
-  implements vscode.TextDocumentContentProvider
-{
+export class VerifyResultDocProvider implements vscode.TextDocumentContentProvider {
   public static readonly scheme = "fsm-verify";
   private readonly bodies = new Map<string, string>();
   private readonly emitter = new vscode.EventEmitter<vscode.Uri>();
@@ -446,8 +407,7 @@ export class VerifyResultDocProvider
 
   public provideTextDocumentContent(uri: vscode.Uri): string {
     return (
-      this.bodies.get(uri.toString()) ??
-      "FSM Studio: (no verification result for this document)"
+      this.bodies.get(uri.toString()) ?? "FSM Studio: (no verification result for this document)"
     );
   }
 

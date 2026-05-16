@@ -32,9 +32,7 @@ function cliExeName(): string {
 
 /** Server executable basename — to derive the CLI sibling from Rule 1. */
 function serverExeName(): string {
-  return os.platform() === "win32"
-    ? "fsm-lang-server.exe"
-    : "fsm-lang-server";
+  return os.platform() === "win32" ? "fsm-lang-server.exe" : "fsm-lang-server";
 }
 
 /**
@@ -82,10 +80,7 @@ export function resolveCliBinary(
     // something not named `fsm-lang-server`, still look for `fsm` in the
     // same dir (the two binaries always co-build into one directory).
     const sibling = path.join(dir, cliExeName());
-    if (
-      path.basename(compilerPath) === serverExeName() ||
-      fs.existsSync(sibling)
-    ) {
+    if (path.basename(compilerPath) === serverExeName() || fs.existsSync(sibling)) {
       if (fs.existsSync(sibling)) {
         return { command: sibling, source: "compilerPath-sibling" };
       }
@@ -93,12 +88,7 @@ export function resolveCliBinary(
   }
 
   // Rule 2: bundled host-triple CLI (Doc 22 §12 `bin/<triple>/` scheme).
-  const bundled = path.join(
-    extensionPath,
-    "bin",
-    hostTriple(),
-    cliExeName(),
-  );
+  const bundled = path.join(extensionPath, "bin", hostTriple(), cliExeName());
   if (fs.existsSync(bundled)) {
     return { command: bundled, source: "bundled" };
   }

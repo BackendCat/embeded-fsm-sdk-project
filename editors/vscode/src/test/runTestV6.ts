@@ -32,9 +32,7 @@ async function main(): Promise<void> {
 
     // A throwaway, pristine VS Code user profile so `fsmLang.compilerPath`
     // is GUARANTEED unset — the precondition that forces V1's Rule-2.
-    userDataDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "fsm-v6-userdata-"),
-    );
+    userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsm-v6-userdata-"));
 
     await runTests({
       extensionDevelopmentPath,

@@ -131,11 +131,7 @@ function reportUri(fsmPath: string, kind: "verify" | "baseline"): vscode.Uri {
 }
 
 /** Open (or refresh) the read-only result document beside the editor. */
-async function showReport(
-  deps: VerifyDeps,
-  uri: vscode.Uri,
-  body: string,
-): Promise<void> {
+async function showReport(deps: VerifyDeps, uri: vscode.Uri, body: string): Promise<void> {
   deps.resultDocs.set(uri, body);
   const doc = await vscode.workspace.openTextDocument(uri);
   await vscode.languages.setTextDocumentLanguage(doc, "plaintext");
@@ -146,21 +142,14 @@ async function showReport(
   });
 }
 
-async function runVerify(
-  cmdDeps: CommandDeps,
-  vDeps: VerifyDeps,
-  arg: unknown,
-): Promise<void> {
+async function runVerify(cmdDeps: CommandDeps, vDeps: VerifyDeps, arg: unknown): Promise<void> {
   const fsmPath = resolveTargetFsm(arg);
   if (!fsmPath) {
     warn("FSM Studio: open a .fsm file to verify.");
     return;
   }
 
-  const cli = resolveCliBinary(
-    cmdDeps.extensionPath,
-    vscode.workspace.getConfiguration("fsmLang"),
-  );
+  const cli = resolveCliBinary(cmdDeps.extensionPath, vscode.workspace.getConfiguration("fsmLang"));
   if (!cli) {
     // No silent no-op — the verbatim missing-CLI message (the cardinal-sin
     // bar at the command boundary; identical to checkFile/generate).
@@ -169,17 +158,13 @@ async function runVerify(
   }
 
   const args = ["verify", "--json", fsmPath];
-  cmdDeps.outputChannel.appendLine(
-    `[fsm] fsm.verify: ${cli.command} ${args.join(" ")}`,
-  );
+  cmdDeps.outputChannel.appendLine(`[fsm] fsm.verify: ${cli.command} ${args.join(" ")}`);
   const res = await runCli(cli.command, args, {
     cwd: path.dirname(fsmPath),
   });
 
   if (res.spawnError) {
-    cmdDeps.outputChannel.appendLine(
-      `[fsm] verify could not spawn the CLI: ${res.stderr}`,
-    );
+    cmdDeps.outputChannel.appendLine(`[fsm] verify could not spawn the CLI: ${res.stderr}`);
     error(`FSM Studio: could not run fsm verify — ${res.stderr.trim()}`);
     return;
   }
@@ -198,9 +183,7 @@ async function runVerify(
   // bar). Exit 0/1/2 ARE verdicts (verified / property-violated /
   // INCONCLUSIVE) and flow to the honest render below.
   if (res.code === 3 || res.code === 4) {
-    const detail =
-      res.stderr.trim().split("\n")[0] ||
-      `fsm verify exited with code ${res.code}`;
+    const detail = res.stderr.trim().split("\n")[0] || `fsm verify exited with code ${res.code}`;
     error(`FSM Studio: cannot verify — ${detail}`);
     return;
   }
@@ -213,11 +196,7 @@ async function runVerify(
   // Reachability FSM-E0400/FSM-W0602 → the dedicated DiagnosticCollection
   // (line/col straight from the JSON — VS Code's native click→source).
   if (parsed) {
-    publishReachabilityDiagnostics(
-      vDeps.reachDiagnostics,
-      vscode.Uri.file(fsmPath),
-      parsed,
-    );
+    publishReachabilityDiagnostics(vDeps.reachDiagnostics, vscode.Uri.file(fsmPath), parsed);
   }
 
   // A non-blocking toast mirroring the CLI's OWN verdict (never a verdict
@@ -250,21 +229,14 @@ async function runVerify(
   }
 }
 
-async function runBaseline(
-  cmdDeps: CommandDeps,
-  vDeps: VerifyDeps,
-  arg: unknown,
-): Promise<void> {
+async function runBaseline(cmdDeps: CommandDeps, vDeps: VerifyDeps, arg: unknown): Promise<void> {
   const fsmPath = resolveTargetFsm(arg);
   if (!fsmPath) {
     warn("FSM Studio: open a .fsm file to run a baseline check.");
     return;
   }
 
-  const cli = resolveCliBinary(
-    cmdDeps.extensionPath,
-    vscode.workspace.getConfiguration("fsmLang"),
-  );
+  const cli = resolveCliBinary(cmdDeps.extensionPath, vscode.workspace.getConfiguration("fsmLang"));
   if (!cli) {
     error(noCliBinaryMessage(`${process.platform}-${process.arch}`));
     return;
@@ -276,15 +248,11 @@ async function runBaseline(
   // against the corpus — the read-only, factory-equivalent invocation.
   const suiteDir = path.dirname(fsmPath);
   const args = ["baseline", "--json", suiteDir];
-  cmdDeps.outputChannel.appendLine(
-    `[fsm] fsm.baseline: ${cli.command} ${args.join(" ")}`,
-  );
+  cmdDeps.outputChannel.appendLine(`[fsm] fsm.baseline: ${cli.command} ${args.join(" ")}`);
   const res = await runCli(cli.command, args, { cwd: suiteDir });
 
   if (res.spawnError) {
-    cmdDeps.outputChannel.appendLine(
-      `[fsm] baseline could not spawn the CLI: ${res.stderr}`,
-    );
+    cmdDeps.outputChannel.appendLine(`[fsm] baseline could not spawn the CLI: ${res.stderr}`);
     error(`FSM Studio: could not run fsm baseline — ${res.stderr.trim()}`);
     return;
   }
@@ -299,9 +267,7 @@ async function runBaseline(
   // are not a verdict — surface verbatim, no fake summary. 0/1/2 are
   // verdicts (no-drift / drift / INCONCLUSIVE) and render honestly.
   if (res.code === 3 || res.code === 4) {
-    const detail =
-      res.stderr.trim().split("\n")[0] ||
-      `fsm baseline exited with code ${res.code}`;
+    const detail = res.stderr.trim().split("\n")[0] || `fsm baseline exited with code ${res.code}`;
     error(`FSM Studio: baseline could not run — ${detail}`);
     return;
   }
@@ -313,10 +279,7 @@ async function runBaseline(
 
   if (parsed && parsed.schema?.startsWith("fsm-trace-diff/")) {
     if (parsed.verdict === "no-drift") {
-      infoWithLog(
-        "FSM Studio: baseline — NO-DRIFT.",
-        cmdDeps.outputChannel,
-      );
+      infoWithLog("FSM Studio: baseline — NO-DRIFT.", cmdDeps.outputChannel);
     } else if (parsed.verdict === "inconclusive") {
       warnWithLog(
         "FSM Studio: baseline — INCONCLUSIVE (corpus absent/unreadable; " +
@@ -380,9 +343,7 @@ async function runVerifyLive(
   // The authoritative content is the IN-EDITOR buffer (the live edge over
   // A1's on-disk CLI-spawn). Find the open document for this path; fall
   // back to reading it if it is not open in an editor.
-  let doc = vscode.workspace.textDocuments.find(
-    (d) => d.uri.fsPath === fsmPath,
-  );
+  let doc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === fsmPath);
   if (!doc) {
     try {
       doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsmPath));
@@ -439,18 +400,13 @@ async function runVerifyLive(
 
   let result: FsmVerifyLiveResult;
   try {
-    result = await client.sendRequest<FsmVerifyLiveResult>(
-      "fsm/verify",
-      params,
-    );
+    result = await client.sendRequest<FsmVerifyLiveResult>("fsm/verify", params);
   } catch (e) {
     // A JSON-RPC error (e.g. invalid-params) or a transport failure —
     // surfaced verbatim, NEVER a fabricated clean verdict (cardinal-sin
     // bar at the request boundary).
     const msg = e instanceof Error ? e.message : String(e);
-    cmdDeps.outputChannel.appendLine(
-      `[fsm] fsm/verify request failed: ${msg}`,
-    );
+    cmdDeps.outputChannel.appendLine(`[fsm] fsm/verify request failed: ${msg}`);
     error(`FSM Studio: live verification request failed — ${msg}`);
     return;
   }
@@ -481,11 +437,7 @@ async function runVerifyLive(
   // Reachability FSM-E0400/FSM-W0602 → the SAME dedicated
   // `DiagnosticCollection` A1 publishes to (line/col straight from the
   // envelope — VS Code's native click→source; no recompute).
-  publishReachabilityDiagnostics(
-    vDeps.reachDiagnostics,
-    vscode.Uri.file(fsmPath),
-    v,
-  );
+  publishReachabilityDiagnostics(vDeps.reachDiagnostics, vscode.Uri.file(fsmPath), v);
 
   // A non-blocking toast mirroring the LSP/CLI's OWN verdict (never
   // re-derived). INCONCLUSIVE is announced as inconclusive — never a pass
@@ -518,13 +470,9 @@ async function runVerifyLive(
  * `verifyResult.ts` render — they are two honest frontends of the SAME
  * `fsm-verify` (the keystone-in-UI invariant, Doc 31 §2), not a fork.
  */
-export function registerVerify(
-  context: vscode.ExtensionContext,
-  cmdDeps: CommandDeps,
-): void {
+export function registerVerify(context: vscode.ExtensionContext, cmdDeps: CommandDeps): void {
   const resultDocs = new VerifyResultDocProvider();
-  const reachDiagnostics =
-    vscode.languages.createDiagnosticCollection("fsm-verify");
+  const reachDiagnostics = vscode.languages.createDiagnosticCollection("fsm-verify");
   context.subscriptions.push(
     resultDocs,
     reachDiagnostics,
@@ -539,12 +487,8 @@ export function registerVerify(
   const liveInflight = new Map<string, number>();
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fsm.verify", (arg) =>
-      runVerify(cmdDeps, vDeps, arg),
-    ),
-    vscode.commands.registerCommand("fsm.baseline", (arg) =>
-      runBaseline(cmdDeps, vDeps, arg),
-    ),
+    vscode.commands.registerCommand("fsm.verify", (arg) => runVerify(cmdDeps, vDeps, arg)),
+    vscode.commands.registerCommand("fsm.baseline", (arg) => runBaseline(cmdDeps, vDeps, arg)),
     vscode.commands.registerCommand("fsm.verifyLive", (arg) =>
       runVerifyLive(cmdDeps, vDeps, liveInflight, arg),
     ),

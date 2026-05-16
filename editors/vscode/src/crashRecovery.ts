@@ -39,9 +39,7 @@ export class FsmErrorHandler implements ErrorHandler {
 
   constructor(
     private readonly onState: (
-      state:
-        | { kind: "restarting"; attempt: number; delayMs: number }
-        | { kind: "exhausted" },
+      state: { kind: "restarting"; attempt: number; delayMs: number } | { kind: "exhausted" },
     ) => void,
   ) {}
 

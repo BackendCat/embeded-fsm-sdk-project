@@ -62,11 +62,7 @@ export type EmitIrResult =
        * `noIrFile` → defensive: exit 0 but no `.ir.json` (the verified CLI
        * contract says this cannot happen; still never fake output).
        */
-      readonly reason:
-        | "noCli"
-        | "spawnError"
-        | "codegenFailed"
-        | "noIrFile";
+      readonly reason: "noCli" | "spawnError" | "codegenFailed" | "noIrFile";
       /** A single-line, user-presentable explanation. */
       readonly detail: string;
     };
@@ -105,15 +101,7 @@ export async function emitIr(
   // just to read the IR (the copyIr.ts:51-56 pattern, verbatim intent).
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsm-emitir-"));
   try {
-    const args = [
-      "generate",
-      "--target",
-      "c99",
-      "--out",
-      tmpDir,
-      "--emit-ir",
-      fsmPath,
-    ];
+    const args = ["generate", "--target", "c99", "--out", tmpDir, "--emit-ir", fsmPath];
     log.appendLine(`[fsm] emitIr: ${cli.command} ${args.join(" ")}`);
     const res = await runCli(cli.command, args, {
       cwd: path.dirname(fsmPath),
@@ -125,8 +113,7 @@ export async function emitIr(
         ok: false,
         reason: "spawnError",
         detail:
-          `could not run fsm generate — ${res.stderr.trim()}` ||
-          "the fsm CLI could not be spawned",
+          `could not run fsm generate — ${res.stderr.trim()}` || "the fsm CLI could not be spawned",
       };
     }
     if (res.stderr.trim().length > 0) {
@@ -149,25 +136,20 @@ export async function emitIr(
 
     // Locate the single `*.ir.json` (named after the first machine —
     // crates/fsm-cli/src/cmd/generate.rs:191-199).
-    const irFiles = fs
-      .readdirSync(tmpDir)
-      .filter((f) => f.endsWith(".ir.json"));
+    const irFiles = fs.readdirSync(tmpDir).filter((f) => f.endsWith(".ir.json"));
     if (irFiles.length === 0) {
       // Defensive: exit 0 but no IR file (cannot happen given the verified
       // CLI contract) — still never fake output.
       return {
         ok: false,
         reason: "noIrFile",
-        detail:
-          "the CLI reported success but wrote no .ir.json file",
+        detail: "the CLI reported success but wrote no .ir.json file",
       };
     }
 
     const irPath = path.join(tmpDir, irFiles[0]);
     const json = fs.readFileSync(irPath, "utf8");
-    log.appendLine(
-      `[fsm] emitIr produced ${irFiles[0]} (${json.length} bytes).`,
-    );
+    log.appendLine(`[fsm] emitIr produced ${irFiles[0]} (${json.length} bytes).`);
     return { ok: true, json, irFileName: irFiles[0] };
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

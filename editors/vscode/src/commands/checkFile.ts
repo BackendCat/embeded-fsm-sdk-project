@@ -16,10 +16,7 @@ import { noCliBinaryMessage, resolveCliBinary } from "./cliBinary";
 import { runCli } from "./cliRunner";
 import { error, errorWithLog, info, warn, warnWithLog } from "./notify";
 
-export function registerCheckFile(
-  context: vscode.ExtensionContext,
-  deps: CommandDeps,
-): void {
+export function registerCheckFile(context: vscode.ExtensionContext, deps: CommandDeps): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("fsm.checkFile", async (arg) => {
       const fsmPath = resolveTargetFsm(arg);
@@ -39,18 +36,12 @@ export function registerCheckFile(
       }
 
       const file = path.basename(fsmPath);
-      deps.outputChannel.appendLine(
-        `[fsm] fsm.checkFile: ${cli.command} check ${fsmPath}`,
-      );
+      deps.outputChannel.appendLine(`[fsm] fsm.checkFile: ${cli.command} check ${fsmPath}`);
       const res = await runCli(cli.command, ["check", fsmPath]);
 
       if (res.spawnError) {
-        deps.outputChannel.appendLine(
-          `[fsm] check could not spawn the CLI: ${res.stderr}`,
-        );
-        error(
-          `FSM Studio: could not run fsm check — ${res.stderr.trim()}`,
-        );
+        deps.outputChannel.appendLine(`[fsm] check could not spawn the CLI: ${res.stderr}`);
+        error(`FSM Studio: could not run fsm check — ${res.stderr.trim()}`);
         return;
       }
 
@@ -76,10 +67,7 @@ export function registerCheckFile(
           deps.outputChannel,
         );
       } else {
-        errorWithLog(
-          `FSM Studio: fsm check exited with code ${res.code}.`,
-          deps.outputChannel,
-        );
+        errorWithLog(`FSM Studio: fsm check exited with code ${res.code}.`, deps.outputChannel);
       }
     }),
   );

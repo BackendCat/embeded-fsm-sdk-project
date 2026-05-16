@@ -32,11 +32,7 @@ import * as path from "path";
 
 import * as vscode from "vscode";
 
-import {
-  OracleDiag,
-  assertAsciiColumnInvariant,
-  cliOracle,
-} from "../suite/oracle";
+import { OracleDiag, assertAsciiColumnInvariant, cliOracle } from "../suite/oracle";
 
 // __dirname = <vscodeDir>/out/test/suiteV6  →  <vscodeDir>
 const VSCODE_DIR = path.resolve(__dirname, "../../../");
@@ -69,19 +65,14 @@ async function waitForDiagnostics(
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `timed out waiting for diagnostics on ${uri.fsPath}; ` +
-          `last = ${JSON.stringify(diags)}`,
+        `timed out waiting for diagnostics on ${uri.fsPath}; ` + `last = ${JSON.stringify(diags)}`,
       );
     }
     await new Promise((r) => setTimeout(r, 150));
   }
 }
 
-function assertRangeMatchesOracle(
-  got: vscode.Diagnostic,
-  want: OracleDiag,
-  label: string,
-): void {
+function assertRangeMatchesOracle(got: vscode.Diagnostic, want: OracleDiag, label: string): void {
   assert.strictEqual(got.code, want.code, `[${label}] code == CLI oracle`);
   assert.strictEqual(
     got.range.start.line,
@@ -126,21 +117,10 @@ suite("FSM Studio V6 — bundled-binary VSIX + Rule-2 acceptance", () => {
 
     const triple = hostTriple();
     const sfx = exeSuffix();
-    bundledServer = path.join(
-      VSCODE_DIR,
-      "bin",
-      triple,
-      `fsm-lang-server${sfx}`,
-    );
+    bundledServer = path.join(VSCODE_DIR, "bin", triple, `fsm-lang-server${sfx}`);
     bundledCli = path.join(VSCODE_DIR, "bin", triple, `fsm${sfx}`);
-    assert.ok(
-      fs.existsSync(bundledServer),
-      `populate-bin must have produced ${bundledServer}`,
-    );
-    assert.ok(
-      fs.existsSync(bundledCli),
-      `populate-bin must have produced ${bundledCli}`,
-    );
+    assert.ok(fs.existsSync(bundledServer), `populate-bin must have produced ${bundledServer}`);
+    assert.ok(fs.existsSync(bundledCli), `populate-bin must have produced ${bundledCli}`);
 
     // 2. R-15 isolation: stage fixtures in an OS temp dir (NOT under the
     //    repo) so the bundled CLI's upward fsm.toml walk finds none —
@@ -166,9 +146,7 @@ suite("FSM Studio V6 — bundled-binary VSIX + Rule-2 acceptance", () => {
     // 3. PROVE Rule-2 is the active path: fsmLang.compilerPath MUST be
     //    empty (this Host is launched with a pristine --user-data-dir, so
     //    it already is — assert it loudly rather than trust it).
-    const cfg = vscode.workspace
-      .getConfiguration("fsmLang")
-      .get<string>("compilerPath");
+    const cfg = vscode.workspace.getConfiguration("fsmLang").get<string>("compilerPath");
     assert.ok(
       cfg === undefined || cfg.trim() === "",
       `V6 Rule-2 precondition: fsmLang.compilerPath must be UNSET so the ` +
@@ -186,9 +164,7 @@ suite("FSM Studio V6 — bundled-binary VSIX + Rule-2 acceptance", () => {
     const startDeadline = Date.now() + 30_000;
     while (!api.serverStarted) {
       if (Date.now() > startDeadline) {
-        throw new Error(
-          "bundled language server never reached Running state",
-        );
+        throw new Error("bundled language server never reached Running state");
       }
       await new Promise((r) => setTimeout(r, 150));
     }
@@ -218,26 +194,19 @@ suite("FSM Studio V6 — bundled-binary VSIX + Rule-2 acceptance", () => {
     // The same flags the committed `package` script uses
     // (--no-dependencies: the extension is esbuild-bundled, so the VSIX
     // ships ZERO runtime node_modules — see .vscodeignore rationale).
-    const vsceBin = path.join(
-      VSCODE_DIR,
-      "node_modules",
-      ".bin",
-      "vsce",
-    );
-    execFileSync(
-      vsceBin,
-      ["package", "--no-dependencies", "--out", vsixPath],
-      { cwd: VSCODE_DIR, stdio: "inherit" },
-    );
+    const vsceBin = path.join(VSCODE_DIR, "node_modules", ".bin", "vsce");
+    execFileSync(vsceBin, ["package", "--no-dependencies", "--out", vsixPath], {
+      cwd: VSCODE_DIR,
+      stdio: "inherit",
+    });
     assert.ok(fs.existsSync(vsixPath), "vsce package must emit the .vsix");
 
     // The authoritative content listing — `vsce ls` prints exactly the
     // files vsce put in the package (NOT a guess about .vscodeignore).
-    const listing = execFileSync(
-      vsceBin,
-      ["ls", "--no-dependencies"],
-      { cwd: VSCODE_DIR, encoding: "utf8" },
-    );
+    const listing = execFileSync(vsceBin, ["ls", "--no-dependencies"], {
+      cwd: VSCODE_DIR,
+      encoding: "utf8",
+    });
     const files = listing
       .split("\n")
       .map((s) => s.trim())
@@ -253,14 +222,10 @@ suite("FSM Studio V6 — bundled-binary VSIX + Rule-2 acceptance", () => {
       files.includes(wantServer),
       `VSIX must contain ${wantServer}; got:\n${files.join("\n")}`,
     );
-    assert.ok(
-      files.includes(wantCli),
-      `VSIX must contain ${wantCli}; got:\n${files.join("\n")}`,
-    );
+    assert.ok(files.includes(wantCli), `VSIX must contain ${wantCli}; got:\n${files.join("\n")}`);
     assert.ok(
       files.some((f) => f === "dist/extension.js"),
-      `VSIX must contain dist/extension.js (the extension main); ` +
-        `got:\n${files.join("\n")}`,
+      `VSIX must contain dist/extension.js (the extension main); ` + `got:\n${files.join("\n")}`,
     );
 
     // EXCLUDED: source, tests, node_modules (lean — duck-principle).
@@ -276,8 +241,7 @@ suite("FSM Studio V6 — bundled-binary VSIX + Rule-2 acceptance", () => {
     assert.deepStrictEqual(
       bad,
       [],
-      `VSIX must EXCLUDE node_modules/src/out/test/*.ts; leaked:\n` +
-        bad.join("\n"),
+      `VSIX must EXCLUDE node_modules/src/out/test/*.ts; leaked:\n` + bad.join("\n"),
     );
 
     // The .vsix is a real zip whose `extension/` prefix carries the same
@@ -293,15 +257,11 @@ suite("FSM Studio V6 — bundled-binary VSIX + Rule-2 acceptance", () => {
         `extension/${wantCli} + extension/dist/extension.js`,
     );
     assert.ok(
-      !/(\s|\/)node_modules\//.test(zipList) &&
-        !/extension\/src\//.test(zipList),
+      !/(\s|\/)node_modules\//.test(zipList) && !/extension\/src\//.test(zipList),
       "the .vsix zip must NOT contain node_modules/ or src/",
     );
 
-    const sizeMb = (
-      fs.statSync(vsixPath).size /
-      (1024 * 1024)
-    ).toFixed(2);
+    const sizeMb = (fs.statSync(vsixPath).size / (1024 * 1024)).toFixed(2);
     // eslint-disable-next-line no-console
     console.log(
       `V6: installable .vsix = ${sizeMb} MB; ` +
@@ -351,15 +311,10 @@ suite("FSM Studio V6 — bundled-binary VSIX + Rule-2 acceptance", () => {
         `bundled CLI, got ${JSON.stringify(oracle)}`,
     );
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
-    const diags = await waitForDiagnostics(
-      doc.uri,
-      (d) => d.length === 1,
-    );
+    const diags = await waitForDiagnostics(doc.uri, (d) => d.length === 1);
     assertRangeMatchesOracle(diags[0], oracle[0], "broken.fsm (bundled)");
   });
 
@@ -372,10 +327,7 @@ suite("FSM Studio V6 — bundled-binary VSIX + Rule-2 acceptance", () => {
     const source = fs.readFileSync(fixture, "utf8");
     const oracle = cliOracle(bundledCli, fixture);
     assertAsciiColumnInvariant(source, oracle);
-    assert.ok(
-      oracle.length >= 1,
-      "oracle precondition: non_ascii_doc.fsm has >= 1 diagnostic",
-    );
+    assert.ok(oracle.length >= 1, "oracle precondition: non_ascii_doc.fsm has >= 1 diagnostic");
     const first = oracle[0];
     assert.strictEqual(
       first.code,
@@ -388,15 +340,10 @@ suite("FSM Studio V6 — bundled-binary VSIX + Rule-2 acceptance", () => {
         `(got 0-based startLine ${first.startLine})`,
     );
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
-    const diags = await waitForDiagnostics(
-      doc.uri,
-      (d) => d.some((x) => x.code === "FSM-E0100"),
-    );
+    const diags = await waitForDiagnostics(doc.uri, (d) => d.some((x) => x.code === "FSM-E0100"));
     const got = diags.find((d) => d.code === "FSM-E0100");
     assert.ok(got, "the FSM-E0100 diagnostic must be present");
     assertRangeMatchesOracle(got, first, "non_ascii_doc.fsm (bundled)");

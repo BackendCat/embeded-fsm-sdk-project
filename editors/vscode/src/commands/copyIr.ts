@@ -36,10 +36,7 @@ import { CommandDeps } from "./index";
 import { emitIr } from "../diagram/emitIr";
 import { error, errorWithLog, info, warn } from "./notify";
 
-export function registerCopyIr(
-  context: vscode.ExtensionContext,
-  deps: CommandDeps,
-): void {
+export function registerCopyIr(context: vscode.ExtensionContext, deps: CommandDeps): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("fsm.copyIR", async (arg) => {
       const fsmPath = resolveTargetFsm(arg);
@@ -82,12 +79,9 @@ export function registerCopyIr(
 
       await vscode.env.clipboard.writeText(res.json);
       deps.outputChannel.appendLine(
-        `[fsm] copied IR (${res.irFileName}, ${res.json.length} bytes) ` +
-          "to the clipboard.",
+        `[fsm] copied IR (${res.irFileName}, ${res.json.length} bytes) ` + "to the clipboard.",
       );
-      info(
-        `FSM Studio: IR JSON copied to the clipboard (${res.irFileName}).`,
-      );
+      info(`FSM Studio: IR JSON copied to the clipboard (${res.irFileName}).`);
     }),
   );
 }

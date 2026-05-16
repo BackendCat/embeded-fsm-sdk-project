@@ -53,10 +53,7 @@ interface RawJsonDiag {
  * diagnostics mapped into VS Code coordinates. Throws if the CLI is missing
  * or emits non-JSON (a hard failure, not a silent empty oracle).
  */
-export function cliOracle(
-  fsmBinary: string,
-  fsmFilePath: string,
-): OracleDiag[] {
+export function cliOracle(fsmBinary: string, fsmFilePath: string): OracleDiag[] {
   if (!fs.existsSync(fsmBinary)) {
     throw new Error(`oracle: fsm CLI not found at ${fsmBinary}`);
   }
@@ -96,10 +93,7 @@ export function cliOracle(
  * fixture ever violates this the mapping would silently mis-encode — this
  * makes that a loud failure instead.
  */
-export function assertAsciiColumnInvariant(
-  sourceText: string,
-  diags: OracleDiag[],
-): void {
+export function assertAsciiColumnInvariant(sourceText: string, diags: OracleDiag[]): void {
   const lines = sourceText.split("\n");
   for (const d of diags) {
     for (const [ln, ch] of [

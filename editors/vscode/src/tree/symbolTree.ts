@@ -106,9 +106,7 @@ function projectSymbol(sym: DocumentSymbol): FsmTreeNode {
  *   active `.fsm` (already the canonical single-analysis projection — this
  *   function adds no analysis and reaches for no CLI/IR path).
  */
-export function projectMachineTree(
-  symbols: readonly DocumentSymbol[],
-): FsmTreeNode[] {
+export function projectMachineTree(symbols: readonly DocumentSymbol[]): FsmTreeNode[] {
   return symbols.map(projectSymbol);
 }
 
@@ -123,14 +121,10 @@ export function projectMachineTree(
  * Events tree is a *lens* over the canonical projection, never a second
  * analysis or a different data source.
  */
-export function projectEventTree(
-  symbols: readonly DocumentSymbol[],
-): FsmTreeNode[] {
+export function projectEventTree(symbols: readonly DocumentSymbol[]): FsmTreeNode[] {
   const out: FsmTreeNode[] = [];
   for (const machine of symbols) {
-    const eventsGroup = (machine.children ?? []).find(
-      (c) => c.name === "events",
-    );
+    const eventsGroup = (machine.children ?? []).find((c) => c.name === "events");
     const eventLeaves = (eventsGroup?.children ?? []).map(projectSymbol);
     if (eventLeaves.length === 0) {
       continue;

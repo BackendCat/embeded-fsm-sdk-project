@@ -33,51 +33,46 @@ export function registerRestartLanguageServer(
   deps: CommandDeps,
 ): void {
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "fsm.restartLanguageServer",
-      async () => {
-        const client = deps.getClient();
-        if (!client) {
-          // Honest degradation: no language client to restart (no
-          // fsm-lang-server binary resolved). Not a silent no-op. The
-          // toast is fire-and-handle (not awaited) — the command is done.
-          deps.outputChannel.appendLine(
-            "[fsm] restart requested but no language client is running " +
-              "(no fsm-lang-server binary resolved at activation).",
-          );
-          warnWithLog(
-            "FSM Studio: no language server is running to restart. " +
-              "Set fsmLang.compilerPath or install a bundled binary.",
-            deps.outputChannel,
-          );
-          return;
-        }
-
-        // V1's restart semantics — resets the Doc 22 §13.2 crash counter
-        // and calls client.restart() (re-spawns with V1's UNCHANGED
-        // omit-transport serverOptions; M-1 preserved by construction).
+    vscode.commands.registerCommand("fsm.restartLanguageServer", async () => {
+      const client = deps.getClient();
+      if (!client) {
+        // Honest degradation: no language client to restart (no
+        // fsm-lang-server binary resolved). Not a silent no-op. The
+        // toast is fire-and-handle (not awaited) — the command is done.
         deps.outputChannel.appendLine(
-          "[fsm] fsm.restartLanguageServer — restarting language client " +
-            "(omit-transport Executable preserved; M-1).",
+          "[fsm] restart requested but no language client is running " +
+            "(no fsm-lang-server binary resolved at activation).",
         );
-        await deps.restartServer();
+        warnWithLog(
+          "FSM Studio: no language server is running to restart. " +
+            "Set fsmLang.compilerPath or install a bundled binary.",
+          deps.outputChannel,
+        );
+        return;
+      }
 
-        // Confirm the client actually came back up (it would NOT if a
-        // regression had re-added `--stdio`/`transport` and the server
-        // exited 2). This is the user-visible half of the M-1 guard; the
-        // V3 behavioural test asserts a diagnostic re-round-trips.
-        if (client.state === State.Running) {
-          deps.outputChannel.appendLine(
-            "[fsm] language client is Running again after restart.",
-          );
-        } else {
-          deps.outputChannel.appendLine(
-            `[fsm] WARNING: language client state is ${State[client.state]} ` +
-              "after restart — the server may have failed to start.",
-          );
-        }
-      },
-    ),
+      // V1's restart semantics — resets the Doc 22 §13.2 crash counter
+      // and calls client.restart() (re-spawns with V1's UNCHANGED
+      // omit-transport serverOptions; M-1 preserved by construction).
+      deps.outputChannel.appendLine(
+        "[fsm] fsm.restartLanguageServer — restarting language client " +
+          "(omit-transport Executable preserved; M-1).",
+      );
+      await deps.restartServer();
+
+      // Confirm the client actually came back up (it would NOT if a
+      // regression had re-added `--stdio`/`transport` and the server
+      // exited 2). This is the user-visible half of the M-1 guard; the
+      // V3 behavioural test asserts a diagnostic re-round-trips.
+      if (client.state === State.Running) {
+        deps.outputChannel.appendLine("[fsm] language client is Running again after restart.");
+      } else {
+        deps.outputChannel.appendLine(
+          `[fsm] WARNING: language client state is ${State[client.state]} ` +
+            "after restart — the server may have failed to start.",
+        );
+      }
+    }),
   );
 }
 

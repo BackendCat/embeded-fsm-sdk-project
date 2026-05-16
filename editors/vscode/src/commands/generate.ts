@@ -33,15 +33,11 @@ type Target = "c99" | "cpp17";
  */
 function resolveOutputDir(fsmPath: string): string {
   const cfg = vscode.workspace.getConfiguration("fsmLang");
-  const configured = (
-    cfg.get<string>("codegen.outputDir") ?? "generated"
-  ).trim();
+  const configured = (cfg.get<string>("codegen.outputDir") ?? "generated").trim();
   if (path.isAbsolute(configured)) {
     return configured;
   }
-  const folder = vscode.workspace.getWorkspaceFolder(
-    vscode.Uri.file(fsmPath),
-  );
+  const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(fsmPath));
   const root = folder ? folder.uri.fsPath : path.dirname(fsmPath);
   return path.join(root, configured);
 }
@@ -49,9 +45,7 @@ function resolveOutputDir(fsmPath: string): string {
 /** Doc 22 §8 `fsmLang.codegen.strategy` (switch|table; CLI also `auto`). */
 function resolveStrategy(): string {
   const s = (
-    vscode.workspace
-      .getConfiguration("fsmLang")
-      .get<string>("codegen.strategy") ?? "switch"
+    vscode.workspace.getConfiguration("fsmLang").get<string>("codegen.strategy") ?? "switch"
   ).trim();
   return s.length > 0 ? s : "switch";
 }
@@ -89,21 +83,14 @@ function appendOptionalCodegenFlags(args: string[]): void {
   }
 }
 
-async function runGenerate(
-  target: Target,
-  deps: CommandDeps,
-  arg: unknown,
-): Promise<void> {
+async function runGenerate(target: Target, deps: CommandDeps, arg: unknown): Promise<void> {
   const fsmPath = resolveTargetFsm(arg);
   if (!fsmPath) {
     warn("FSM Studio: open a .fsm file to generate code.");
     return;
   }
 
-  const cli = resolveCliBinary(
-    deps.extensionPath,
-    vscode.workspace.getConfiguration("fsmLang"),
-  );
+  const cli = resolveCliBinary(deps.extensionPath, vscode.workspace.getConfiguration("fsmLang"));
   if (!cli) {
     error(noCliBinaryMessage(`${process.platform}-${process.arch}`));
     return;
@@ -111,15 +98,7 @@ async function runGenerate(
 
   const outDir = resolveOutputDir(fsmPath);
   const strategy = resolveStrategy();
-  const args = [
-    "generate",
-    "--target",
-    target,
-    "--out",
-    outDir,
-    "--strategy",
-    strategy,
-  ];
+  const args = ["generate", "--target", target, "--out", outDir, "--strategy", strategy];
   appendOptionalCodegenFlags(args);
   // The CLI requires the .fsm path(s) as the trailing positional arg(s)
   // (`#[arg(required = true)] files`), so it goes last, after any flags.
@@ -134,9 +113,7 @@ async function runGenerate(
   });
 
   if (res.spawnError) {
-    deps.outputChannel.appendLine(
-      `[fsm] generate could not spawn the CLI: ${res.stderr}`,
-    );
+    deps.outputChannel.appendLine(`[fsm] generate could not spawn the CLI: ${res.stderr}`);
     error(`FSM Studio: could not run fsm generate — ${res.stderr.trim()}`);
     return;
   }
@@ -173,16 +150,9 @@ async function runGenerate(
   );
 }
 
-export function registerGenerate(
-  context: vscode.ExtensionContext,
-  deps: CommandDeps,
-): void {
+export function registerGenerate(context: vscode.ExtensionContext, deps: CommandDeps): void {
   context.subscriptions.push(
-    vscode.commands.registerCommand("fsm.generateC99", (arg) =>
-      runGenerate("c99", deps, arg),
-    ),
-    vscode.commands.registerCommand("fsm.generateCpp17", (arg) =>
-      runGenerate("cpp17", deps, arg),
-    ),
+    vscode.commands.registerCommand("fsm.generateC99", (arg) => runGenerate("c99", deps, arg)),
+    vscode.commands.registerCommand("fsm.generateCpp17", (arg) => runGenerate("cpp17", deps, arg)),
   );
 }

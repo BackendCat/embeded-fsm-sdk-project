@@ -60,12 +60,7 @@ export function resolveServerBinary(
   }
 
   // Rule 2: bundled host-triple binary (Doc 22 §12). V1 = host-only.
-  const bundled = path.join(
-    extensionPath,
-    "bin",
-    hostTriple(),
-    serverExeName(),
-  );
+  const bundled = path.join(extensionPath, "bin", hostTriple(), serverExeName());
   if (fs.existsSync(bundled)) {
     return { command: bundled, source: "bundled" };
   }

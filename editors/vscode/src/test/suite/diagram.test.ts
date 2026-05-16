@@ -57,15 +57,10 @@ import { resolveRealBinaries } from "./binaries";
 // drives the codegen-gated boundary directly (its ctor registers NO command
 // — only `registerOpenDiagram` does, and the extension already did that in
 // activate()).
-import {
-  DiagramController,
-  STALE_BANNER as SUT_STALE_BANNER,
-  parseAndBuild,
-} from "../../diagram";
+import { DiagramController, STALE_BANNER as SUT_STALE_BANNER, parseAndBuild } from "../../diagram";
 
 const FIXTURE_SRC = path.resolve(__dirname, "../fixtures");
-const STALE_BANNER =
-  "⚠ Diagram shows last valid state. Fix parse errors to update.";
+const STALE_BANNER = "⚠ Diagram shows last valid state. Fix parse errors to update.";
 
 interface FsmExtensionApi {
   readonly serverStarted: boolean;
@@ -96,12 +91,7 @@ function oracleSets(ir: OracleIr): {
 } {
   const nodeIds = new Set<string>();
   const edges = new Set<string>();
-  const withTx = new Set([
-    "simple",
-    "composite",
-    "parallel",
-    "submachine_ref",
-  ]);
+  const withTx = new Set(["simple", "composite", "parallel", "submachine_ref"]);
   const withRegions = new Set(["composite", "parallel"]);
   const walk = (r: OracleRegion | undefined): void => {
     for (const s of r?.states ?? []) {
@@ -127,28 +117,18 @@ function oracleSets(ir: OracleIr): {
 function emitIrOracle(cli: string, fsmPath: string): OracleIr {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "fsm-v4-iror-"));
   try {
-    execFileSync(
-      cli,
-      ["generate", "--target", "c99", "--out", out, "--emit-ir", fsmPath],
-      { stdio: "ignore" },
-    );
-    const irFile = fs
-      .readdirSync(out)
-      .find((f) => f.endsWith(".ir.json"));
+    execFileSync(cli, ["generate", "--target", "c99", "--out", out, "--emit-ir", fsmPath], {
+      stdio: "ignore",
+    });
+    const irFile = fs.readdirSync(out).find((f) => f.endsWith(".ir.json"));
     assert.ok(irFile, "oracle: real --emit-ir wrote a .ir.json");
-    return JSON.parse(
-      fs.readFileSync(path.join(out, irFile), "utf8"),
-    ) as OracleIr;
+    return JSON.parse(fs.readFileSync(path.join(out, irFile), "utf8")) as OracleIr;
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
   }
 }
 
-async function waitFor(
-  predicate: () => boolean,
-  what: string,
-  timeoutMs = 30_000,
-): Promise<void> {
+async function waitFor(predicate: () => boolean, what: string, timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (predicate()) {
@@ -200,11 +180,7 @@ suite("FSM Studio V4 — Extension-Host diagram behavioural acceptance", () => {
     // host state and matches the V3 suite.
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        bins.server,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", bins.server, vscode.ConfigurationTarget.Global);
 
     const ext = vscode.extensions.getExtension("fsmstudio.fsm-lang");
     assert.ok(ext, "extension fsmstudio.fsm-lang must be present");
@@ -221,19 +197,15 @@ suite("FSM Studio V4 — Extension-Host diagram behavioural acceptance", () => {
       vscode.window as unknown as {
         createWebviewPanel: typeof vscode.window.createWebviewPanel;
       }
-    ).createWebviewPanel = ((
-      ...args: Parameters<typeof vscode.window.createWebviewPanel>
-    ) => {
+    ).createWebviewPanel = ((...args: Parameters<typeof vscode.window.createWebviewPanel>) => {
       const panel = (
         realCreate as (
           ...a: Parameters<typeof vscode.window.createWebviewPanel>
         ) => vscode.WebviewPanel
       )(...args);
-      panel.webview.onDidReceiveMessage(
-        (m: Record<string, unknown>) => {
-          webviewMsgs.push(m);
-        },
-      );
+      panel.webview.onDidReceiveMessage((m: Record<string, unknown>) => {
+        webviewMsgs.push(m);
+      });
       return panel;
     }) as typeof vscode.window.createWebviewPanel;
   });
@@ -241,11 +213,7 @@ suite("FSM Studio V4 — Extension-Host diagram behavioural acceptance", () => {
   suiteTeardown(async () => {
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        undefined,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", undefined, vscode.ConfigurationTarget.Global);
     if (tmpDir && fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -254,10 +222,7 @@ suite("FSM Studio V4 — Extension-Host diagram behavioural acceptance", () => {
   // Precondition (NOT the acceptance): the command exists.
   test("fsm.openDiagram is registered", async () => {
     const all = await vscode.commands.getCommands(true);
-    assert.ok(
-      all.includes("fsm.openDiagram"),
-      "fsm.openDiagram must be a registered command",
-    );
+    assert.ok(all.includes("fsm.openDiagram"), "fsm.openDiagram must be a registered command");
   });
 
   // (1) IR→GRAPH FIDELITY — the REAL command renders the EXACT
@@ -268,9 +233,7 @@ suite("FSM Studio V4 — Extension-Host diagram behavioural acceptance", () => {
     this.timeout(120_000);
 
     const fixture = path.join(tmpDir, "clean.fsm"); // machine Gate
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
     webviewMsgs.length = 0;
@@ -300,16 +263,8 @@ suite("FSM Studio V4 — Extension-Host diagram behavioural acceptance", () => {
     // The Gate fixture's known structural truth (re-derived above so a
     // schema change fails loudly): 1 initial pseudo + 2 simple states;
     // 2 transitions (Closed->Open, Open->Closed).
-    assert.strictEqual(
-      nodeIds.size,
-      3,
-      "oracle precondition: Gate has 3 state nodes",
-    );
-    assert.strictEqual(
-      edges.size,
-      2,
-      "oracle precondition: Gate has 2 transitions",
-    );
+    assert.strictEqual(nodeIds.size, 3, "oracle precondition: Gate has 3 state nodes");
+    assert.strictEqual(edges.size, 2, "oracle precondition: Gate has 2 transitions");
 
     // The REAL Webview ack's counts MUST equal the oracle's set sizes.
     assert.strictEqual(
@@ -345,8 +300,7 @@ suite("FSM Studio V4 — Extension-Host diagram behavioural acceptance", () => {
     assert.deepStrictEqual(
       new Set(model.edges.map((e) => `${e.source}->${e.target}`)),
       edges,
-      "the SUT's projected edge (source->target) set must equal the " +
-        "real IR's transition set",
+      "the SUT's projected edge (source->target) set must equal the " + "real IR's transition set",
     );
     // Every node must carry a 1-based SourceLocation (the click→source
     // substrate, Doc 05 §1.5.4) — a model without locs cannot navigate.
@@ -387,9 +341,7 @@ suite("FSM Studio V4 — Extension-Host diagram behavioural acceptance", () => {
     const mut = path.join(tmpDir, "_boundary.fsm");
     fs.copyFileSync(path.join(tmpDir, "clean.fsm"), mut);
 
-    const docu = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(mut),
-    );
+    const docu = await vscode.workspace.openTextDocument(vscode.Uri.file(mut));
     await vscode.window.showTextDocument(docu);
 
     webviewMsgs.length = 0;
@@ -420,44 +372,26 @@ suite("FSM Studio V4 — Extension-Host diagram behavioural acceptance", () => {
     //     `codegenFailed` / refresh() path a pure codegen ICE takes (the
     //     V3-blessed analogue — broken.fsm's content; `fsm generate`
     //     exits non-zero, NO IR written).
-    const failingSrc = fs.readFileSync(
-      path.join(tmpDir, "broken.fsm"),
-      "utf8",
-    );
+    const failingSrc = fs.readFileSync(path.join(tmpDir, "broken.fsm"), "utf8");
     fs.writeFileSync(mut, failingSrc);
     // Sanity: confirm the CLI really declines to write an .ir.json for
     // this source (the codegen-gated precondition, proven not assumed).
     {
-      const probe = fs.mkdtempSync(
-        path.join(os.tmpdir(), "fsm-v4-probe-"),
-      );
+      const probe = fs.mkdtempSync(path.join(os.tmpdir(), "fsm-v4-probe-"));
       let exit = 0;
       try {
-        execFileSync(
-          cliBinary,
-          [
-            "generate",
-            "--target",
-            "c99",
-            "--out",
-            probe,
-            "--emit-ir",
-            mut,
-          ],
-          { stdio: "ignore" },
-        );
+        execFileSync(cliBinary, ["generate", "--target", "c99", "--out", probe, "--emit-ir", mut], {
+          stdio: "ignore",
+        });
       } catch (e) {
         exit = (e as { status?: number }).status ?? 1;
       }
-      const wroteIr = fs
-        .readdirSync(probe)
-        .some((f) => f.endsWith(".ir.json"));
+      const wroteIr = fs.readdirSync(probe).some((f) => f.endsWith(".ir.json"));
       fs.rmSync(probe, { recursive: true, force: true });
       assert.notStrictEqual(
         exit,
         0,
-        "codegen-gated precondition: `fsm generate` must exit " +
-          "non-zero for the failing source",
+        "codegen-gated precondition: `fsm generate` must exit " + "non-zero for the failing source",
       );
       assert.strictEqual(
         wroteIr,
@@ -473,10 +407,7 @@ suite("FSM Studio V4 — Extension-Host diagram behavioural acceptance", () => {
 
     // The Webview must acknowledge the Doc 05 §1.5.9 banner.
     await waitFor(
-      () =>
-        webviewMsgs.some(
-          (m) => m.type === "staleShown" && m.bannerVisible === true,
-        ),
+      () => webviewMsgs.some((m) => m.type === "staleShown" && m.bannerVisible === true),
       "the Webview to acknowledge the Doc 05 §1.5.9 stale banner",
       30_000,
     );

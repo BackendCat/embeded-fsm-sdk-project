@@ -37,16 +37,9 @@
 // (extension.ts:248-261) — V5 only forwards it into `setContext`.
 
 import * as vscode from "vscode";
-import {
-  LanguageClient,
-  State,
-} from "vscode-languageclient/node";
+import { LanguageClient, State } from "vscode-languageclient/node";
 
-import {
-  FsmTreeNode,
-  projectEventTree,
-  projectMachineTree,
-} from "./symbolTree";
+import { FsmTreeNode, projectEventTree, projectMachineTree } from "./symbolTree";
 
 const LANGUAGE_ID = "fsm-lang";
 
@@ -146,11 +139,8 @@ class FsmTreeItem extends vscode.TreeItem {
  * (flat per-machine events) views without duplicating the
  * documentSymbol acquisition.
  */
-class FsmSymbolTreeProvider
-  implements vscode.TreeDataProvider<FsmTreeItem>
-{
-  private readonly emitter =
-    new vscode.EventEmitter<FsmTreeItem | undefined>();
+class FsmSymbolTreeProvider implements vscode.TreeDataProvider<FsmTreeItem> {
+  private readonly emitter = new vscode.EventEmitter<FsmTreeItem | undefined>();
   readonly onDidChangeTreeData = this.emitter.event;
 
   /** Cache of the last projection so `getChildren(element)` can recurse
@@ -161,9 +151,7 @@ class FsmSymbolTreeProvider
   private activeUri: vscode.Uri | undefined;
 
   constructor(
-    private readonly project: (
-      symbols: readonly vscode.DocumentSymbol[],
-    ) => FsmTreeNode[],
+    private readonly project: (symbols: readonly vscode.DocumentSymbol[]) => FsmTreeNode[],
   ) {}
 
   /** Re-acquire the `documentSymbol` projection for the active editor and
@@ -186,9 +174,10 @@ class FsmSymbolTreeProvider
     // undefined/[] → an HONEST empty tree, never the IR path.
     let symbols: vscode.DocumentSymbol[] | undefined;
     try {
-      symbols = await vscode.commands.executeCommand<
-        vscode.DocumentSymbol[]
-      >("vscode.executeDocumentSymbolProvider", this.activeUri);
+      symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+        "vscode.executeDocumentSymbolProvider",
+        this.activeUri,
+      );
     } catch {
       // A momentarily-unavailable provider is an empty tree, not a crash
       // and never a fabricated/IR-sourced one (the cardinal-sin bar).
@@ -236,13 +225,8 @@ class FsmSymbolTreeProvider
  */
 function updateContextKeys(deps: ExplorerDeps): void {
   const editor = vscode.window.activeTextEditor;
-  const hasFsm =
-    editor !== undefined && editor.document.languageId === LANGUAGE_ID;
-  void vscode.commands.executeCommand(
-    "setContext",
-    CK_HAS_OPEN_FSM,
-    hasFsm,
-  );
+  const hasFsm = editor !== undefined && editor.document.languageId === LANGUAGE_ID;
+  void vscode.commands.executeCommand("setContext", CK_HAS_OPEN_FSM, hasFsm);
   const client = deps.getClient();
   void vscode.commands.executeCommand(
     "setContext",
@@ -286,34 +270,19 @@ export function registerFsmExplorer(
   context.subscriptions.push(machineProvider, eventProvider);
 
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider(
-      "fsm.machineExplorer",
-      machineProvider,
-    ),
-    vscode.window.registerTreeDataProvider(
-      "fsm.eventExplorer",
-      eventProvider,
-    ),
+    vscode.window.registerTreeDataProvider("fsm.machineExplorer", machineProvider),
+    vscode.window.registerTreeDataProvider("fsm.eventExplorer", eventProvider),
   );
 
   const refreshAll = async (): Promise<void> => {
-    await Promise.all([
-      machineProvider.refresh(),
-      eventProvider.refresh(),
-    ]);
+    await Promise.all([machineProvider.refresh(), eventProvider.refresh()]);
   };
 
   // The Doc 05 §1.3.2 `view/title` refresh affordance — one command per
   // explorer (the manifest wires each to its own view's title bar).
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "fsm.refreshMachineExplorer",
-      () => machineProvider.refresh(),
-    ),
-    vscode.commands.registerCommand(
-      "fsm.refreshEventExplorer",
-      () => eventProvider.refresh(),
-    ),
+    vscode.commands.registerCommand("fsm.refreshMachineExplorer", () => machineProvider.refresh()),
+    vscode.commands.registerCommand("fsm.refreshEventExplorer", () => eventProvider.refresh()),
   );
 
   // Click→declaration: reveal the authoritative `selectionRange` (Doc 05
@@ -326,14 +295,8 @@ export function registerFsmExplorer(
       async (uri: vscode.Uri, range: vscode.Range) => {
         const doc = await vscode.workspace.openTextDocument(uri);
         const editor = await vscode.window.showTextDocument(doc);
-        editor.selection = new vscode.Selection(
-          range.start,
-          range.end,
-        );
-        editor.revealRange(
-          range,
-          vscode.TextEditorRevealType.InCenterIfOutsideViewport,
-        );
+        editor.selection = new vscode.Selection(range.start, range.end);
+        editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
       },
     ),
   );
@@ -366,9 +329,7 @@ export function registerFsmExplorer(
   // here (which would either force registration AFTER V1's spawn or
   // duplicate V1's status-bar handler — the N-4 precedent sanctions only
   // the statusBar.ts string touch, nothing more in V1's lifecycle block).
-  context.subscriptions.push(
-    vscode.languages.onDidChangeDiagnostics(() => sync()),
-  );
+  context.subscriptions.push(vscode.languages.onDidChangeDiagnostics(() => sync()));
 
   // Belt-and-braces: if a client already exists at registration time
   // (V5 registered after V1's spawn), also mirror its `onDidChangeState`
@@ -376,9 +337,7 @@ export function registerFsmExplorer(
   // when no binary resolved (the tree stays in its honest empty state).
   const client = deps.getClient();
   if (client) {
-    context.subscriptions.push(
-      client.onDidChangeState(() => sync()),
-    );
+    context.subscriptions.push(client.onDidChangeState(() => sync()));
   }
 
   // Initial paint + context-key seed (covers the file-already-open case).

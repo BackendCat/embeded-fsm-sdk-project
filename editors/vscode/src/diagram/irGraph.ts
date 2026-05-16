@@ -121,12 +121,7 @@ export interface DiagramModel {
 }
 
 /** `kind`s that own a `transitions[]` array (Doc 09 §4/§6). */
-const STATES_WITH_TRANSITIONS = new Set([
-  "simple",
-  "composite",
-  "parallel",
-  "submachine_ref",
-]);
+const STATES_WITH_TRANSITIONS = new Set(["simple", "composite", "parallel", "submachine_ref"]);
 /** `kind`s that own nested `regions[]` (Doc 09 §4.2/§4.3). */
 const STATES_WITH_REGIONS = new Set(["composite", "parallel"]);
 
@@ -193,9 +188,7 @@ function walkRegion(
   regions.push({ id: region.id, name: region.name, parentState });
   for (const st of region.states) {
     const label =
-      typeof st.name === "string" && st.name.length > 0
-        ? st.name
-        : pseudoLabel(st.kind, st.id);
+      typeof st.name === "string" && st.name.length > 0 ? st.name : pseudoLabel(st.kind, st.id);
     nodes.push({
       id: st.id,
       label,
@@ -232,10 +225,7 @@ function walkRegion(
  * the cardinal-sin bar at the model boundary; a malformed IR is a hard
  * failure the caller surfaces, not a blank diagram pretending success).
  */
-export function buildDiagramModel(
-  ir: IrDocument,
-  machineName?: string,
-): DiagramModel {
+export function buildDiagramModel(ir: IrDocument, machineName?: string): DiagramModel {
   if (!ir || typeof ir.irVersion !== "string") {
     throw new IrGraphError(
       "IR document is missing the required `irVersion` field — it is " +
@@ -243,23 +233,15 @@ export function buildDiagramModel(
     );
   }
   if (!Array.isArray(ir.machines) || ir.machines.length === 0) {
-    throw new IrGraphError(
-      "IR document contains no machines — nothing to diagram.",
-    );
+    throw new IrGraphError("IR document contains no machines — nothing to diagram.");
   }
   const machine =
-    machineName !== undefined
-      ? ir.machines.find((m) => m.name === machineName)
-      : ir.machines[0];
+    machineName !== undefined ? ir.machines.find((m) => m.name === machineName) : ir.machines[0];
   if (!machine) {
-    throw new IrGraphError(
-      `IR document has no machine named "${machineName}".`,
-    );
+    throw new IrGraphError(`IR document has no machine named "${machineName}".`);
   }
   if (!machine.root || !Array.isArray(machine.root.states)) {
-    throw new IrGraphError(
-      `machine "${machine.name}" has no root region — malformed IR.`,
-    );
+    throw new IrGraphError(`machine "${machine.name}" has no root region — malformed IR.`);
   }
 
   const nodes: GraphNode[] = [];
@@ -280,17 +262,12 @@ export class IrGraphError extends Error {
 /** Parse raw `--emit-ir` JSON then project it. Surfaces JSON-parse and
  * structural failures as `IrGraphError` (the caller keeps the last-valid
  * render + shows the Doc 05 §1.5.9 banner — it does NOT blank the webview). */
-export function parseAndBuild(
-  irJson: string,
-  machineName?: string,
-): DiagramModel {
+export function parseAndBuild(irJson: string, machineName?: string): DiagramModel {
   let doc: IrDocument;
   try {
     doc = JSON.parse(irJson) as IrDocument;
   } catch (e) {
-    throw new IrGraphError(
-      `the --emit-ir output is not valid JSON: ${String(e)}`,
-    );
+    throw new IrGraphError(`the --emit-ir output is not valid JSON: ${String(e)}`);
   }
   return buildDiagramModel(doc, machineName);
 }

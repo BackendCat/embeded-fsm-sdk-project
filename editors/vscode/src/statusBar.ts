@@ -11,12 +11,7 @@ import * as vscode from "vscode";
 export type DiagnosticSeverityHint = "error" | "warning" | "clean";
 
 /** The Doc 22 §10 status-bar states. */
-export type ServerStatus =
-  | "starting"
-  | "running"
-  | "warnings"
-  | "errors"
-  | "stopped";
+export type ServerStatus = "starting" | "running" | "warnings" | "errors" | "stopped";
 
 interface StatusVisual {
   readonly icon: string;
@@ -147,11 +142,7 @@ export class FsmStatusBar {
       return;
     }
     const refined: ServerStatus =
-      hint === "error"
-        ? "errors"
-        : hint === "warning"
-          ? "warnings"
-          : "running";
+      hint === "error" ? "errors" : hint === "warning" ? "warnings" : "running";
     this.render(refined);
   }
 

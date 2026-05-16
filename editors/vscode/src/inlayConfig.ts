@@ -34,18 +34,9 @@ export function readInlayHintSettings(
   return {
     enableInlayHints: config.get<boolean>("enableInlayHints", true),
     inlayHints: {
-      showTransitionPriorities: config.get<boolean>(
-        "inlayHints.showTransitionPriorities",
-        true,
-      ),
-      showStateTypes: config.get<boolean>(
-        "inlayHints.showStateTypes",
-        false,
-      ),
-      showTimerDurations: config.get<boolean>(
-        "inlayHints.showTimerDurations",
-        true,
-      ),
+      showTransitionPriorities: config.get<boolean>("inlayHints.showTransitionPriorities", true),
+      showStateTypes: config.get<boolean>("inlayHints.showStateTypes", false),
+      showTimerDurations: config.get<boolean>("inlayHints.showTimerDurations", true),
     },
   };
 }

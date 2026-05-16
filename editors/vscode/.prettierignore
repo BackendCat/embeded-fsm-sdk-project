@@ -1,0 +1,36 @@
+# C1-F2 (Doc 31 §1 W-C2): prettier is scoped to AUTHORED source under
+# editors/vscode/** ONLY. Everything below is either a build artifact, a
+# vendored dependency, an out-of-tree-but-locally-materialised test
+# cache, or a spec-verbatim contributed artifact that MUST stay
+# byte-identical to its normative source (Doc 21 grammar / Doc 22 §9
+# snippets / the manifest) — none of it is hand-authored TS the
+# formatting pass owns.
+
+# Build output + the esbuild bundle (regenerated; never tracked).
+out/
+dist/
+
+# Vendored deps + the @vscode/test-electron extension/user-data cache
+# (the VS Code binary download is pinned out-of-tree to ~/.vscode-test
+# by src/test/runTest.ts; this dir is the residual test profile — both
+# are gitignored, neither is authored source).
+node_modules/
+.vscode-test/
+
+# The packaged host-triple binaries (a build artifact; populate-bin.mjs).
+bin/
+*.vsix
+
+# Spec-verbatim contributed artifacts — these mirror a normative spec
+# byte-for-byte (Doc 21 TextMate grammar, Doc 22 §9 snippet bodies, the
+# Marketplace manifest B1 owns); reformatting them would (a) churn a
+# B1-owned file and (b) risk a spec-fidelity drift the V2 grammar /
+# snippet Extension-Host tests assert verbatim. Out of C1-F2's scope.
+syntaxes/
+snippets/
+assets/
+package.json
+package-lock.json
+language-configuration.json
+.eslintrc.json
+.prettierrc.json

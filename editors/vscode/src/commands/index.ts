@@ -33,10 +33,7 @@ import { registerCheckFile } from "./checkFile";
 import { registerCopyIr } from "./copyIr";
 import { registerFormatDocument } from "./formatDocument";
 import { registerGenerate } from "./generate";
-import {
-  registerRestartLanguageServer,
-  registerShowOutputChannel,
-} from "./clientControl";
+import { registerRestartLanguageServer, registerShowOutputChannel } from "./clientControl";
 
 /**
  * The V1-owned state the V3 commands need, passed in by `extension.ts`
@@ -73,10 +70,7 @@ export { State };
  * contract). Called once from `activate()` AFTER V1 has built the client —
  * an additive call site, no change to V1's spawn path.
  */
-export function registerCommands(
-  context: vscode.ExtensionContext,
-  deps: CommandDeps,
-): void {
+export function registerCommands(context: vscode.ExtensionContext, deps: CommandDeps): void {
   registerCheckFile(context, deps);
   registerGenerate(context, deps);
   registerCopyIr(context, deps);

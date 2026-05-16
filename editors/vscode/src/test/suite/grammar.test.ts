@@ -103,22 +103,15 @@ async function loadContributedGrammar(): Promise<{
     contributes && Array.isArray(contributes.grammars),
     "package.json contributes.grammars must be an array",
   );
-  const langEntry = (contributes.languages as any[]).find(
-    (l) => l.id === "fsm-lang",
-  );
+  const langEntry = (contributes.languages as any[]).find((l) => l.id === "fsm-lang");
   assert.ok(langEntry, "contributes.languages must declare id 'fsm-lang'");
   assert.strictEqual(
     langEntry.configuration,
     "./language-configuration.json",
     "contributes.languages.fsm-lang must reference the language-configuration",
   );
-  const grammarEntry = (contributes.grammars as any[]).find(
-    (g) => g.language === "fsm-lang",
-  );
-  assert.ok(
-    grammarEntry,
-    "contributes.grammars must declare a grammar for 'fsm-lang'",
-  );
+  const grammarEntry = (contributes.grammars as any[]).find((g) => g.language === "fsm-lang");
+  assert.ok(grammarEntry, "contributes.grammars must declare a grammar for 'fsm-lang'");
   assert.strictEqual(
     grammarEntry.scopeName,
     "source.fsm",
@@ -126,10 +119,7 @@ async function loadContributedGrammar(): Promise<{
   );
 
   const grammarPath = path.join(ext.extensionPath, grammarEntry.path);
-  assert.ok(
-    fs.existsSync(grammarPath),
-    `contributed grammar path must resolve: ${grammarPath}`,
-  );
+  assert.ok(fs.existsSync(grammarPath), `contributed grammar path must resolve: ${grammarPath}`);
 
   const appRoot = vscode.env.appRoot;
   const onigPath = path.join(appRoot, "node_modules", "vscode-oniguruma");
@@ -137,14 +127,11 @@ async function loadContributedGrammar(): Promise<{
   const oniguruma = require(onigPath);
   const tm = require(tmPath);
 
-  const wasmBin = fs.readFileSync(
-    path.join(onigPath, "release", "onig.wasm"),
-  ).buffer;
+  const wasmBin = fs.readFileSync(path.join(onigPath, "release", "onig.wasm")).buffer;
   await oniguruma.loadWASM(wasmBin);
 
   const onigLib = Promise.resolve({
-    createOnigScanner: (patterns: string[]) =>
-      oniguruma.createOnigScanner(patterns),
+    createOnigScanner: (patterns: string[]) => oniguruma.createOnigScanner(patterns),
     createOnigString: (s: string) => oniguruma.createOnigString(s),
   });
 
@@ -162,19 +149,12 @@ async function loadContributedGrammar(): Promise<{
   });
 
   const grammar = await registry.loadGrammar(grammarEntry.scopeName);
-  assert.ok(
-    grammar,
-    `the contributed grammar (${grammarEntry.scopeName}) must parse and load`,
-  );
+  assert.ok(grammar, `the contributed grammar (${grammarEntry.scopeName}) must parse and load`);
   return { grammar, INITIAL: tm.INITIAL };
 }
 
 /** Tokenize a full source string into per-line (text, scopes) spans. */
-function tokenizeSource(
-  grammar: Grammar,
-  INITIAL: any,
-  source: string,
-): TokenizedLine[] {
+function tokenizeSource(grammar: Grammar, INITIAL: any, source: string): TokenizedLine[] {
   const lines = source.split(/\r\n|\r|\n/);
   let ruleStack = INITIAL;
   const out: TokenizedLine[] = [];
@@ -192,10 +172,7 @@ function tokenizeSource(
 }
 
 /** First token whose text (trimmed) === `text`. */
-function findToken(
-  lines: TokenizedLine[],
-  text: string,
-): Token | undefined {
+function findToken(lines: TokenizedLine[], text: string): Token | undefined {
   for (const ln of lines) {
     for (const tok of ln) {
       if (tok.text.trim() === text) {
@@ -220,11 +197,7 @@ function findAllTokens(lines: TokenizedLine[], text: string): Token[] {
 }
 
 /** Assert some token's scope list contains `scope`, else fail with detail. */
-function assertScope(
-  tok: Token | undefined,
-  scope: string,
-  label: string,
-): void {
+function assertScope(tok: Token | undefined, scope: string, label: string): void {
   assert.ok(tok, `${label}: token not found in tokenized output`);
   assert.ok(
     tok.scopes.includes(scope),
@@ -246,84 +219,40 @@ suite("V2 — TextMate grammar tokenization (real Extension Host)", () => {
     const loaded = await loadContributedGrammar();
     grammar = loaded.grammar;
     INITIAL = loaded.INITIAL;
-    const corpus = fs.readFileSync(
-      path.join(FIXTURE_DIR, "grammar_corpus.fsm"),
-      "utf8",
-    );
+    const corpus = fs.readFileSync(path.join(FIXTURE_DIR, "grammar_corpus.fsm"), "utf8");
     lines = tokenizeSource(grammar, INITIAL, corpus);
     // Sanity: every span carries the root scope (proves the grammar
     // actually drove tokenization, not an empty/failed parse).
-    const everySpanHasRoot = lines.every((ln) =>
-      ln.every((t) => t.scopes.includes("source.fsm")),
-    );
-    assert.ok(
-      everySpanHasRoot,
-      "every tokenized span must carry the 'source.fsm' root scope",
-    );
+    const everySpanHasRoot = lines.every((ln) => ln.every((t) => t.scopes.includes("source.fsm")));
+    assert.ok(everySpanHasRoot, "every tokenized span must carry the 'source.fsm' root scope");
   });
 
   test("(keywords) declaration + operator + pseudo-state keyword scopes", () => {
-    assertScope(
-      findToken(lines, "machine"),
-      "keyword.declaration.machine.fsm",
-      "machine keyword",
-    );
-    assertScope(
-      findToken(lines, "state"),
-      "keyword.declaration.state.fsm",
-      "state keyword",
-    );
-    assertScope(
-      findToken(lines, "extern"),
-      "keyword.declaration.extern.fsm",
-      "extern keyword",
-    );
-    assertScope(
-      findToken(lines, "pure"),
-      "keyword.modifier.pure.fsm",
-      "pure modifier",
-    );
-    assertScope(
-      findToken(lines, "events"),
-      "keyword.declaration.events.fsm",
-      "events keyword",
-    );
+    assertScope(findToken(lines, "machine"), "keyword.declaration.machine.fsm", "machine keyword");
+    assertScope(findToken(lines, "state"), "keyword.declaration.state.fsm", "state keyword");
+    assertScope(findToken(lines, "extern"), "keyword.declaration.extern.fsm", "extern keyword");
+    assertScope(findToken(lines, "pure"), "keyword.modifier.pure.fsm", "pure modifier");
+    assertScope(findToken(lines, "events"), "keyword.declaration.events.fsm", "events keyword");
     assertScope(
       findToken(lines, "on"),
       "keyword.operator.fsm",
       "on operator keyword (transition begin)",
     );
-    assertScope(
-      findToken(lines, "after"),
-      "keyword.operator.fsm",
-      "after timer keyword",
-    );
+    assertScope(findToken(lines, "after"), "keyword.operator.fsm", "after timer keyword");
     assertScope(
       findToken(lines, "initial"),
       "keyword.type.pseudo.fsm",
       "initial pseudo-state keyword",
     );
-    assertScope(
-      findToken(lines, "entry"),
-      "keyword.control.fsm",
-      "entry control keyword",
-    );
+    assertScope(findToken(lines, "entry"), "keyword.control.fsm", "entry control keyword");
   });
 
   test("(identifiers) declaration name scopes", () => {
-    assertScope(
-      findToken(lines, "Sample"),
-      "entity.name.type.machine.fsm",
-      "machine name",
-    );
+    assertScope(findToken(lines, "Sample"), "entity.name.type.machine.fsm", "machine name");
     const idleDecl = findAllTokens(lines, "Idle").find((t) =>
       t.scopes.includes("entity.name.type.state.fsm"),
     );
-    assertScope(
-      idleDecl,
-      "entity.name.type.state.fsm",
-      "state name (Idle declaration)",
-    );
+    assertScope(idleDecl, "entity.name.type.state.fsm", "state name (Idle declaration)");
     assertScope(
       findToken(lines, "GO"),
       "entity.name.type.event.fsm",
@@ -334,47 +263,30 @@ suite("V2 — TextMate grammar tokenization (real Extension Host)", () => {
       "entity.name.function.extern.fsm",
       "extern function name",
     );
-    assertScope(
-      findToken(lines, "count"),
-      "variable.other.field.fsm",
-      "context field name",
-    );
+    assertScope(findToken(lines, "count"), "variable.other.field.fsm", "context field name");
   });
 
   test("(comments) ///, //, /* */ are DISTINCT scopes", () => {
-    const docTok = lines
-      .flat()
-      .find((t) => t.text.includes("Doc comment line"));
+    const docTok = lines.flat().find((t) => t.text.includes("Doc comment line"));
     assert.ok(docTok, "the /// doc-comment line must tokenize");
     assert.ok(
       docTok.scopes.includes("comment.line.documentation.fsm"),
-      `/// must be 'comment.line.documentation.fsm', got ${JSON.stringify(
-        docTok.scopes,
-      )}`,
+      `/// must be 'comment.line.documentation.fsm', got ${JSON.stringify(docTok.scopes)}`,
     );
     assert.ok(
       !docTok.scopes.includes("comment.line.double-slash.fsm"),
       "the /// doc-comment must NOT collapse to the // line-comment scope",
     );
 
-    const lineTok = lines
-      .flat()
-      .find((t) => t.text.includes("Plain line comment"));
+    const lineTok = lines.flat().find((t) => t.text.includes("Plain line comment"));
     assert.ok(lineTok, "the // line-comment must tokenize");
     assert.ok(
       lineTok.scopes.includes("comment.line.double-slash.fsm"),
-      `// must be 'comment.line.double-slash.fsm', got ${JSON.stringify(
-        lineTok.scopes,
-      )}`,
+      `// must be 'comment.line.double-slash.fsm', got ${JSON.stringify(lineTok.scopes)}`,
     );
 
-    const blockTok = lines
-      .flat()
-      .find((t) => t.scopes.includes("comment.block.fsm"));
-    assert.ok(
-      blockTok,
-      "the /* */ block comment must carry 'comment.block.fsm'",
-    );
+    const blockTok = lines.flat().find((t) => t.scopes.includes("comment.block.fsm"));
+    assert.ok(blockTok, "the /* */ block comment must carry 'comment.block.fsm'");
   });
 
   test("(literals) string + numeric scopes", () => {
@@ -388,37 +300,17 @@ suite("V2 — TextMate grammar tokenization (real Extension Host)", () => {
     const timerInt = findAllTokens(lines, "1000").find((t) =>
       t.scopes.includes("constant.numeric.integer.fsm"),
     );
-    assertScope(
-      timerInt,
-      "constant.numeric.integer.fsm",
-      "timer integer literal (1000)",
-    );
+    assertScope(timerInt, "constant.numeric.integer.fsm", "timer integer literal (1000)");
     // A focused integer + float snippet through the same contributed
     // grammar (isolated from the context-block limitation above).
-    const numLines = tokenizeSource(
-      grammar,
-      INITIAL,
-      "state S { after 250 ms -> T; }\n",
-    );
-    const isoInt = numLines
-      .flat()
-      .find((t) => t.scopes.includes("constant.numeric.integer.fsm"));
-    assertScope(
-      isoInt,
-      "constant.numeric.integer.fsm",
-      "isolated integer literal (250)",
-    );
+    const numLines = tokenizeSource(grammar, INITIAL, "state S { after 250 ms -> T; }\n");
+    const isoInt = numLines.flat().find((t) => t.scopes.includes("constant.numeric.integer.fsm"));
+    assertScope(isoInt, "constant.numeric.integer.fsm", "isolated integer literal (250)");
 
     // A quoted string: a focused snippet (the corpus is keyword-dense)
     // still tokenized through the contributed grammar.
-    const strLines = tokenizeSource(
-      grammar,
-      INITIAL,
-      'machine M { @id("stable-name") }\n',
-    );
-    const strTok = strLines
-      .flat()
-      .find((t) => t.scopes.includes("string.quoted.double.fsm"));
+    const strLines = tokenizeSource(grammar, INITIAL, 'machine M { @id("stable-name") }\n');
+    const strTok = strLines.flat().find((t) => t.scopes.includes("string.quoted.double.fsm"));
     assert.ok(
       strTok,
       `a quoted string must carry 'string.quoted.double.fsm', got ${JSON.stringify(
@@ -431,9 +323,7 @@ suite("V2 — TextMate grammar tokenization (real Extension Host)", () => {
     // The transition rule is a begin/end block; its inner guard must
     // apply NESTED scopes — a real nested-construct assertion, not a
     // flat keyword match.
-    const transitionSpans = lines
-      .flat()
-      .filter((t) => t.scopes.includes("meta.transition.fsm"));
+    const transitionSpans = lines.flat().filter((t) => t.scopes.includes("meta.transition.fsm"));
     assert.ok(
       transitionSpans.length > 0,
       "the `on … ->` transition must open the meta.transition.fsm scope",
@@ -454,15 +344,8 @@ suite("V2 — TextMate grammar tokenization (real Extension Host)", () => {
     );
     const guardBody = lines
       .flat()
-      .find(
-        (t) =>
-          t.scopes.includes("meta.guard.fsm") &&
-          t.scopes.includes("meta.transition.fsm"),
-      );
-    assert.ok(
-      guardBody,
-      "the guard body must carry meta.guard.fsm nested in meta.transition.fsm",
-    );
+      .find((t) => t.scopes.includes("meta.guard.fsm") && t.scopes.includes("meta.transition.fsm"));
+    assert.ok(guardBody, "the guard body must carry meta.guard.fsm nested in meta.transition.fsm");
     const arrow = lines
       .flat()
       .find(
@@ -481,15 +364,10 @@ suite("V2 — TextMate grammar tokenization (real Extension Host)", () => {
     // nested action scope (the action-block half of the nested gate).
     const actionInner = lines
       .flat()
-      .find(
-        (t) =>
-          t.text.trim() === "resetCount" &&
-          t.scopes.includes("meta.block.action.fsm"),
-      );
+      .find((t) => t.text.trim() === "resetCount" && t.scopes.includes("meta.block.action.fsm"));
     assert.ok(
       actionInner,
-      "the `entry: { resetCount(); }` body must carry the nested " +
-        "meta.block.action.fsm scope",
+      "the `entry: { resetCount(); }` body must carry the nested " + "meta.block.action.fsm scope",
     );
   });
 
@@ -509,15 +387,9 @@ suite("V2 — TextMate grammar tokenization (real Extension Host)", () => {
     const bins = resolveRealBinaries();
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        bins.server,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", bins.server, vscode.ConfigurationTarget.Global);
 
-    const tmpDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "fsm-v2-langcfg-"),
-    );
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsm-v2-langcfg-"));
     const filePath = path.join(tmpDir, "langcfg.fsm");
     fs.writeFileSync(filePath, "state Idle\n", "utf8");
     const doc = await vscode.workspace.openTextDocument(filePath);
@@ -531,9 +403,7 @@ suite("V2 — TextMate grammar tokenization (real Extension Host)", () => {
       `comment-toggle must use the contributed lineComment '//' ` +
         `(language-configuration.json); got ${JSON.stringify(firstLine)}`,
     );
-    await vscode.commands.executeCommand(
-      "workbench.action.closeActiveEditor",
-    );
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -545,28 +415,18 @@ suite("V2 — TextMate grammar tokenization (real Extension Host)", () => {
       Array.isArray(snippetsContrib) && snippetsContrib.length === 1,
       "contributes.snippets must be a single-entry array (Doc 22 §3)",
     );
-    const snippetsPath = path.join(
-      ext.extensionPath,
-      snippetsContrib[0].path,
-    );
+    const snippetsPath = path.join(ext.extensionPath, snippetsContrib[0].path);
     const snippets = JSON.parse(fs.readFileSync(snippetsPath, "utf8"));
 
     assert.strictEqual(snippets["After timer"].prefix, "after");
-    assert.deepStrictEqual(snippets["After timer"].body, [
-      "after ${1:1000}ms -> ${2:Timeout};",
-    ]);
+    assert.deepStrictEqual(snippets["After timer"].body, ["after ${1:1000}ms -> ${2:Timeout};"]);
     assert.strictEqual(snippets["Transition with guard"].prefix, "on");
     assert.deepStrictEqual(snippets["Transition with guard"].body, [
       "on ${1:EVENT} [${2:guard()}] -> ${3:Target};",
     ]);
     assert.strictEqual(snippets["Machine"].prefix, "machine");
-    assert.strictEqual(
-      snippets["Machine"].body[0],
-      "machine ${1:Name} {",
-    );
-    assert.deepStrictEqual(snippets["Every timer"].body, [
-      "every ${1:100}ms: { ${2:poll();} }",
-    ]);
+    assert.strictEqual(snippets["Machine"].body[0], "machine ${1:Name} {");
+    assert.deepStrictEqual(snippets["Every timer"].body, ["every ${1:100}ms: { ${2:poll();} }"]);
     assert.deepStrictEqual(snippets["Pure extern guard"].body, [
       "pure extern ${1:checkCondition}(${2:threshold: u32}) : bool",
     ]);

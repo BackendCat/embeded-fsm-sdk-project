@@ -67,10 +67,7 @@ import { resolveRealBinaries } from "./binaries";
 // `FsmStatusBar` drives the N-4 fix directly; `restartingTooltip` is the
 // shipped Doc 22:679 literal builder.
 import type { FsmTreeNode } from "../../tree/symbolTree";
-import {
-  projectEventTree,
-  projectMachineTree,
-} from "../../tree/symbolTree";
+import { projectEventTree, projectMachineTree } from "../../tree/symbolTree";
 import { FsmStatusBar, restartingTooltip } from "../../statusBar";
 
 const FIXTURE_SRC = path.resolve(__dirname, "../fixtures");
@@ -101,12 +98,7 @@ interface NodeShape {
 }
 
 function rng(r: vscode.Range): [number, number, number, number] {
-  return [
-    r.start.line,
-    r.start.character,
-    r.end.line,
-    r.end.character,
-  ];
+  return [r.start.line, r.start.character, r.end.line, r.end.character];
 }
 
 /** Project a SUT {@link FsmTreeNode} to its comparable shape. */
@@ -139,9 +131,7 @@ function shapeOfSymbol(s: vscode.DocumentSymbol): NodeShape {
  * each machine's `events` group hoisted, machines with no events dropped
  * (mirrors the SUT contract but computed here from the oracle, not the
  * SUT). */
-function eventOracleShape(
-  symbols: vscode.DocumentSymbol[],
-): NodeShape[] {
+function eventOracleShape(symbols: vscode.DocumentSymbol[]): NodeShape[] {
   const out: NodeShape[] = [];
   for (const m of symbols) {
     const ev = (m.children ?? []).find((c) => c.name === "events");
@@ -161,23 +151,20 @@ function eventOracleShape(
   return out;
 }
 
-async function getSymbolOracle(
-  uri: vscode.Uri,
-): Promise<vscode.DocumentSymbol[]> {
+async function getSymbolOracle(uri: vscode.Uri): Promise<vscode.DocumentSymbol[]> {
   // Poll: the server may not have published the analysis the instant the
   // doc opens. The oracle is the SAME free capability the SUT uses.
   const deadline = Date.now() + 30_000;
   for (;;) {
-    const got = await vscode.commands.executeCommand<
-      vscode.DocumentSymbol[]
-    >("vscode.executeDocumentSymbolProvider", uri);
+    const got = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+      "vscode.executeDocumentSymbolProvider",
+      uri,
+    );
     if (got && got.length > 0) {
       return got;
     }
     if (Date.now() > deadline) {
-      throw new Error(
-        "timed out waiting for executeDocumentSymbolProvider oracle",
-      );
+      throw new Error("timed out waiting for executeDocumentSymbolProvider oracle");
     }
     await new Promise((r) => setTimeout(r, 150));
   }
@@ -242,11 +229,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
     // the tree consumes (MV5-1: zero new extension code at the LSP layer).
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        bins.server,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", bins.server, vscode.ConfigurationTarget.Global);
 
     const ext = vscode.extensions.getExtension("fsmstudio.fsm-lang");
     assert.ok(ext, "extension fsmstudio.fsm-lang must be present");
@@ -273,11 +256,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
   suiteTeardown(async () => {
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        undefined,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", undefined, vscode.ConfigurationTarget.Global);
     if (tmpDir && fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -296,17 +275,13 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
       cmds.includes("fsm.refreshEventExplorer"),
       "fsm.refreshEventExplorer must be a registered command",
     );
-    assert.ok(
-      cmds.includes("fsm.revealSymbol"),
-      "fsm.revealSymbol must be a registered command",
-    );
+    assert.ok(cmds.includes("fsm.revealSymbol"), "fsm.revealSymbol must be a registered command");
     // The Doc 22 §7 view container + views are in the manifest (a
     // precondition; the acceptance is the fidelity deep-compare).
     const pkg = ext_pkg();
-    const containers =
-      pkg.contributes.viewsContainers.activitybar as Array<{
-        id: string;
-      }>;
+    const containers = pkg.contributes.viewsContainers.activitybar as Array<{
+      id: string;
+    }>;
     assert.ok(
       containers.some((c) => c.id === "fsm-explorer"),
       "Doc 22 §7 fsm-explorer activity-bar container must be contributed",
@@ -335,9 +310,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
   test("the Machines tree's node structure deep-equals the documentSymbol hierarchy EXACTLY", async function () {
     this.timeout(120_000);
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
     // INDEPENDENT oracle: the SAME free V1-client capability the SUT uses,
@@ -351,9 +324,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
     assert.strictEqual(
       oracle.length,
       2,
-      `oracle precondition: 2 machine roots, got ${oracle
-        .map((s) => s.name)
-        .join(",")}`,
+      `oracle precondition: 2 machine roots, got ${oracle.map((s) => s.name).join(",")}`,
     );
     assert.deepStrictEqual(
       oracle.map((s) => s.name),
@@ -362,12 +333,8 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
     );
     const door = oracle.find((s) => s.name === "Door");
     assert.ok(door, "oracle: Door machine present");
-    const doorStates = (door.children ?? []).find(
-      (c) => c.name === "states",
-    );
-    const locked = (doorStates?.children ?? []).find(
-      (s) => s.name === "Locked",
-    );
+    const doorStates = (door.children ?? []).find((c) => c.name === "states");
+    const locked = (doorStates?.children ?? []).find((s) => s.name === "Locked");
     assert.ok(
       locked && (locked.children ?? []).some((c) => c.name === "Idle"),
       "oracle precondition: composite Locked nests Idle (the nesting " +
@@ -413,9 +380,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
   test("the Events tree's node structure deep-equals the hoisted documentSymbol events groups", async function () {
     this.timeout(60_000);
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
     const oracle = await getSymbolOracle(doc.uri);
 
@@ -464,9 +429,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
   test("clicking a tree node reveals the editor at the symbol's exact selectionRange", async function () {
     this.timeout(60_000);
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
     const oracle = await getSymbolOracle(doc.uri);
 
@@ -474,12 +437,8 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
     // composite Door → Locked → Idle state. Its selectionRange is the
     // "Idle" name token the LSP computed.
     const door = oracle.find((s) => s.name === "Door");
-    const states = (door?.children ?? []).find(
-      (c) => c.name === "states",
-    );
-    const locked = (states?.children ?? []).find(
-      (s) => s.name === "Locked",
-    );
+    const states = (door?.children ?? []).find((c) => c.name === "states");
+    const locked = (states?.children ?? []).find((s) => s.name === "Locked");
     const idle = (locked?.children ?? []).find((s) => s.name === "Idle");
     assert.ok(idle, "oracle: Door→Locked→Idle present");
     const want = idle.selectionRange;
@@ -491,11 +450,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
 
     // Drive the SUT's REAL contributed reveal command (the exact command
     // a TreeItem click invokes — FsmTreeItem.command).
-    await vscode.commands.executeCommand(
-      "fsm.revealSymbol",
-      doc.uri,
-      want,
-    );
+    await vscode.commands.executeCommand("fsm.revealSymbol", doc.uri, want);
 
     await waitFor(() => {
       const ed = vscode.window.activeTextEditor;
@@ -509,11 +464,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
 
     const ed = vscode.window.activeTextEditor;
     assert.ok(ed, "an editor must be active after reveal");
-    assert.strictEqual(
-      ed.document.uri.fsPath,
-      fixture,
-      "reveal must focus the declaring document",
-    );
+    assert.strictEqual(ed.document.uri.fsPath, fixture, "reveal must focus the declaring document");
     assert.strictEqual(
       ed.selection.start.line,
       want.start.line,
@@ -536,9 +487,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
     );
     // It really IS the "Idle" token (the authoritative name span), not
     // the whole state decl — selectionRange ⊊ range, the LSP contract.
-    const selText = ed.document.getText(
-      new vscode.Range(want.start, want.end),
-    );
+    const selText = ed.document.getText(new vscode.Range(want.start, want.end));
     assert.strictEqual(
       selText,
       "Idle",
@@ -556,9 +505,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
     this.timeout(60_000);
 
     // (a) A .fsm is active → fsm.hasOpenFsmFile true → tree populated.
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
     await getSymbolOracle(doc.uri); // ensure the server has analyzed.
     explorer.syncContextKeys();
@@ -577,9 +524,7 @@ suite("FSM Studio V5 — Extension-Host tree + context-key acceptance", () => {
     //     gated tree has no FSM content (the views would be hidden by the
     //     `when:` clause; the observable data consequence is an empty
     //     projection — the SUT must NOT fabricate or IR-source nodes).
-    const plainDoc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(plainFile),
-    );
+    const plainDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(plainFile));
     await vscode.window.showTextDocument(plainDoc);
     explorer.syncContextKeys();
     await explorer.refresh();

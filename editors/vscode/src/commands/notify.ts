@@ -18,11 +18,7 @@ import * as vscode from "vscode";
 
 type Kind = "info" | "warning" | "error";
 
-function showLogButton(
-  kind: Kind,
-  message: string,
-  outputChannel: vscode.OutputChannel,
-): void {
+function showLogButton(kind: Kind, message: string, outputChannel: vscode.OutputChannel): void {
   const fn =
     kind === "error"
       ? vscode.window.showErrorMessage
@@ -43,26 +39,17 @@ export function info(message: string): void {
 }
 
 /** An info toast offering "Show Log" — fire-and-handle, never awaited. */
-export function infoWithLog(
-  message: string,
-  outputChannel: vscode.OutputChannel,
-): void {
+export function infoWithLog(message: string, outputChannel: vscode.OutputChannel): void {
   showLogButton("info", message, outputChannel);
 }
 
 /** A warning toast offering "Show Log" — fire-and-handle, never awaited. */
-export function warnWithLog(
-  message: string,
-  outputChannel: vscode.OutputChannel,
-): void {
+export function warnWithLog(message: string, outputChannel: vscode.OutputChannel): void {
   showLogButton("warning", message, outputChannel);
 }
 
 /** An error toast offering "Show Log" — fire-and-handle, never awaited. */
-export function errorWithLog(
-  message: string,
-  outputChannel: vscode.OutputChannel,
-): void {
+export function errorWithLog(message: string, outputChannel: vscode.OutputChannel): void {
   showLogButton("error", message, outputChannel);
 }
 

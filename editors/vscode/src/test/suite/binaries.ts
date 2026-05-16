@@ -56,24 +56,12 @@ export function resolveRealBinaries(): RealBinaries {
     // (1.75.0). Building from editors/vscode/ would NOT pick up the pin.
     execFileSync(
       "cargo",
-      [
-        "build",
-        "-p",
-        "fsm-lsp",
-        "--bin",
-        "fsm-lang-server",
-        "-p",
-        "fsm-cli",
-        "--bin",
-        "fsm",
-      ],
+      ["build", "-p", "fsm-lsp", "--bin", "fsm-lang-server", "-p", "fsm-cli", "--bin", "fsm"],
       { cwd: root, stdio: "inherit" },
     );
   }
   if (!fs.existsSync(server) || !fs.existsSync(cli)) {
-    throw new Error(
-      `real binaries missing after build: server=${server} cli=${cli}`,
-    );
+    throw new Error(`real binaries missing after build: server=${server} cli=${cli}`);
   }
   return { server, cli, repoRoot: root };
 }

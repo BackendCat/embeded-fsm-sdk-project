@@ -56,11 +56,7 @@ import { registerOpenDiagram } from "./diagram";
 import { FsmExplorerHandle, registerFsmExplorer } from "./tree";
 import { FsmErrorHandler } from "./crashRecovery";
 import { readInlayHintSettings } from "./inlayConfig";
-import {
-  noBundledBinaryMessage,
-  hostTriple,
-  resolveServerBinary,
-} from "./serverBinary";
+import { noBundledBinaryMessage, hostTriple, resolveServerBinary } from "./serverBinary";
 import { FsmStatusBar } from "./statusBar";
 
 const LANGUAGE_ID = "fsm-lang";
@@ -117,8 +113,7 @@ function buildApi(
     get negotiatedPositionEncoding(): string | undefined {
       // `initializeResult` is populated by vscode-languageclient after the
       // `initialize` round-trip; `positionEncoding` is the negotiated value.
-      const enc =
-        client?.initializeResult?.capabilities?.positionEncoding;
+      const enc = client?.initializeResult?.capabilities?.positionEncoding;
       return typeof enc === "string" ? enc : undefined;
     },
     binarySource,
@@ -126,9 +121,7 @@ function buildApi(
   };
 }
 
-export async function activate(
-  context: vscode.ExtensionContext,
-): Promise<FsmExtensionApi> {
+export async function activate(context: vscode.ExtensionContext): Promise<FsmExtensionApi> {
   outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
   context.subscriptions.push(outputChannel);
 
@@ -284,9 +277,7 @@ export async function activate(
     // (initializationOptions) AND live (synchronize.configurationSection ->
     // workspace/didChangeConfiguration). This is exactly the channel pair
     // the shipped server round-trips (server.rs:233-235 + :855-857).
-    initializationOptions: readInlayHintSettings(
-      vscode.workspace.getConfiguration(CONFIG_SECTION),
-    ),
+    initializationOptions: readInlayHintSettings(vscode.workspace.getConfiguration(CONFIG_SECTION)),
     synchronize: {
       configurationSection: CONFIG_SECTION,
     },
@@ -346,10 +337,7 @@ function refreshSeverityIndicator(): void {
     for (const d of diags) {
       if (d.severity === vscode.DiagnosticSeverity.Error) {
         worst = "error";
-      } else if (
-        d.severity === vscode.DiagnosticSeverity.Warning &&
-        worst !== "error"
-      ) {
+      } else if (d.severity === vscode.DiagnosticSeverity.Warning && worst !== "error") {
         worst = "warning";
       }
     }

@@ -43,27 +43,18 @@ import {
 const FIXTURE_SRC = path.resolve(__dirname, "../fixtures");
 // The W4a-verified known-good example FSMs (NOT authored here — the
 // factory-audited canon): examples/verify/{deadlocks,clean}.fsm.
-const EXAMPLES_VERIFY = path.resolve(
-  __dirname,
-  "../../../../../examples/verify",
-);
+const EXAMPLES_VERIFY = path.resolve(__dirname, "../../../../../examples/verify");
 
 /** Spawn the REAL `fsm verify --json` on `file` and return the parsed
  * envelope. This is the in-test oracle — the SAME binary the extension
  * spawns; a non-zero exit is a verdict (0/1/2), not a failure: the JSON is
  * still on stdout, recovered from the thrown error. */
-function cliVerify(
-  cliBinary: string,
-  file: string,
-  extraArgs: string[] = [],
-): VerifyJson {
+function cliVerify(cliBinary: string, file: string, extraArgs: string[] = []): VerifyJson {
   let stdout: string;
   try {
-    stdout = execFileSync(
-      cliBinary,
-      ["verify", "--json", ...extraArgs, file],
-      { encoding: "utf8" },
-    );
+    stdout = execFileSync(cliBinary, ["verify", "--json", ...extraArgs, file], {
+      encoding: "utf8",
+    });
   } catch (e) {
     const err = e as { status?: number; stdout?: string };
     if (typeof err.stdout === "string" && err.stdout.length > 0) {
@@ -78,11 +69,7 @@ function cliVerify(
 }
 
 /** Poll until predicate or deadline (mirrors commands.test.ts). */
-async function waitFor(
-  predicate: () => boolean,
-  what: string,
-  timeoutMs = 20_000,
-): Promise<void> {
+async function waitFor(predicate: () => boolean, what: string, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (predicate()) {
@@ -116,10 +103,7 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsm-v15a1-"));
     // The W4a-verified canon (copied from examples/verify — NOT authored).
     for (const f of ["deadlocks.fsm", "clean.fsm"]) {
-      fs.copyFileSync(
-        path.join(EXAMPLES_VERIFY, f),
-        path.join(tmpDir, f),
-      );
+      fs.copyFileSync(path.join(EXAMPLES_VERIFY, f), path.join(tmpDir, f));
     }
     // The §5.4 (d) reachability-defect fixture (added under
     // editors/vscode/ test fixtures — zero crates/ delta; disclosed).
@@ -147,30 +131,18 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
     // path — the SAME GT-3 seam checkFile/generate use.
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        bins.server,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", bins.server, vscode.ConfigurationTarget.Global);
 
     const ext = vscode.extensions.getExtension("fsmstudio.fsm-lang");
     assert.ok(ext, "extension fsmstudio.fsm-lang must be present");
     const api = (await ext.activate()) as FsmExtensionApi;
-    await waitFor(
-      () => api.serverStarted,
-      "language client to reach Running",
-      30_000,
-    );
+    await waitFor(() => api.serverStarted, "language client to reach Running", 30_000);
   });
 
   suiteTeardown(async () => {
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        undefined,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", undefined, vscode.ConfigurationTarget.Global);
     if (tmpDir && fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -180,14 +152,8 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
   // below): the two commands are reachable.
   test("fsm.verify + fsm.baseline are registered", async () => {
     const all = await vscode.commands.getCommands(true);
-    assert.ok(
-      all.includes("fsm.verify"),
-      "command fsm.verify must be registered",
-    );
-    assert.ok(
-      all.includes("fsm.baseline"),
-      "command fsm.baseline must be registered",
-    );
+    assert.ok(all.includes("fsm.verify"), "command fsm.verify must be registered");
+    assert.ok(all.includes("fsm.baseline"), "command fsm.baseline must be registered");
   });
 
   // ── §5.4 (a): the witness the extension decodes BYTE-EQUALS the CLI's
@@ -200,31 +166,23 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
     // the registered command for the real end-to-end effect, then assert
     // the rendered virtual document carries the witness, AND that the
     // parse the extension uses byte-matches the independent CLI oracle.
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
     await vscode.commands.executeCommand("fsm.verify");
 
     // The result virtual doc opens beside the editor. Find it.
     await waitFor(
-      () =>
-        vscode.workspace.textDocuments.some(
-          (d) => d.uri.scheme === "fsm-verify",
-        ),
+      () => vscode.workspace.textDocuments.some((d) => d.uri.scheme === "fsm-verify"),
       "the fsm-verify result document to open",
     );
-    const resultDoc = vscode.workspace.textDocuments.find(
-      (d) => d.uri.scheme === "fsm-verify",
-    );
+    const resultDoc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === "fsm-verify");
     assert.ok(resultDoc, "a fsm-verify result document must be open");
     const reportText = resultDoc.getText();
 
     // The independent CLI oracle — recomputed by spawning the SAME real
     // binary on the SAME fixture in-test.
     const oracle = cliVerify(cliBinary, fixture);
-    const oracleWitness =
-      oracle.properties?.deadlockFree?.counterexample?.witness;
+    const oracleWitness = oracle.properties?.deadlockFree?.counterexample?.witness;
     assert.ok(
       oracleWitness && oracleWitness.length > 0,
       "the deadlocks.fsm fixture must yield a non-empty CLI witness",
@@ -275,9 +233,7 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
   // ── §5.4 (b): a clean fixture → the UI shows "verified".
   test("(b) clean fixture → the UI shows VERIFIED", async () => {
     const fixture = path.join(tmpDir, "clean.fsm");
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
     // Close any prior result doc so we assert THIS run's render.
@@ -291,30 +247,19 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
     await vscode.commands.executeCommand("fsm.verify");
     await waitFor(() => {
       const d = vscode.workspace.textDocuments.find(
-        (t) =>
-          t.uri.scheme === "fsm-verify" &&
-          t.uri.query.includes("clean.fsm"),
+        (t) => t.uri.scheme === "fsm-verify" && t.uri.query.includes("clean.fsm"),
       );
       return !!d && /VERDICT:\s+✔\s+VERIFIED/.test(d.getText());
     }, "the result doc to show VERIFIED for clean.fsm");
 
     const resultDoc = vscode.workspace.textDocuments.find(
-      (t) =>
-        t.uri.scheme === "fsm-verify" &&
-        t.uri.query.includes("clean.fsm"),
+      (t) => t.uri.scheme === "fsm-verify" && t.uri.query.includes("clean.fsm"),
     );
     assert.ok(resultDoc, "clean.fsm result doc must be open");
     const text = resultDoc.getText();
-    assert.match(
-      text,
-      /VERDICT:\s+✔\s+VERIFIED/,
-      "the UI must show VERIFIED for a clean fixture",
-    );
+    assert.match(text, /VERDICT:\s+✔\s+VERIFIED/, "the UI must show VERIFIED for a clean fixture");
     // It must NOT contain the inconclusive banner.
-    assert.ok(
-      !text.includes("INCONCLUSIVE"),
-      "a verified result must NOT show INCONCLUSIVE",
-    );
+    assert.ok(!text.includes("INCONCLUSIVE"), "a verified result must NOT show INCONCLUSIVE");
   });
 
   // ── §5.4 (c): clean fixture + tiny --max-states → INCONCLUSIVE,
@@ -332,16 +277,8 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
       "inconclusive",
       "clean.fsm --max-states 1 must be INCONCLUSIVE per the CLI oracle",
     );
-    assert.strictEqual(
-      oracle.exitCode,
-      2,
-      "the inconclusive CLI exit code must be 2",
-    );
-    assert.strictEqual(
-      oracle.bound?.hit,
-      true,
-      "the bound must be reported as hit",
-    );
+    assert.strictEqual(oracle.exitCode, 2, "the inconclusive CLI exit code must be 2");
+    assert.strictEqual(oracle.bound?.hit, true, "the bound must be reported as hit");
 
     // Render via the EXTENSION's own renderer on the CLI's own JSON (the
     // exact code path the command handler runs). We assert the rendered
@@ -353,11 +290,9 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
     // asserts the actual shipped honesty logic, not a mock.)
     const rawStdout = (() => {
       try {
-        return execFileSync(
-          cliBinary,
-          ["verify", "--json", "--max-states", "1", fixture],
-          { encoding: "utf8" },
-        );
+        return execFileSync(cliBinary, ["verify", "--json", "--max-states", "1", fixture], {
+          encoding: "utf8",
+        });
       } catch (e) {
         return (e as { stdout?: string }).stdout ?? "";
       }
@@ -366,13 +301,9 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
     assert.ok(parsed, "the inconclusive CLI JSON must parse");
     const report = renderVerifyReport(parsed, fixture, rawStdout);
 
+    assert.ok(report.includes("INCONCLUSIVE"), "the UI MUST show INCONCLUSIVE for a bound-hit");
     assert.ok(
-      report.includes("INCONCLUSIVE"),
-      "the UI MUST show INCONCLUSIVE for a bound-hit",
-    );
-    assert.ok(
-      !/VERDICT:\s+✔\s+VERIFIED/.test(report) &&
-        !report.includes("✔ VERIFIED"),
+      !/VERDICT:\s+✔\s+VERIFIED/.test(report) && !report.includes("✔ VERIFIED"),
       "THE FALSE-PROVEN GUARD: a bound-hit MUST NOT render as VERIFIED " +
         `(report verdict line must be INCONCLUSIVE; got:\n${report
           .split("\n")
@@ -380,9 +311,7 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
           .join(" | ")})`,
     );
     // The verdict line is specifically the INCONCLUSIVE one.
-    const verdictLine = report
-      .split("\n")
-      .find((l) => l.startsWith("VERDICT:"));
+    const verdictLine = report.split("\n").find((l) => l.startsWith("VERDICT:"));
     assert.match(
       verdictLine ?? "",
       /VERDICT:\s+\?\s+INCONCLUSIVE/,
@@ -398,12 +327,10 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
 
     // The independent CLI oracle — recomputed from the real binary.
     const oracle = cliVerify(cliBinary, fixture);
-    const oracleDiags =
-      oracle.properties?.reachability?.diagnostics ?? [];
+    const oracleDiags = oracle.properties?.reachability?.diagnostics ?? [];
     assert.ok(
       oracleDiags.length > 0,
-      "unreachable.fsm must yield ≥1 reachability diagnostic per the " +
-        "CLI oracle",
+      "unreachable.fsm must yield ≥1 reachability diagnostic per the " + "CLI oracle",
     );
     assert.ok(
       oracleDiags.some((d) => d.code === "FSM-E0400"),
@@ -413,8 +340,7 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
     // Publish via the EXACT function the command handler calls
     // (`publishReachabilityDiagnostics`), into a real
     // DiagnosticCollection, then read the entries VS Code stored back.
-    const collection =
-      vscode.languages.createDiagnosticCollection("fsm-verify-test");
+    const collection = vscode.languages.createDiagnosticCollection("fsm-verify-test");
     try {
       const fsmUri = vscode.Uri.file(fixture);
       publishReachabilityDiagnostics(collection, fsmUri, oracle);
@@ -432,13 +358,8 @@ suite("FSM Studio W-A1 — verify-UI Extension-Host behavioural acceptance", () 
       // (CLI 1-based scalar) - 1, with NO recomputation (the `cliOracle`
       // coordinate contract). Match by code+message to pair them.
       for (const od of oracleDiags) {
-        const match = stored.find(
-          (s) => s.code === od.code && s.message === od.message,
-        );
-        assert.ok(
-          match,
-          `a DiagnosticCollection entry for ${od.code} must exist`,
-        );
+        const match = stored.find((s) => s.code === od.code && s.message === od.message);
+        assert.ok(match, `a DiagnosticCollection entry for ${od.code} must exist`);
         assert.strictEqual(
           match.range.start.line,
           od.line - 1,

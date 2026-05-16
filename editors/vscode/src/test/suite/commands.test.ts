@@ -68,11 +68,7 @@ import { cliOracle } from "./oracle";
 const FIXTURE_SRC = path.resolve(__dirname, "../fixtures");
 
 /** Poll until `predicate` holds or the deadline (mirrors extension.test). */
-async function waitFor(
-  predicate: () => boolean,
-  what: string,
-  timeoutMs = 20_000,
-): Promise<void> {
+async function waitFor(predicate: () => boolean, what: string, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (predicate()) {
@@ -148,31 +144,19 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
     // of this path (the genuine two-binary need Doc 27 §2.2 records).
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        bins.server,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", bins.server, vscode.ConfigurationTarget.Global);
 
     const ext = vscode.extensions.getExtension("fsmstudio.fsm-lang");
     assert.ok(ext, "extension fsmstudio.fsm-lang must be present");
     api = (await ext.activate()) as FsmExtensionApi;
 
-    await waitFor(
-      () => api.serverStarted,
-      "language client to reach Running",
-      30_000,
-    );
+    await waitFor(() => api.serverStarted, "language client to reach Running", 30_000);
   });
 
   suiteTeardown(async () => {
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        undefined,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", undefined, vscode.ConfigurationTarget.Global);
     if (tmpDir && fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -201,9 +185,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
     const outDir = path.join(tmpDir, "generated");
     fs.rmSync(outDir, { recursive: true, force: true });
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
     await vscode.commands.executeCommand("fsm.generateC99");
 
@@ -211,8 +193,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
     // the command roots it at the .fsm file's directory -> tmpDir/generated.
     await waitFor(
       () =>
-        fs.existsSync(path.join(outDir, "Gate.c")) &&
-        fs.existsSync(path.join(outDir, "Gate.h")),
+        fs.existsSync(path.join(outDir, "Gate.c")) && fs.existsSync(path.join(outDir, "Gate.h")),
       "Gate.c + Gate.h to be generated",
     );
     const c = fs.readFileSync(path.join(outDir, "Gate.c"), "utf8");
@@ -226,9 +207,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
   // AND structurally the fsm-ir document (the genuine R-11/R-17 path).
   test("fsm.copyIR copies the genuine --emit-ir IR JSON to the clipboard", async () => {
     const fixture = path.join(tmpDir, "clean.fsm"); // codegen-SUCCEEDS
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
     // Independent oracle: run the SAME real CLI --emit-ir ourselves and
@@ -237,35 +216,17 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
     // the real fsm_ir::to_json output, not a JS stub. (R-17: to_json /
     // from_json are a verified-stable schema pair, so a byte-equal
     // to_json artifact is from_json-round-trippable.)
-    const oracleOut = fs.mkdtempSync(
-      path.join(os.tmpdir(), "fsm-v3-iroracle-"),
-    );
+    const oracleOut = fs.mkdtempSync(path.join(os.tmpdir(), "fsm-v3-iroracle-"));
     try {
       const { execFileSync } = await import("child_process");
       execFileSync(
         cliBinary,
-        [
-          "generate",
-          "--target",
-          "c99",
-          "--out",
-          oracleOut,
-          "--emit-ir",
-          fixture,
-        ],
+        ["generate", "--target", "c99", "--out", oracleOut, "--emit-ir", fixture],
         { stdio: "ignore" },
       );
-      const irFile = fs
-        .readdirSync(oracleOut)
-        .find((f) => f.endsWith(".ir.json"));
-      assert.ok(
-        irFile,
-        "oracle precondition: real --emit-ir wrote a .ir.json",
-      );
-      const expectedIr = fs.readFileSync(
-        path.join(oracleOut, irFile),
-        "utf8",
-      );
+      const irFile = fs.readdirSync(oracleOut).find((f) => f.endsWith(".ir.json"));
+      assert.ok(irFile, "oracle precondition: real --emit-ir wrote a .ir.json");
+      const expectedIr = fs.readFileSync(path.join(oracleOut, irFile), "utf8");
 
       // Put a sentinel on the clipboard first so a no-op command (the
       // failure we are guarding against) is detectable, not a false pass.
@@ -281,9 +242,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
             break;
           }
           if (Date.now() > deadline) {
-            throw new Error(
-              "timed out waiting for fsm.copyIR to populate the clipboard",
-            );
+            throw new Error("timed out waiting for fsm.copyIR to populate the clipboard");
           }
           await new Promise((r) => setTimeout(r, 150));
         }
@@ -306,8 +265,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
         "clipboard IR must carry an irVersion (fsm-ir schema, R-17)",
       );
       assert.ok(
-        Array.isArray(parsed.machines) &&
-          parsed.machines.some((m) => m.name === "Gate"),
+        Array.isArray(parsed.machines) && parsed.machines.some((m) => m.name === "Gate"),
         "clipboard IR must contain the fixture's machine `Gate`",
       );
     } finally {
@@ -319,9 +277,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
   // codegen-gated boundary surfaced honestly (R-11, PROVEN not assumed).
   test("fsm.copyIR does NOT fake a clipboard when codegen fails (R-11 boundary)", async () => {
     const fixture = path.join(tmpDir, "broken.fsm"); // codegen FAILS
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
     const sentinel = `__no_ir_sentinel_${Date.now()}__`;
@@ -346,9 +302,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
     const outDir = path.join(tmpDir, "generated_cpp");
     fs.rmSync(outDir, { recursive: true, force: true });
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
     await vscode.commands.executeCommand("fsm.generateCpp17");
 
@@ -356,8 +310,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
     // (crates/fsm-cli/src/cmd/generate.rs:28-36). The command must NOT
     // have produced an output dir / files (a fake success would).
     await new Promise((r) => setTimeout(r, 1500));
-    const produced =
-      fs.existsSync(outDir) && fs.readdirSync(outDir).length > 0;
+    const produced = fs.existsSync(outDir) && fs.readdirSync(outDir).length > 0;
     assert.strictEqual(
       produced,
       false,
@@ -375,9 +328,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
     assert.strictEqual(oracle.length, 1, "broken.fsm oracle = 1 diag");
     assert.strictEqual(oracle[0].code, "FSM-E0107");
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
     // Executing the command must not throw and the editor's diagnostics
@@ -406,9 +357,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
     const messyPath = path.join(tmpDir, "_fmt_target.fsm");
     fs.writeFileSync(messyPath, messy);
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(messyPath),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(messyPath));
     const editor = await vscode.window.showTextDocument(doc);
 
     // The CLI formatter is the oracle: format the same bytes via stdin.
@@ -439,9 +388,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
       "fsm.formatDocument must be idempotent on already-canonical text",
     );
 
-    await vscode.commands.executeCommand(
-      "workbench.action.closeActiveEditor",
-    );
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
     fs.rmSync(messyPath, { force: true });
   });
 
@@ -465,9 +412,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
     this.timeout(120_000);
 
     const fixture = path.join(tmpDir, "broken.fsm");
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
     // Pre-restart: the squiggle is up (FSM-E0107) under the original
@@ -477,11 +422,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
       (d) => d.some((x) => x.code === "FSM-E0107"),
       "FSM-E0107 BEFORE restart",
     );
-    assert.strictEqual(
-      api.serverStarted,
-      true,
-      "client must be Running before the restart",
-    );
+    assert.strictEqual(api.serverStarted, true, "client must be Running before the restart");
 
     // Execute the real command (NOT a direct client.restart() — we are
     // testing the contributed+registered command path end-to-end).
@@ -501,9 +442,7 @@ suite("FSM Studio V3 — Extension-Host command behavioural acceptance", () => {
 
     // Reopen to force a fresh didOpen on the (restarted) server, then
     // assert the diagnostic round-trips through the new connection.
-    const doc2 = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc2 = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc2);
     const after = await waitForDiagnostics(
       doc2.uri,

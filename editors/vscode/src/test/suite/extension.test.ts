@@ -32,11 +32,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 
 import { resolveRealBinaries } from "./binaries";
-import {
-  OracleDiag,
-  assertAsciiColumnInvariant,
-  cliOracle,
-} from "./oracle";
+import { OracleDiag, assertAsciiColumnInvariant, cliOracle } from "./oracle";
 
 const FIXTURE_SRC = path.resolve(__dirname, "../fixtures");
 
@@ -60,24 +56,15 @@ async function waitForDiagnostics(
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `timed out waiting for diagnostics on ${uri.fsPath}; ` +
-          `last = ${JSON.stringify(diags)}`,
+        `timed out waiting for diagnostics on ${uri.fsPath}; ` + `last = ${JSON.stringify(diags)}`,
       );
     }
     await new Promise((r) => setTimeout(r, 150));
   }
 }
 
-function assertRangeMatchesOracle(
-  got: vscode.Diagnostic,
-  want: OracleDiag,
-  label: string,
-): void {
-  assert.strictEqual(
-    got.code,
-    want.code,
-    `[${label}] diagnostic code must equal the CLI oracle`,
-  );
+function assertRangeMatchesOracle(got: vscode.Diagnostic, want: OracleDiag, label: string): void {
+  assert.strictEqual(got.code, want.code, `[${label}] diagnostic code must equal the CLI oracle`);
   assert.strictEqual(
     got.range.start.line,
     want.startLine,
@@ -117,10 +104,7 @@ suite("FSM Studio V1 — Extension-Host behavioural acceptance", () => {
     //    found — apply_allow_deny is a guaranteed no-op.
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsm-v1-accept-"));
     for (const f of ["broken.fsm", "clean.fsm", "non_ascii_doc.fsm"]) {
-      fs.copyFileSync(
-        path.join(FIXTURE_SRC, f),
-        path.join(tmpDir, f),
-      );
+      fs.copyFileSync(path.join(FIXTURE_SRC, f), path.join(tmpDir, f));
     }
     // Hard assert no fsm.toml is reachable up-tree from the staged dir.
     let dir = tmpDir;
@@ -141,11 +125,7 @@ suite("FSM Studio V1 — Extension-Host behavioural acceptance", () => {
     //    bin/ yet, so the explicit-path rule is the V1 launch path).
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        bins.server,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", bins.server, vscode.ConfigurationTarget.Global);
 
     // 4. Activate the extension and capture its test API.
     const ext = vscode.extensions.getExtension("fsmstudio.fsm-lang");
@@ -165,11 +145,7 @@ suite("FSM Studio V1 — Extension-Host behavioural acceptance", () => {
   suiteTeardown(async () => {
     await vscode.workspace
       .getConfiguration("fsmLang")
-      .update(
-        "compilerPath",
-        undefined,
-        vscode.ConfigurationTarget.Global,
-      );
+      .update("compilerPath", undefined, vscode.ConfigurationTarget.Global);
     if (tmpDir && fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -228,24 +204,17 @@ suite("FSM Studio V1 — Extension-Host behavioural acceptance", () => {
     );
     assert.strictEqual(oracle[0].code, "FSM-E0107");
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
-    const diags = await waitForDiagnostics(
-      doc.uri,
-      (d) => d.length === 1,
-    );
+    const diags = await waitForDiagnostics(doc.uri, (d) => d.length === 1);
     assertRangeMatchesOracle(diags[0], oracle[0], "broken.fsm");
   });
 
   // (b) — edit-to-fix → diagnostics clear.
   test("(b) editing the file to fix the error clears diagnostics", async () => {
     const fixture = path.join(tmpDir, "broken.fsm");
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     const editor = await vscode.window.showTextDocument(doc);
 
     await waitForDiagnostics(doc.uri, (d) => d.length === 1);
@@ -254,10 +223,7 @@ suite("FSM Studio V1 — Extension-Host behavioural acceptance", () => {
     // the replacement source really IS clean via the same CLI pipeline, so
     // a subsequent non-empty publish would be a real regression, not a bad
     // fixture. Check it on an isolated temp copy (still R-15-isolated).
-    const cleanSource = fs.readFileSync(
-      path.join(tmpDir, "clean.fsm"),
-      "utf8",
-    );
+    const cleanSource = fs.readFileSync(path.join(tmpDir, "clean.fsm"), "utf8");
     const sanityPath = path.join(tmpDir, "_b_sanity.fsm");
     fs.writeFileSync(sanityPath, cleanSource);
     assert.strictEqual(
@@ -271,17 +237,11 @@ suite("FSM Studio V1 — Extension-Host behavioural acceptance", () => {
     // didChange; the server re-analyzes the NEW buffer (not the on-disk
     // file) and must republish empty.
     await editor.edit((eb) => {
-      const full = new vscode.Range(
-        doc.positionAt(0),
-        doc.positionAt(doc.getText().length),
-      );
+      const full = new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length));
       eb.replace(full, cleanSource);
     });
 
-    const cleared = await waitForDiagnostics(
-      doc.uri,
-      (d) => d.length === 0,
-    );
+    const cleared = await waitForDiagnostics(doc.uri, (d) => d.length === 0);
     assert.strictEqual(
       cleared.length,
       0,
@@ -293,9 +253,7 @@ suite("FSM Studio V1 — Extension-Host behavioural acceptance", () => {
     // later test reopening it sees pristine content (revert via the
     // stable file-revert command, then close without save).
     await vscode.commands.executeCommand("workbench.action.files.revert");
-    await vscode.commands.executeCommand(
-      "workbench.action.closeActiveEditor",
-    );
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
   });
 
   // (d) — first error AFTER a non-ASCII line: Range correct (Doc 26 §4.1
@@ -307,10 +265,7 @@ suite("FSM Studio V1 — Extension-Host behavioural acceptance", () => {
     const source = fs.readFileSync(fixture, "utf8");
     const oracle = cliOracle(cliBinary, fixture);
     assertAsciiColumnInvariant(source, oracle);
-    assert.ok(
-      oracle.length >= 1,
-      `oracle precondition: non_ascii_doc.fsm has >= 1 diagnostic`,
-    );
+    assert.ok(oracle.length >= 1, `oracle precondition: non_ascii_doc.fsm has >= 1 diagnostic`);
     // The FIRST error is the one whose Range the §5(d) guard pins.
     const first = oracle[0];
     assert.strictEqual(
@@ -326,15 +281,10 @@ suite("FSM Studio V1 — Extension-Host behavioural acceptance", () => {
         `(got 0-based startLine ${first.startLine})`,
     );
 
-    const doc = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(fixture),
-    );
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
     await vscode.window.showTextDocument(doc);
 
-    const diags = await waitForDiagnostics(
-      doc.uri,
-      (d) => d.some((x) => x.code === "FSM-E0100"),
-    );
+    const diags = await waitForDiagnostics(doc.uri, (d) => d.some((x) => x.code === "FSM-E0100"));
     const got = diags.find((d) => d.code === "FSM-E0100");
     assert.ok(got, "the FSM-E0100 diagnostic must be present");
     assertRangeMatchesOracle(got, first, "non_ascii_doc.fsm");

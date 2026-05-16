@@ -31,11 +31,7 @@ async function main(): Promise<void> {
       // required when running Electron headless as root in CI (the
       // Chromium sandbox cannot be set up there and otherwise SIGKILLs
       // spawned child processes — the language server included).
-      launchArgs: [
-        "--disable-extensions",
-        "--disable-gpu",
-        "--no-sandbox",
-      ],
+      launchArgs: ["--disable-extensions", "--disable-gpu", "--no-sandbox"],
       cachePath,
     });
   } catch (err) {

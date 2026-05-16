@@ -31,16 +31,11 @@ import * as vscode from "vscode";
 
 import { CommandDeps } from "../commands/index";
 import { emitIr } from "./emitIr";
-import {
-  DiagramModel,
-  IrGraphError,
-  parseAndBuild,
-} from "./irGraph";
+import { DiagramModel, IrGraphError, parseAndBuild } from "./irGraph";
 
 /** The Doc 05 §1.5.9 banner — VERBATIM. A regression of this string fails
  * the V4 acceptance (the contract text is asserted, not paraphrased). */
-export const STALE_BANNER =
-  "⚠ Diagram shows last valid state. Fix parse errors to update.";
+export const STALE_BANNER = "⚠ Diagram shows last valid state. Fix parse errors to update.";
 
 /** Messages the Webview posts back to the extension (the only inbound
  * surface — a tight, typed boundary). */
@@ -152,8 +147,7 @@ class DiagramView {
     } catch (e) {
       // A malformed/empty IR is a hard failure — same honest fallback as
       // the codegen-gated boundary (never a blank diagram as "success").
-      const detail =
-        e instanceof IrGraphError ? e.message : String(e);
+      const detail = e instanceof IrGraphError ? e.message : String(e);
       this.deps.outputChannel.appendLine(
         `[fsm] diagram: IR projection failed (${detail}) — keeping last ` +
           "valid render + stale banner.",
@@ -190,10 +184,7 @@ class DiagramView {
   /** Reveal a clicked node's declaration in the source editor (Doc 05
    * §1.5.4 click → editor line; the IR `SourceLocation` is 1-based, VS Code
    * is 0-based). */
-  private async revealSource(
-    line1Based: number,
-    column1Based: number,
-  ): Promise<void> {
+  private async revealSource(line1Based: number, column1Based: number): Promise<void> {
     const uri = vscode.Uri.file(this.fsmPath);
     const doc = await vscode.workspace.openTextDocument(uri);
     const editor = await vscode.window.showTextDocument(doc, {
@@ -267,9 +258,7 @@ export class DiagramController {
         enableScripts: true,
         retainContextWhenHidden: true,
         localResourceRoots: [
-          vscode.Uri.file(
-            path.join(this.context.extensionPath, "dist", "webview"),
-          ),
+          vscode.Uri.file(path.join(this.context.extensionPath, "dist", "webview")),
         ],
       },
     );
@@ -290,10 +279,7 @@ export class DiagramController {
   /** Test-observable: the last-valid model for a file's panel. The
    * `machineName` arg is accepted for call-site readability but identity
    * is the file path (one panel per file — §1.5.9). */
-  lastValidModelFor(
-    fsmPath: string,
-    _machineName?: string,
-  ): DiagramModel | undefined {
+  lastValidModelFor(fsmPath: string, _machineName?: string): DiagramModel | undefined {
     void _machineName;
     return this.views.get(path.resolve(fsmPath))?.getLastValidModel();
   }
@@ -305,12 +291,7 @@ export class DiagramController {
     const nonce = makeNonce();
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.file(
-        path.join(
-          this.context.extensionPath,
-          "dist",
-          "webview",
-          "diagramWebview.js",
-        ),
+        path.join(this.context.extensionPath, "dist", "webview", "diagramWebview.js"),
       ),
     );
     const csp =
