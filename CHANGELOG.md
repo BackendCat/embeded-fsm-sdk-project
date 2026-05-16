@@ -7,6 +7,155 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-05-16
+
+**Theme: Trustable behavioral validation — the verification core (`fsm verify` + `fsm baseline`).**
+
+> **Scope (Doc 00 §11.63, owner-confirmed):** `v1.4.0` ships the **complete
+> Verification core** = cut **A** (bounded explicit-state reachability +
+> deadlock detection driving the shipped `fsm_simulator::Interpreter` as the
+> sole semantic oracle, surfaced as `fsm verify`, honestly closing
+> FSM-E0400/FSM-W0602) **+ B** (trace differential replay, `fsm baseline`).
+> The verification core is a **NEW single `fsm-verify` crate** that drives the
+> shipped Interpreter and **never re-implements FSM semantics** (the keystone,
+> an epic-level architecture invariant). The canonical interface is the
+> **CLI** — no server, no daemon, no plugin host (the pipeline-before-UI bar,
+> `[[feedback_embeded_fsm_pipeline_before_ui]]`). The WS simulator server →
+> v1.5; Web IDE / wasm32 / cross-file LSP → v1.6 (explicitly deferred, not
+> re-cut). The v1.4 Rust delta vs v1.3 is **substantial and additive** (the
+> new `fsm-verify` crate + the W2-P0 lossless-snapshot extension + the
+> verify/baseline CLI wiring; `git diff --stat a036c38 4eb04dc -- crates/
+> Cargo.toml Cargo.lock rust-toolchain.toml` = 51 files / +7398 / −6) with
+> **0 new external dependencies** (Cargo.lock adds only the `fsm-verify`
+> workspace-member edge).
+
+### Added
+
+- **`fsm verify` — bounded explicit-state verification** (v1.4-W1/W2): a new
+  `fsm-verify` crate + `fsm verify <file>` subcommand. Bounded explicit-state
+  reachability + deadlock detection by **driving the shipped
+  `fsm_simulator::Interpreter`** as the sole transition oracle
+  (`new`/`init`/`dispatch`/`advance_clock`/`snapshot`/`restore`) — zero
+  re-implemented transition-selection / guard-eval / timer-fire / LCA /
+  completion (the §4.1 keystone). Covers flat **and**
+  composite/parallel/history/defer/timer/submachine machines (W2). Visited-set
+  keyed by a stable digest of `InterpreterSnapshot` (not retained full
+  snapshots — the §3.2 memory-bound design); a sound clock-origin
+  normalisation merges only strongly-bisimilar configs (the soundness lemma
+  now has its normative home at **Doc 08 §13.5**). **Distinct
+  verification-verdict exit codes** (0 verified / 1 property-violated /
+  2 INCONCLUSIVE / 3 IO / 4 won't-compile — Doc 18 §3.1; never a false
+  "verified" on a bound-hit, the honest-bound discipline) + a deterministic
+  machine-readable `--json` schema `fsm-verify/v1` (property results +
+  counterexample/witness traces). CI/Make/factory-integratable headless, zero
+  daemon. Behaviourally proven against an independent interpreter BFS + witness
+  replay through a fresh interpreter (the §5.4 bar; never symbol-presence).
+- **`fsm baseline` — trace differential replay** (v1.4-W3): a new
+  `fsm baseline --record` / `--check` subcommand — the semantic-drift
+  regression oracle. `--record` captures every suite `.fsm`'s execution trace
+  (driven through the shipped interpreter) into a frozen `fsm-trace/v1`
+  corpus; `--check` re-runs on a later build and reports any divergence with a
+  precise first-mismatch report. **Consumes** `fsm_simulator::execute_trace` /
+  `first_mismatch` (the same seam the conformance runner + `fsm verify` use —
+  no forked step comparison). Shipped as a **dedicated sibling subcommand**
+  (not `fsm test --baseline` — `fsm test` already has its own exit-code
+  semantics; a single-purpose subcommand is a clean sibling of `fsm verify`).
+  Distinct exit codes mirroring `fsm verify`'s family (0 no-drift / 1 drift /
+  2 INCONCLUSIVE / 3 IO / 4 out-of-scope) + `fsm-trace-diff/v1` `--json`.
+- **FSM-E0400 (unreachable state) + FSM-W0602 (no-incoming, not initial) —
+  honestly closed** (v1.4-W1/W2): both codes were **catalogued from v1.0 but
+  had no emission site** (the Doc 30 §1.3 / R8 *catalog-reserved-but-
+  unimplemented* drift). `fsm verify` now **emits them** from the computed
+  reachable set — FSM-E0400 **proof-gated** (emitted only on an exhaustive
+  search; the dual of the never-false-`ProvenNoDeadlock` invariant),
+  FSM-W0602 the structural always-safe subset (unconditional). The drift is
+  **closed in the record** (Doc 10 annotated); the live `DiagnosticCode`
+  count is **unchanged at 73** — v1.4 gave existing codes their first
+  emission site, it did not add a code.
+- **Worked CI-shaped factory recipe** (v1.4-W4a): `examples/verify/`
+  (`clean.fsm`, `deadlocks.fsm`, a runnable `README.md` CI script) +
+  `docs/25-Integration-Guide.md` §9 — the headless `fsm verify → generate →
+  check → baseline` loop demonstrated end-to-end + the determinism harness.
+- **`#![forbid(unsafe_code)]` extended to `fsm-verify`** — workspace is now
+  **12 forbid roots / 11 crates** (re-derived from source at the gate-doc
+  commit; the new `crates/fsm-verify/src/lib.rs` is the 12th root).
+
+### Changed
+
+- **`InterpreterSnapshot` made lossless for `timers` + recursive
+  `submachines`** (v1.4-W2-P0, `efae559`): **purely additive** — pre-W2
+  fields keep name/type/order; flat snapshots serialise byte-identically
+  (`"timers":[]` / `"submachines":{}`), proven by a ~435-line
+  `snapshot → perturb → restore → re-snapshot` byte-identity round-trip gate.
+  This closed the latent false-`ProvenNoDeadlock` foot-gun the post-W1 §11.3
+  audit flagged (the pre-W2 snapshot was lossy for those fields, so a
+  hierarchical/timer explorer would conflate behaviourally-distinct configs).
+  No regression to the flat-machine behaviour (the W2 §11.3 audit confirmed
+  byte-unregressed; subsumed in the cold-quad's `cargo test --workspace`).
+- **Doc 08 §13.5 added** — a new normative *absolute-virtual-clock
+  non-observability* lemma: no FSM-Lang construct can read the simulator
+  virtual clock; only relative timer phase is behaviourally significant ⇒
+  clock-origin-shift-equivalent configs are strongly bisimilar ⇒ the
+  `fsm verify` digest's clock-origin normalisation is sound (never a false
+  `ProvenNoDeadlock`). The normative-spec home for the W2 clock-merge
+  soundness. `crates/fsm-verify/src/digest.rs` citations repointed to §13.5
+  (comment-only, zero behaviour change).
+- **Doc 18 §3.1 added** — the sanctioned per-subcommand
+  verification-verdict exit-code family (`fsm verify` / `fsm baseline`
+  0/1/2/3/4) + the `fsm-verify/vN` / `fsm-trace/vN` / `fsm-trace-diff/vN`
+  schema-versioning policy, surfaced at the spec layer (Doc 18 §3 remains the
+  single authoritative exit-code source, now correctly including it). Exit 2
+  is documented as the first-class **INCONCLUSIVE** verdict (never a tool
+  error to blindly retry — the W4a §3.G surfacing). The policy was already
+  self-documented in-source (a positive credit); this is the discoverability
+  surfacing, not a code change.
+- **Doc 30 reconciled by annotation** (not rewritten — it remains the
+  wave-plan of record): the §4.1 "`InterpreterSnapshot` … already the
+  complete state" overstatement, the CLI+E0400/W0602-landed-in-W1 scope, the
+  two-audit §11.3 cadence, the `fsm baseline` surface choice, and the
+  baseline-corpus capture-from-current-known-good provenance are all marked
+  with reconciliation-note blockquotes beneath the original prose.
+
+### Fixed
+
+- *(No user-facing behaviour fixes — v1.4 is a new-capability epic.)* The
+  one internal correctness gap closed is the **pre-W2 `InterpreterSnapshot`
+  lossiness** for `timers`/`submachines` (W2-P0, see *Changed*); it was
+  latent (never reachable in v1.3 — there was no explorer that
+  snapshot/restore'd hierarchical/timer configs) and is closed *before* the
+  v1.4 explorer consumes the seam, so no shipped v1.x behaviour regressed.
+
+### Known limitations
+
+- **The mechanised sim≡codegen-equivalence proof is an explicit deferral
+  (R7).** v1.4's "trustable validation" theme is the *runtime* verification
+  core + the differential-replay drift oracle; a *mechanised* proof that the
+  simulator and the generated C are observationally equivalent is a **named**
+  v1.4-stretch / v1.5 item (the §11.49 leave-and-explain precedent applied to
+  scope) — recorded as accepted-tracked, **not silently omitted**.
+  `docs/GATE_VERIFICATION_v1_4.md` §6, Doc 00 §11.71.
+- **FSM-E0400/W0602 are tested by the `fsm-verify` acceptance suites, not a
+  formal conformance fixture.** The §5.4 *behavioural*-acceptance is a real
+  `.fsm` fixture driven through the parse+analyze+verify pipeline and
+  byte-cross-checked against an independent interpreter BFS (never
+  symbol-presence). The formal `tests/conformance/MANIFEST.json` corpus is
+  byte-unchanged at **26 fixtures**; G7's formal-conformance posture is
+  unchanged (the same explicitly-tracked partial accepted at v1.0–v1.3 — not
+  a v1.4 regression). `docs/GATE_VERIFICATION_v1_4.md` §1 G7.
+- **CI matrix + the JS lane never run** (G9). The GitHub Actions matrix
+  (linux/macos/windows × fmt/clippy/build/test), the SCA `cargo audit` job,
+  and the v1.3 Node/Extension-Host JS lane have **never executed against any
+  v1.2/v1.3/v1.4 commit** (local-only repo — owner controls the remote). The
+  local-equivalent cold quad is the gate; platform-specific behaviour is
+  unverified on the runners. Post-tag owner push action — carried unchanged
+  from v1.3 (`docs/GATE_VERIFICATION_v1_4.md` §5).
+- **Multi-platform binary bundling host-only (G9-gated); VSIX
+  installable-not-published; no top-level `LICENSE`; the v1.3.x
+  `makeNonce` CSPRNG one-liner; JC-3 `fsmLang.codegen.*` config-
+  discoverability** — all **carried unchanged from v1.3** (v1.4 neither
+  touched nor regressed them; the v1.4 surface is the verification core, no
+  `editors/` change). `docs/GATE_VERIFICATION_v1_4.md` §6, Doc 00 §11.71.
+
 ## [1.3.0] — 2026-05-16
 
 **Theme: First-class editor experience on top of the shipped LSP — the VS Code extension (Doc 27), preceded by the deferred §11.49 analyzer-coupling paydown (W0).**

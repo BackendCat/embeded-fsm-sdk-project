@@ -1,0 +1,220 @@
+{
+  "$comment": "FSM Studio metrics snapshot at the v1.4.0 tag (pending the contingent cold-quad + pre-tag-audit step). COMPANION to the v1.3.0 snapshot docs/metrics/2026-05-16-v1_3.json (NOT overwritten — that remains the frozen v1.3 attestation). 'deltas_vs_prev' carries v1.3->v1.4 movement; 'attention:true' marks a metric the next status report must examine. Reproducible: every metric has a 'method'. KEY FACT: the v1.4 Rust delta vs the v1.3 tag (a036c38) IS THE ADDITIVE VERIFICATION CORE — a NEW fsm-verify crate (17 files, +3042; src-only 6 files +1695) + the W2-P0 lossless-snapshot extension to fsm-simulator (6 files, +684/-6, purely additive — pre-W2 InterpreterSnapshot fields keep name/type/order, flat snapshots byte-identical, round-trip-gated) + the fsm verify/fsm baseline CLI wiring in fsm-cli (26 files, +3657). `git diff --stat a036c38 4eb04dc -- crates/ Cargo.toml Cargo.lock rust-toolchain.toml` = 51 files / +7398 / -6 — this is a SUBSTANTIAL ADDITIVE delta, stated as exactly that: the SYMMETRIC OPPOSITE of v1.3's cardinal 'zero Rust delta' error (v1.3 under-stated W0; v1.4 must neither under- nor over-state the verification-core delta). 0 NEW EXTERNAL DEPS: `git diff a036c38 4eb04dc -- Cargo.lock` adds only the fsm-verify workspace-member edge + the fsm-cli->fsm-verify dep line, 0 added `source =` lines. The Rust metrics that EQUAL the frozen v1.3 figures (live diagnostic codes 73, conformance 26) do so NOT because nothing changed but because v1.4 added NO diagnostic code (FSM-E0400/W0602 were CATALOGUED pre-v1.4 and only gained an EMISSION SITE in v1.4 — the §1.3/R8 catalog-reserved-but-unimplemented drift closed in the record) and the conformance MANIFEST is byte-untouched; forbid(unsafe_code) CORRECTLY INCREMENTS 11->12 roots / 10->11 crates (the new fsm-verify crate). Each is independently re-derived at the gate-doc commit (4eb04dc + the docs/ledger-only delta), not echoed.",
+  "date": "2026-05-16",
+  "milestone": "v1.4.0 — the Verification core (fsm verify + fsm baseline) shipped; FSM-E0400/W0602 honestly closed; tag is the contingent cold-quad+pre-tag-audit step (GATE_VERIFICATION_v1_4.md §4/§7)",
+  "tag_topology": {
+    "v1_4_0_gate_doc_commit": "X (pending — this metrics file + GATE_VERIFICATION_v1_4.md + the batched Doc-00 §11.64-71 / CHANGELOG [1.4.0] / ROADMAP / Doc 08 §13.5 / Doc 18 §3.1 / Doc 10 consolidation + the comment-only digest.rs §13->§13.5 repoint; the release commit)",
+    "v1_4_0_head_pre_gate": "4eb04dc",
+    "v1_4_0_head_pre_gate_full": "4eb04dc64d4ae0e343a834731b16f5d14a9c38a9",
+    "v1_4_0_head_subject": "v1.4-W4a: factory-integration completeness audit + worked verify recipe",
+    "checkpoint_2026_05_16_v1_4_commit": "X (== the v1.4.0 tag commit, per §11.30: gate-doc commit -> cold quad WITH NOTE-1 STEP 0 -> tag, all at the same commit; prospective §11.30-clean — the 4th consecutive)",
+    "note": "v1.4 follows the §11.30 prospective ordering (gate-doc commit X -> cold-from-source quad AT X with the MANDATORY NOTE-1 `cargo clean`/non-shared-CARGO_TARGET_DIR Step 0 -> tag AT X), the v1.2/v1.3 pattern repeated (4th consecutive prospective-clean release). The cold quad is NOT carried from v1.3 (v1.4 has a substantial additive Rust delta — the verification core); the contingent cold-quad at X is the gating step. De-risking predicates (NOT a substitute for the canonical run): the per-wave §11.1 independent re-runs + the W2 full-clean §11.1 re-run (114 ok / 0 FAILED on 3447881, clearing the NOTE-1 stale-target hazard) + the post-W1 keystone + post-W2 breadth §11.3 audits (both PROCEED-WITH-NOTES) + the W4a real-binary factory-completeness run (FACTORY-COMPLETE). Canonical record: docs/GATE_VERIFICATION_v1_4.md.",
+    "intra_epic_note": "No new intra-epic rollback checkpoint tag is cut by W4b (unlike v1.3's w0-clean anchor); the v1.4 epic's safety tag is `recovery-checkpoint-2026-05-11`-class only if needed. The v1.3.0 commit a036c38 (== checkpoint/2026-05-16-v1_3) is the v1.4 baseline; immutable, not moved.",
+    "v1_3_0_commit": "a036c381", "v1_3_0_tag_object": "a24c195b", "v1_3_0_checkpoint": "checkpoint/2026-05-16-v1_3 -> a036c381",
+    "v1_2_0_commit": "71043935", "v1_2_0_tag_object": "3b37db7c", "v1_2_0_checkpoint": "checkpoint/2026-05-16 -> 71043935",
+    "v1_1_0_commit": "abc70044", "v1_1_0_tag_object": "9634c7e2",
+    "v1_0_0_commit": "b4800036", "v1_0_0_tag_object": "13e2ac6c",
+    "tag_object_vs_commit_note": "Release tags are ANNOTATED: `git rev-parse <tag>` yields the tag-OBJECT sha; `git rev-list -1 <tag>` yields the COMMIT. They differ and must not be conflated. Independently re-confirmed at this commit: `git rev-parse v1.3.0` = a24c195b (tag-object) != `git rev-list -1 v1.3.0` = a036c381 (commit); `git rev-parse v1.2.0` = 3b37db7c != `git rev-list -1 v1.2.0` = 71043935. Recorded per Doc 00 §11.30 / GATE_VERIFICATION_v1_{1,2,3} §7/§8/§8 / GATE_VERIFICATION_v1_4 §8 so no future wave misreads the v1.4.0 tag-object sha as a mismatched commit."
+  },
+
+  "v1_4_rust_delta_is_the_additive_verification_core": {
+    "rust_delta_vs_v1_3_tag": "51 files / +7398 / -6 (crates/ + Cargo.toml + Cargo.lock + rust-toolchain.toml)",
+    "method": "`git diff --shortstat a036c38 4eb04dc -- crates/ Cargo.toml Cargo.lock rust-toolchain.toml` => 51 files / +7398 / -6. Independently re-derived this snapshot; the post-W1/post-W2/W4a audits each re-confirmed the wave deltas from `git`.",
+    "breakdown": {
+      "fsm_verify_crate_NEW": "17 files / +3042 (`git diff --shortstat a036c38 4eb04dc -- crates/fsm-verify/`); src-only 6 files / +1695 (`-- crates/fsm-verify/src/`)",
+      "fsm_simulator_W2_P0_lossless_snapshot": "6 files / +684 / -6 (`-- crates/fsm-simulator/`) — PURELY ADDITIVE to InterpreterSnapshot (pre-W2 fields keep name/type/order; flat snapshots byte-identical with \"timers\":[]/\"submachines\":{}; ~435-line snapshot->perturb->restore->re-snapshot round-trip gate). Closed the latent false-ProvenNoDeadlock foot-gun the post-W1 §11.3 audit flagged; the W2 §11.3 audit Lens 3 confirmed flat-machine byte-unregression.",
+      "fsm_cli_verify_baseline_CLI": "26 files / +3657 (`-- crates/fsm-cli/`) — the `fsm verify`/`fsm baseline` subcommands + their acceptance suites; +2 lines in main.rs (subcommand wiring), zero change to check/generate/fmt/test dispatch.",
+      "rust_toolchain_toml": "byte-unchanged (`git diff --stat a036c38 4eb04dc -- rust-toolchain.toml` empty) — pin held at 1.75"
+    },
+    "cargo_lock_new_external_deps": "0",
+    "cargo_lock_method": "`git diff a036c38 4eb04dc -- Cargo.lock` adds ONLY `name = \"fsm-verify\"` (the workspace-member entry) + the fsm-cli->fsm-verify dependency line; `... | grep -cE '^\\+source = '` => 0 (no registry/external crate pulled — all fsm-verify deps are first-party fsm-analyzer/diagnostics/ir/parser/simulator + serde_json/thiserror, already in the lockfile).",
+    "interpretation": "The v1.4 Rust delta vs the v1.3 tag (a036c38) IS THE ADDITIVE VERIFICATION CORE — a substantial +7398/-6 across 51 files, NOT empty and NOT zero. This is the SYMMETRIC ANALOGUE of v1.3's cardinal error (v1.3 wrongly summarised W0 as 'zero Rust delta' when it was +421/-93): the v1.4 delta is stated as exactly what it is — a large ADDITIVE delta (a new crate + an additive snapshot extension + a new CLI surface), with 0 new external deps. The Rust metrics that EQUAL the frozen v1.3 figures (live diagnostic codes 73, conformance 26) do so because v1.4 added NO diagnostic code (FSM-E0400/W0602 were CATALOGUED pre-v1.4, v1.4 gave them their first EMISSION SITE — the §1.3/R8 drift closed in the record) and the conformance MANIFEST is byte-untouched; forbid(unsafe_code) CORRECTLY INCREMENTS (the new crate adds the 12th root). Each independently re-derived at the gate-doc commit, not echoed."
+  },
+
+  "fsm_verify_subsystem": {
+    "$comment": "NEW v1.4 subsystem — the verification core. Rust, pure additive new crate, drives the shipped fsm_simulator::Interpreter as the SOLE semantic oracle (the §4.1 keystone, an epic-level architecture invariant — zero re-implemented transition-selection/guard/LCA/completion; independently re-derived from source at both the post-W1 and post-W2 §11.3 audits). Did not exist at v1.3.",
+    "src_rs_files": 6,
+    "src_loc_delta": 1695,
+    "src_files_list": ["lib.rs", "engine.rs", "deadlock.rs", "digest.rs", "diagnostics.rs", "reachability.rs"],
+    "test_loc_delta": 1347,
+    "test_files": "reachability_acceptance.rs (W1) + w2_hierarchy_acceptance.rs (W2) + tests/fixtures/*.fsm",
+    "total_fsm_verify_delta_vs_v1_3": "17 files / +3042 (entirely new — did not exist at a036c38)",
+    "method": "`git diff --shortstat a036c38 4eb04dc -- crates/fsm-verify/src/` => 6 files / +1695; full crate `-- crates/fsm-verify/` => 17 files / +3042; src .rs file list = `git ls-tree -r --name-only 4eb04dc -- crates/fsm-verify/src` filtered to *.rs.",
+    "runtime_deps": {
+      "fsm-simulator": "the semantic oracle (snapshot/restore/dispatch/advance_clock seam)",
+      "fsm-ir": "structural IR shape reads only (state IDs, transition targets — never behaviour)",
+      "fsm-diagnostics": "FSM-E0400/W0602 Diagnostic construction",
+      "serde_json + thiserror": "already in the lockfile (0 new external deps)",
+      "fsm-analyzer + fsm-parser": "[dev-dependencies] ONLY — used to parse+analyze real .fsm acceptance fixtures; the §11.63 'fsm-analyzer untouched, interpreter not dragged into the analyzer graph' architecture held exactly (W1+W2 audits independently re-derived from Cargo.toml)"
+    },
+    "keystone_proof": "Behaviourally proven against an independent interpreter-driven hand-BFS over composite/parallel/submachine fixtures + deadlock-witness replay through a FRESH interpreter (the §5.4 bar, never symbol-presence). Honest-bound structurally enforced: Verdict::ProvenNoDeadlock constructible at exactly one site on the natural exhausted exit; unreachable!() guards an inconclusive-on-exhausted outcome (the cardinal-verification-sin guard, structural not merely documented).",
+    "clock_merge_soundness_home": "Doc 08 §13.5 (the NEW normative absolute-virtual-clock non-observability lemma added by this closeout; digest.rs §13 citations repointed comment-only, zero behaviour). The post-W2 §11.3 audit independently re-derived the bisimulation argument from the quoted spec.",
+    "attention": false
+  },
+
+  "cli_verdict_surface": {
+    "$comment": "NEW v1.4 CLI surface — two subcommands with a distinct verification-verdict exit-code family (owner-mandated, NOT a generic 0/1 — Doc 00 §11.63 / Doc 30 §4.2-W4/§5.2). Surfaced at the spec layer in Doc 18 §3.1 by this closeout (the W4a §3.G fold).",
+    "fsm_verify": "0 verified / 1 property-violated (with witness) / 2 INCONCLUSIVE (honest-bound, NEVER a false 'verified' on a bound-hit — confirmed at the JSON-field level by W4a) / 3 IO / 4 won't-compile; --json schema fsm-verify/v1 (deterministic, sorted keys; W4a two-run byte-compare confirmed)",
+    "fsm_baseline": "0 no-drift / 1 drift (first-mismatch) / 2 INCONCLUSIVE (corpus absent/mismatched, NEVER a false 'no-drift') / 3 IO / 4 out-of-scope; corpus fsm-trace/v1, --json fsm-trace-diff/v1 — symmetric to fsm verify's family (a factory integrator who learns one knows the other)",
+    "factory_completeness": "W4a (FACTORY-COMPLETE) drove the FULL headless fsm verify -> generate -> check -> baseline loop end-to-end TWICE: every workflow a real captured command + actual exit code + jq-parsed JSON (anti-symbol-presence bar); deterministic; zero UI/daemon. Worked recipe shipped at examples/verify/{clean.fsm,deadlocks.fsm,README.md} + Doc 25 §9.",
+    "schema_versioning_policy": "fsm-verify/vN, fsm-trace/vN, fsm-trace-diff/vN — additive keeps major (unknown-key-tolerant consumers unaffected; W2's hierarchy coverage was purely additive under v1), breaking bumps major, the exit-code contract is part of the versioned surface. Self-documented in-source (verify.rs:70-101 / baseline.rs:79-103 — a POSITIVE credit, the W1-audit 'state the policy explicitly' rec already satisfied) AND now surfaced at the spec layer in Doc 18 §3.1 (the discoverability fold, NOT a defect fix).",
+    "attention": false
+  },
+
+  "diagnostic_codes": {
+    "live_count": 73,
+    "by_severity": { "error": 51, "warning": 12, "info": 4, "hint": 6 },
+    "retired_count": 6,
+    "delta_vs_v1_3": 0,
+    "v1_4_change": "FSM-E0400 + FSM-W0602 HONESTLY CLOSED (catalog-reserved-but-unimplemented drift, Doc 30 §1.3/R8 fixed in the record): both codes were CATALOGUED from v1.0 but had NO emission site; fsm verify now EMITS them (E0400 proof-gated on exhaustive search — the dual of the never-false-ProvenNoDeadlock invariant; W0602 the structural always-safe subset, unconditional). The live count is UNCHANGED at 73 because the codes were already CATALOGUED — v1.4 gave them an EMISSION SITE, it did NOT add a code. Doc 10 annotated (append-only, IMPLEMENTED-in-v1.4).",
+    "ci_lock": "all_codes_matches_expected_count test asserts `const EXPECTED: usize = 73`; byte-unchanged across v1.4 (v1.4 added/retired no code).",
+    "method": "`sed -n '261,387p' crates/fsm-diagnostics/src/lib.rs | grep -cE '^\\s+[EWIH][0-9]{4}\\s*=>\\s*\\('` => 73 (independently re-derived at the gate-doc commit, not echoed; by-severity: E `... | grep -cE 'E[0-9]{4}.*Error'`=51, W=12, I=4, H=6). Matches the frozen v1.3 live_count exactly + the CI-lock EXPECTED const.",
+    "flag_resolution": "RESOLVED — the W4-plan flagged 'closing E0400/W0602 may NOT change the count since they were catalogued pre-v1.4'. Confirmed from source: 73 (== v1.3), unchanged. The §1.3/R8 drift is about IMPLEMENTATION (no emission site), not catalog presence; closing it is an emission-site addition, not a code addition.",
+    "attention": false
+  },
+
+  "conformance": {
+    "manifest_fixtures_total": 26,
+    "manifest_by_category": { "parser": 6, "validator": 6, "semantic": 7, "codegen-c": 4, "formatter": 3 },
+    "v1_3_baseline_fixtures": 26,
+    "delta_vs_v1_3": 0,
+    "added_v1_4": "NONE in the formal MANIFEST — v1.4 added/retired no diagnostic code; tests/conformance/MANIFEST.json is byte-untouched. FSM-E0400/W0602 (closed in v1.4) are tested by the fsm-verify ACCEPTANCE SUITES (real .fsm fixtures driven through parse+analyze+verify, byte-cross-checked vs an independent interpreter BFS — the §5.4 behavioural bar, e.g. unreachable_island.fsm), the §5.4-analogue for a new subsystem (the v1.3 Extension-Host-tests precedent). NOT a formal conformance fixture — the formal corpus is unchanged (honest finding; G7 posture unchanged, the same explicitly-tracked partial accepted at v1.0-v1.3).",
+    "method": "AUTHORITATIVE = `jq '[.categories[].fixtures|length]|add' tests/conformance/MANIFEST.json` => 26 (independently re-derived at the gate-doc commit). `jq -r '.categories[].fixtures[] | .path + \" \" + (.expectedCodes//[]|tostring)' | grep -iE '0400|0602|reach|deadlock'` => EMPTY (no new reachability/E0400/W0602 formal fixture — confirmed from source).",
+    "attention": false
+  },
+
+  "safety": {
+    "crate_roots_with_forbid_unsafe": 12,
+    "crates_forbid_unsafe": 11,
+    "delta_vs_v1_3": "+1 root / +1 crate (the NEW fsm-verify crate)",
+    "root_files": [
+      "crates/fsm-analyzer/src/lib.rs",
+      "crates/fsm-cli/src/main.rs",
+      "crates/fsm-codegen-c/src/lib.rs",
+      "crates/fsm-diagnostics/src/lib.rs",
+      "crates/fsm-formatter/src/lib.rs",
+      "crates/fsm-ir/src/lib.rs",
+      "crates/fsm-lexer/src/lib.rs",
+      "crates/fsm-lsp/src/lib.rs",
+      "crates/fsm-lsp/src/main.rs",
+      "crates/fsm-parser/src/lib.rs",
+      "crates/fsm-simulator/src/lib.rs",
+      "crates/fsm-verify/src/lib.rs"
+    ],
+    "method": "`git grep -l '#![forbid(unsafe_code)]' -- 'crates/*/src/*.rs'` => 12 root files; `... | cut -d/ -f2 | sort -u | wc -l` => 11 crates (independently re-derived at the gate-doc commit, not echoed). CORRECTLY INCREMENTS from the frozen v1.3 11/10 — the new crates/fsm-verify/src/lib.rs is the 12th root (fsm-lsp contributes 2 roots lib.rs+main.rs across 1 crate => 12 roots / 11 crates). Matches Doc 30 §5.2's 'v1.4 adds fsm-verify -> 12/11' assertion, verified from source.",
+    "unsafe_blocks": 0,
+    "flag_resolution": "RESOLVED — the W4-plan flagged 'Doc 30 §5.2 asserts v1.4 adds fsm-verify -> 12/11; verify from source'. Confirmed: 12 roots / 11 crates from `git grep -l`. fsm-verify carries #![forbid(unsafe_code)] (the workspace convention upheld).",
+    "interpretation": "v1.3 was 10 crates / 11 roots; v1.4's new fsm-verify crate adds the 12th root and the 11th crate (it carries #![forbid(unsafe_code)] per the workspace convention). The invariant holds and is re-confirmed at the gate-doc commit.",
+    "attention": false
+  },
+
+  "loc": {
+    "rust_src_excl_tests_total_v1_3_frozen": 45620,
+    "v1_4_additive_src_delta": "fsm-verify src +1695 (6 files, NEW) + fsm-simulator W2-P0 +684/-6 (additive snapshot extension) — the headline v1.4 LOC story is the NEW fsm-verify verification-core crate + the W2-P0 lossless-snapshot extension + the verify/baseline CLI (fsm-cli +3657 incl. tests)",
+    "rust_note": "The frozen v1.3 figure (45620, docs/metrics/2026-05-16-v1_3.json — a frozen attestation is not rewritten) does NOT carry unchanged for v1.4: v1.4 has a substantial ADDITIVE Rust delta (the verification core). The v1.4 src LOC delta vs v1.3 is NOT separately whole-src-file-recomputed here (the v1.3 snapshot is the frozen base); the authoritative v1.4 movement is the `git diff --shortstat a036c38 4eb04dc` breakdown above (51 files / +7398 / -6; src-only fsm-verify +1695, fsm-simulator +684/-6). This is the SYMMETRIC OPPOSITE of v1.3's 'carried unchanged because W0 non-behavioural' framing — v1.4's delta is large and additive, stated as exactly that.",
+    "method": "Rust delta = `git diff --shortstat a036c38 4eb04dc -- crates/fsm-verify/src/` (+1695) + `-- crates/fsm-simulator/` (+684/-6); the frozen v1.3 base 45620 is from docs/metrics/2026-05-16-v1_3.json (not rewritten).",
+    "interpretation": "v1.4's LOC delta is the +1695-LOC NEW fsm-verify verification-core src + the +684/-6 W2-P0 fsm-simulator lossless-snapshot extension + the +3657 fsm-cli verify/baseline surface (incl. acceptance tests). A focused, behaviourally-proven new subsystem that drives the existing Interpreter rather than re-implementing semantics (the keystone)."
+  },
+
+  "tests": {
+    "$comment": "The full cold-quad test total is the contingent gating step (GATE_VERIFICATION_v1_4 §4.4) — NOT asserted as a completed number here (no run-at-X transcript is fabricated). v1.4 ADDS test surface: the fsm-verify acceptance suites (reachability_acceptance.rs W1 + w2_hierarchy_acceptance.rs W2), the fsm-simulator snapshot_lossless.rs round-trip gate (~435 lines), and the fsm-cli cli_verify.rs / cli_baseline.rs CLI acceptance. The W2 §11.1 independent re-run produced 114 ok / 0 FAILED on 3447881 (full-clean — clearing the NOTE-1 stale-target hazard). The §11.30-clean canonical confirming cold quad at X (with the MANDATORY NOTE-1 Step 0) re-confirms from cold regardless.",
+    "w2_independent_rerun": "114 ok / 0 FAILED on 3447881 (full-clean re-run, /tmp/w2-indep-rerun-report.md §Cold-quad — the 6 apparent FAILs were stale …-wt-v14w2/-baked test binaries in crates W2 never touched; PASS on recompile; NOTE-1 cleared)",
+    "new_v1_4_test_surface": "fsm-verify: reachability_acceptance.rs (W1, behavioural — genuine deadlock+witness, proven-clean-within-bound, too-small-bound-INCONCLUSIVE-not-false-proven, verifier-agrees-with-interpreter-oracle), w2_hierarchy_acceptance.rs (W2, byte-equals an independent interpreter BFS over composite/parallel/submachine + witness replay through a fresh interpreter); fsm-simulator: snapshot_lossless.rs (~435-line snapshot->perturb->restore->re-snapshot byte-identity gate + flat-machine regression asserting \"timers\":[]/\"submachines\":{}); fsm-cli: cli_verify.rs (exit 0/1/2/3/4 each behaviourally tested + byte-equal-across-two-runs + the headless verify->generate->check loop) + cli_baseline.rs (record/check + committed_corpus_matches_a_fresh_capture_on_this_build byte-stability gate)",
+    "method": "Cold-quad total is the contingent step (NOT fabricated); the new-surface inventory = `git diff --name-only a036c38 4eb04dc -- 'crates/*/tests/'` filtered to the v1.4 acceptance files. The W2 re-run figure is from the frozen /tmp/w2-indep-rerun-report.md.",
+    "attention": false
+  },
+
+  "decisions_ledger": {
+    "section_11_total_rows": 71,
+    "v1_4_impl_rows_range": "§11.64 - §11.71",
+    "v1_4_impl_rows_count": 8,
+    "v1_4_owner_reconcile_row": "§11.63 (the v1.4 owner scope-confirm + fsm-verify/CLI-canonical/no-server-no-plugin architecture; appended PRE-W1 at commit 3e0aac3, BEFORE this batch — counted in the total but NOT a W4b-authored row)",
+    "v1_3_rows_count": 13,
+    "method": "`grep -cE '^\\| §11\\.[0-9]+ \\| ' docs/00-Decisions-And-Reconciliation.md` => 71. APPEND-ONLY verified: all 63 pre-existing §11 rows byte-identical in the working tree (`comm -23 <rows@HEAD-sorted> <rows@working-sorted>` empty); §11.63 relocated NET-ZERO to restore numeric order (62,63,64...71); the SINGLE permitted deletion is the footer-line swap (the v1.3 D15 invariant). New row-definition lines added = 8 (exactly §11.64-71); deleted row-definition lines = 0.",
+    "v1_4_rows_summary": "§11.64 W1 keystone + the §4.3 sub-brief superseded (CLI+E0400/W0602 landed in W1 per §11.63; Vec<String> witness the better choice; forbid 12/11); §11.65 W2 the load-bearing snapshot-completeness P0 + the W1-audit D-2 'complete state' overstatement closed in code (Doc 08 §13.5 soundness home); §11.66 the TWO-audit §11.3 cadence (post-W1 keystone a75cd69 + post-W2 breadth, the post-W1 verdict re-read in full not echoed); §11.67 W3 fsm baseline sibling subcommand + the capture-from-current-known-good corpus provenance (NOT an a036c38 capture; a036c38 IS the v1.3.0 commit); §11.68 W4a FACTORY-COMPLETE + the §3.G Doc-18 surfacing deferred-then-folded; §11.69 the W4b batched closeout = the §11.30 gate-doc commit + the W1-audit path-citation ledger note (frozen W1 audit NOT overwritten); §11.70 the NOTE-1 hardening (mandatory cargo clean/fresh-target before the cold quad — binding v1.4+); §11.71 v1.4 accepted-tracked-debt (R7 sim≡codegen explicit DEFERRAL named-not-omitted) + carried v1.3 owner-escalations.",
+    "footer_swap": "the single permitted deletion — the §11 footer line updated to record 'rows §11.64-71 appended 2026-05-16, the v1.4 batched doc/ledger closeout' (the v1.3 D15 invariant: one footer-line swap is the only deletion in an append-only ledger edit)."
+  },
+
+  "gate_status": {
+    "cleanly_met": 7,
+    "acceptable_partial": 2,
+    "blocked": 0,
+    "detail": "GATE_VERIFICATION_v1_4.md §1: G1-G6, G8 clean. The cold quad is the contingent gating step at the gate-doc commit X (WITH the MANDATORY NOTE-1 Step 0 — `cargo clean`/non-shared CARGO_TARGET_DIR before the full-workspace gate, binding v1.4+, GATE §4.2). G7 (formal conformance 26 fixtures, not all 73 live codes; FSM-E0400/W0602 tested via the fsm-verify acceptance suites — the §5.4-analogue) + G9 (remote CI never run + the carried v1.3 JS lane never run + the G9-gated 5-platform tail) are the same acceptable-partial posture as v1.0/v1.1/v1.2/v1.3. 0 open P0. The two §11.3 phase-boundary audits (post-W1 keystone, post-W2 breadth) each returned PROCEED-WITH-NOTES; the W4a factory-integration audit returned FACTORY-COMPLETE (0 workflow gaps)."
+  },
+
+  "phase_boundary_audits": [
+    "docs/AUDIT_PHASE_V1_4_W1_2026_05_16.md (post-W1 KEYSTONE, audited dd2d41e, commit a75cd69, PROCEED-WITH-NOTES — verdict independently RE-READ IN FULL at this closeout per §11.29, not echoed; headline D-2: InterpreterSnapshot lossy for submachines/timers => the mandatory W2-first-unit prerequisite; D-1: CLI+E0400/W0602 shipped in W1 per §11.63)",
+    "docs/AUDIT_PHASE_V1_4_W2_2026_05_16.md (post-W2 BREADTH, audited 3447881, PROCEED-WITH-NOTES — keystone intact + clock-merge soundness fully confirmed by the auditor's own spec derivation + post-W1 D-2 closed; froze the 7-item closeout carry-list §5 this batch executes)",
+    "docs/AUDIT_FACTORY_INTEGRATION_V1_4_2026_05_16.md (W4a FACTORY-COMPLETENESS, audited fc88ec1, commit 4eb04dc, FACTORY-COMPLETE — the full headless verify->generate->check->baseline loop CI/factory-integratable with 0 workflow gaps, real-binary-driven twice; single finding §3.G doc-discoverability DEFER->folded into Doc 18 §3.1 by this batch, not a code change, not a tag blocker)"
+  ],
+
+  "accepted_tracked_debt": {
+    "named_deferral_this_release": {
+      "item": "R7 — mechanised sim≡codegen-equivalence proof",
+      "status": "EXPLICIT NAMED DEFERRAL (v1.4-stretch / v1.5) — NOT omitted",
+      "detail": "v1.4's 'trustable validation' theme is the RUNTIME verification core (fsm verify) + the differential-replay drift oracle (fsm baseline). A MECHANISED proof that sim ≡ generated-C is a NAMED v1.4-stretch/v1.5 item (Doc 30 §2.1 / R7), recorded as accepted-tracked-debt — the §11.49 leave-and-explain precedent applied to scope (the project keeps re-learning the overstatement sin: an unaddressed sub-claim of the theme must be scoped-out LOUDLY, not silently dropped). Doc 00 §11.71, GATE_VERIFICATION_v1_4 §6.1, CHANGELOG [1.4.0] Known limitations.",
+      "precedent": "v1.3 §6.1 §11.49-paydown residual + v1.0-v1.3 G7/G9 partials were recorded the same way (named-tracked, not omitted)"
+    },
+    "closed_this_release": {
+      "item": "FSM-E0400 / FSM-W0602 catalog-reserved-but-unimplemented drift (Doc 30 §1.3 / R8)",
+      "status": "CLOSED IN THE RECORD — both codes now have an emission site (fsm verify, v1.4-W1/W2)",
+      "detail": "Both were CATALOGUED from v1.0 but had no emission site. v1.4 emits them (E0400 proof-gated on exhaustive search; W0602 the structural always-safe subset). Doc 10 annotated IMPLEMENTED-in-v1.4 (append-only); the live DiagnosticCode count is UNCHANGED at 73 (emission-site addition, not a code addition). Doc 00 §11.64/§11.65, ROADMAP."
+    },
+    "carried_owner_escalations": [
+      "G9 CI matrix + the carried v1.3 JS lane never run (owner push action; GATE_VERIFICATION_v1_4 §5.1 / Doc 00 §11.71 — the v1.3 §5 carry, UNCHANGED by v1.4)",
+      "G9-gated 5-platform binary-bundling tail (v1.3-V6 host-only — owner/infra action; §5.2, carried from GATE_VERIFICATION_v1_3 §5.2 / Doc 00 §11.57)",
+      "VSIX packaged-not-published (owner credential/product decision; §5.3, carried from v1.3 §5.3 / Doc 00 §11.57)",
+      "no top-level LICENSE file (owner/legal, coupled to publishing; carried from v1.3 §6.3 / Doc 00 §11.62)",
+      "makeNonce Math.random->CSPRNG (tracked v1.3.x senior-bar one-liner; carried unchanged — the v1.4 surface touched no editors/; Doc 00 §11.61)",
+      "JC-3 fsmLang.codegen.* config-discoverability (owner/later config-owner wave; carried unchanged; Doc 00 §11.58)"
+    ]
+  },
+
+  "security": {
+    "rust_known_vulns": 0,
+    "rust_note": "Equals the frozen v1.3 figure (0 known vulns). v1.4 added 0 new EXTERNAL deps: `git diff a036c38 4eb04dc -- Cargo.lock` adds only the fsm-verify workspace-member edge + the fsm-cli->fsm-verify dep line (0 added `source =` lines — no registry/external crate pulled; all fsm-verify deps are first-party + serde_json/thiserror already in the lockfile), so the dependency surface is unchanged and RUSTSEC-2026-0009 remained eliminated. The SCA cargo audit ci.yml job is byte-unchanged + still unexercised (G9, carried).",
+    "node_audit": "N/A for v1.4 (no editors/ change — the v1.4 surface is the Rust verification core). The carried v1.3 JS-lane npm audit remains the v1.3 contingent step, unaffected by v1.4.",
+    "verification_core_soundness": "The fsm verify honest-bound is structurally enforced (Verdict::ProvenNoDeadlock at exactly one site on the natural exhausted exit; unreachable!() guards inconclusive-on-exhausted — the cardinal-verification-sin guard). The clock-origin-normalisation soundness has its NORMATIVE SPEC HOME at Doc 08 §13.5 (the new lemma) + was independently re-derived from the quoted spec by the post-W2 §11.3 audit (never a false ProvenNoDeadlock by that mechanism). The W4a factory-audit confirmed the honest-bound holds at the JSON-field level (a bound-hit run is NEVER a false 'verified')."
+  },
+
+  "deltas_vs_prev": {
+    "_prev_milestone": "v1.3.0 (2026-05-16, docs/metrics/2026-05-16-v1_3.json — frozen, NOT overwritten)",
+    "rust_workspace": {
+      "delta": "THE ADDITIVE VERIFICATION CORE: 51 files / +7398 / -6 vs the v1.3 tag a036c38 (NEW fsm-verify crate 17 files/+3042 + fsm-simulator W2-P0 lossless-snapshot 6 files/+684/-6 + fsm-cli verify/baseline 26 files/+3657); 0 new EXTERNAL deps; rust-toolchain.toml byte-unchanged.",
+      "attention": false,
+      "note": "`git diff --stat a036c38 4eb04dc -- crates/ Cargo.toml Cargo.lock rust-toolchain.toml` = 51 files / +7398 / -6 — a SUBSTANTIAL ADDITIVE delta, NOT empty and NOT zero. This is the SYMMETRIC ANALOGUE of v1.3's cardinal 'zero Rust delta' error: v1.3 wrongly summarised W0 (+421/-93) as zero; v1.4's verification-core delta is stated as exactly what it is — a large additive delta (new crate + additive snapshot extension + new CLI surface), 0 new external deps (Cargo.lock adds only the fsm-verify member edge — `... | grep -cE '^\\+source = '` => 0). Independently re-derived this snapshot; the W1/W2/W4a audits each re-confirmed the wave deltas from git."
+    },
+    "new_subsystem_fsm_verify": {
+      "v1_3": "absent (did not exist)", "v1_4": "1695 src LOC (6 .rs files: lib/engine/deadlock/digest/diagnostics/reachability) + 1347 test LOC + the fsm verify/fsm baseline CLI",
+      "delta": "+3042 total fsm-verify crate insertions vs the v1.3 tag (17 files, entirely new) + the +684/-6 fsm-simulator W2-P0 + the +3657 fsm-cli verify/baseline surface",
+      "attention": false,
+      "note": "The v1.4 verification-core epic W1-W4a. A NEW Rust crate that DRIVES the shipped fsm_simulator::Interpreter as the SOLE semantic oracle (the §4.1 keystone — zero re-implemented semantics, independently re-derived from source at both §11.3 audits). 0 new external deps; the §11.63 'fsm-analyzer untouched' architecture held (fsm-analyzer is [dev-dependencies]-only in fsm-verify)."
+    },
+    "live_diagnostic_codes": { "v1_3": 73, "v1_4": 73, "delta": 0, "attention": false, "note": "Unchanged — v1.4 retired/added NO code; FSM-E0400/W0602 were CATALOGUED pre-v1.4 and only gained an EMISSION SITE in v1.4 (the §1.3/R8 catalog-reserved-but-unimplemented drift closed in the record — an emission-site addition, not a code addition). Re-derived at the gate-doc commit." },
+    "conformance_fixtures": { "v1_3": 26, "v1_4": 26, "delta": 0, "attention": false, "note": "Unchanged — byte-identical MANIFEST.json (v1.4 added/retired no code). FSM-E0400/W0602 tested via the fsm-verify acceptance suites (the §5.4-analogue), NOT a new formal fixture — the formal corpus is unchanged (honest finding; G7 posture unchanged)." },
+    "forbid_unsafe_roots": { "v1_3": 11, "v1_4": 12, "delta": 1, "attention": false, "note": "CORRECTLY INCREMENTS — the NEW fsm-verify crate adds the 12th root (12 roots / 11 crates; fsm-lsp = 2 roots/1 crate). Matches Doc 30 §5.2's 'v1.4 adds fsm-verify -> 12/11', verified from `git grep -l` at the gate-doc commit." },
+    "forbid_unsafe_crates": { "v1_3": 10, "v1_4": 11, "delta": 1, "attention": false, "note": "CORRECTLY INCREMENTS — the NEW fsm-verify crate is the 11th forbid-unsafe crate." },
+    "decisions_section_11_rows": {
+      "v1_3": 62, "v1_4": 71, "delta": 9,
+      "attention": false,
+      "note": "+9 rows from the v1.3-tag 62: §11.63 (the v1.4 owner scope-confirm, appended PRE-W1 at 3e0aac3 — before this batch) + §11.64-71 (8 rows, THIS W4b batched closeout). Append-only verified: all 63 pre-existing §11 rows byte-identical (§11.63 relocated net-zero to restore numeric order); the single permitted deletion is the footer-line swap (the v1.3 D15 invariant). The v1.3 metrics decisions_section_11_rows was 62 at the v1.3 tag."
+    },
+    "regression_flags": "NONE — v1.4's Rust delta is PURELY ADDITIVE (a new fsm-verify crate + an additive InterpreterSnapshot extension proven byte-identical for flat machines + a new CLI surface); the W2 §11.3 audit independently confirmed flat-machine byte-unregression, the post-W1 §11.3 audit caught + the W2-P0 unit closed the latent false-ProvenNoDeadlock foot-gun BEFORE the v1.4 explorer consumed the seam. No Rust metric regressed (live codes 73, conformance 26 unchanged because no code added; forbid-unsafe correctly +1). No metric crossed into attention-territory this release. The verification core is the NEW behaviourally-proven surface (keystone proven against an independent interpreter BFS + witness replay through a fresh interpreter; honest-bound structurally enforced)."
+  },
+
+  "process": {
+    "v1_4_waves": "W1 (the fsm-verify keystone spine + fsm verify CLI + E0400/W0602) + W2 (the load-bearing snapshot-completeness P0 + hierarchy/parallel/timer/submachine breadth) + W3 (fsm baseline trace differential replay) + W4a (factory-integration completeness audit) + W4b (this batched doc/ledger closeout = the §11.30 gate-doc commit) + 3 §11.3-cadenced audit docs (post-W1 keystone + post-W2 breadth + W4a factory-completeness)",
+    "sprint_theme": "The Verification core (Doc 30 / Doc 00 §11.63 owner-confirmed): cut A (bounded explicit-state reachability + deadlock detection driving the shipped Interpreter as the SOLE semantic oracle, surfaced as fsm verify, FSM-E0400/W0602 honestly closed) + cut B (trace differential replay, fsm baseline). CLI-canonical, no server/daemon/plugin (the pipeline-before-UI bar). WS server -> v1.5; Web IDE/wasm/cross-file LSP -> v1.6 (explicitly deferred, not re-cut).",
+    "canonical_release_record": "docs/GATE_VERIFICATION_v1_4.md (authored at the v1.4 gate-doc commit X; §11.30 prospective ordering followed — gate-doc commit -> cold quad WITH the MANDATORY NOTE-1 Step 0 -> tag, all at X; the 4th consecutive prospective-clean release)",
+    "frozen_phase_audits": "docs/AUDIT_PHASE_V1_4_W1_2026_05_16.md + docs/AUDIT_PHASE_V1_4_W2_2026_05_16.md + docs/AUDIT_FACTORY_INTEGRATION_V1_4_2026_05_16.md (3 audits — 2 PROCEED-WITH-NOTES + 1 FACTORY-COMPLETE; the durable correction-of-record this closeout folds — NOT edited; the W1-audit path-citation correction is recorded in the Doc 00 §11.69 ledger note, the frozen W1 audit byte-untouched per §11.29)",
+    "roadmap_doc": "docs/ROADMAP.md (v1.4 = the Verification core SHIPPED pending tag; FSM-E0400/W0602 marked IMPLEMENTED-in-v1.4 + the §1.3/R8 catalog-drift closed; v1.4 retrospective added; WS server -> v1.5, Web IDE/wasm/cross-file LSP -> v1.6 explicitly)",
+    "key_process_refinements": [
+      "Keystone-as-architecture-invariant held end-to-end: 'drive the shipped Interpreter as the SOLE semantic oracle, never fork the semantics' independently re-derived from source at BOTH the post-W1 and post-W2 §11.3 audits + proven behaviourally against an independent interpreter BFS; the two-audit cadence (keystone-first, then breadth) caught the load-bearing D-2 at the W1 boundary BEFORE W2 built on it (Doc 00 §11.64/§11.65/§11.66)",
+      "verify-the-record load-bearing AT THE CLOSEOUT LAYER (the §11.29 symmetric lineage): the post-W1 audit verdict RE-READ IN FULL not echoed from the W2-audit restatement; every pinned numeric INDEPENDENTLY RE-DERIVED at the gate-doc commit (live codes 73 unchanged because E0400/W0602 were catalogued pre-v1.4; forbid 12/11 correctly incremented; conformance 26 unchanged); the v1.4 Rust delta stated as a SUBSTANTIAL ADDITIVE delta — the SYMMETRIC ANALOGUE of v1.3's cardinal 'zero Rust delta' error, neither under- nor over-stated",
+      "NOTE-1 codified as an EXPLICIT cold-quad precondition (Doc 00 §11.70 — binding v1.4+): the §11.22 cold quad now MANDATES a `cargo clean`/non-shared CARGO_TARGET_DIR Step 0 BEFORE the full-workspace gate (a validated-this-epic false-red hazard — the symmetric danger to a false green; written into GATE §4.2 as a mandatory step)",
+      "Pipeline-before-UI bar shaped the whole epic: CLI-canonical verification core (no server/daemon/plugin), the W4a factory-audit proved 0 workflow gaps by driving the real binary end-to-end twice; the single §3.G doc-discoverability finding folded into Doc 18 §3.1 (not a code change, not a tag blocker)",
+      "Batched doc/ledger writes (the v1.2/v1.3 generalisation): the v1.4 closeout is a single controlled batch (GATE_VERIFICATION_v1_4 + Doc-00 §11.64-71 + CHANGELOG [1.4.0] + ROADMAP + Doc 08 §13.5 + Doc 18 §3.1 + Doc 10 + this metrics companion + the comment-only digest.rs repoint) folding the FROZEN 7-item carry-list in ONE batch (the §11.62 batched-doc discipline — never piecemeal)",
+      "Doc 30 annotated-not-rewritten (the v1.3 pattern): 6 reconciliation-note blockquotes beneath stale prose, ZERO original prose removed (numstat 17/0) — Doc 30 remains the wave-plan of record; the frozen W1/W2/W4a audits byte-untouched (audit evidence is never edited)"
+    ]
+  }
+}

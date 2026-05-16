@@ -20,7 +20,8 @@
 //! heartbeat or any cyclic-timer FSM advances the clock forever, so the
 //! digest never repeats, the visited set never converges, and a **genuine
 //! timer-deadlock is reported `Inconclusive` instead of `Deadlock`**
-//! (observed empirically). Doc 08 §13 makes the absolute clock
+//! (observed empirically). Doc 08 §13.5 (the normative
+//! absolute-virtual-clock non-observability lemma) makes the absolute clock
 //! **non-observable** — only *relative* timer phase affects behaviour — so
 //! [`canonical_bytes`] normalises the clock origin to 0 and keys timers by
 //! *remaining duration*, recursively for sub-instances. This merges
@@ -58,7 +59,7 @@ pub(crate) struct ConfigDigest {
     lo: u64,
 }
 
-/// Sound **clock-origin normalisation** (v1.4-W2, Doc 08 §13 — disclosed
+/// Sound **clock-origin normalisation** (v1.4-W2, Doc 08 §13.5 — disclosed
 /// judgment call, see the module-level `### W2 clock-origin normalisation`
 /// note and the completion report).
 ///
@@ -69,7 +70,7 @@ pub(crate) struct ConfigDigest {
 /// submachine sub-instance (each sub has its own clock + timers — Doc 08
 /// §12; each is normalised by *its own* clock origin).
 ///
-/// **Why this is sound (the bisimulation argument).** Doc 08 §13: a timer
+/// **Why this is sound (the bisimulation argument).** Doc 08 §13.5: a timer
 /// fires exactly when its owning runtime's `virtual_clock_ms` reaches
 /// `expiry_ms`; nothing else in the RTC step reads the absolute clock
 /// (events, guards, context, completion are clock-independent). Hence two
@@ -242,7 +243,7 @@ mod tests {
 
     #[test]
     fn clock_shift_equivalent_configs_collide() {
-        // W2 sound clock-origin normalisation (Doc 08 §13): with NO armed
+        // W2 sound clock-origin normalisation (Doc 08 §13.5): with NO armed
         // timer the absolute clock is non-observable, so the same active
         // state at t=0 and t=500 is the SAME reachable behaviour and MUST
         // collide. (W1 keyed absolute clock — a conservative

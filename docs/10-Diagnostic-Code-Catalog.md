@@ -646,6 +646,8 @@ fork StartAll -> { Idle, Running }   // FSM-E0750: Idle and Running are not in p
 | **Severity** | Error (if compiler can prove statically), Warning (FSM-W0400 alias if only suspected) |
 | **Description** | A state is declared but cannot be reached from the initial configuration via any sequence of transitions. |
 
+> **Implementation status: IMPLEMENTED in v1.4** _(annotation added 2026-05-16, the v1.4 closeout; Doc 00 §11.64/§11.65, Doc 30 R8/§5.2)._ FSM-E0400 is **emitted by `fsm verify`** (the v1.4 verification core, `crates/fsm-verify/src/diagnostics.rs`) from the bounded-explicit-state reachable set computed by driving the shipped `fsm_simulator::Interpreter`. It is **proof-gated**: E0400 is emitted **only when the search was exhaustive** (`StopReason::Exhausted`) — on a bound-truncated search **no E0400 is emitted** (an "unreachable" claim from an incomplete search would itself be a false proof; this is the dual of the never-false-`ProvenNoDeadlock` invariant). This closes the prior **catalog-reserved-but-unimplemented** drift (Doc 30 §1.3 / R8): the code was catalogued from v1.0 but had no emission site until v1.4-W1/W2. The live `DiagnosticCode` count is **unchanged at 73** — the code was always *catalogued*; v1.4 gave it its first *emission site*.
+
 ---
 
 ### FSM-E0401 — External self-transition on composite state without exit
@@ -908,6 +910,8 @@ after 100000000 ms -> Timeout   // FSM-W0601: duration 100000000ms (~27.8 hours)
 ```
 state Orphan { }   // FSM-W0602: 'Orphan' has no incoming transitions and is not initial
 ```
+
+> **Implementation status: IMPLEMENTED in v1.4** _(annotation added 2026-05-16, the v1.4 closeout; Doc 00 §11.64/§11.65, Doc 30 R8/§5.2)._ FSM-W0602 is **emitted by `fsm verify`** (`crates/fsm-verify/src/diagnostics.rs`) as the **structural always-safe subset**: a declared concrete state with zero incoming transition edges that is not an initial target — sound **regardless of search exhaustiveness** (a purely structural property, unlike the proof-gated FSM-E0400), so it is emitted unconditionally. This closes the prior catalog-reserved-but-unimplemented drift (Doc 30 §1.3 / R8); the live `DiagnosticCode` count is **unchanged at 73** (the code was always catalogued; v1.4 added its first emission site).
 
 ---
 

@@ -605,6 +605,95 @@ next_fire = last_scheduled_fire + X
 In the simulator's virtual clock mode, `M_tick(elapsed)` MUST process all timers that
 would have fired in the elapsed interval, in chronological order.
 
+## 13.5 Absolute-Virtual-Clock Non-Observability (lemma)
+
+> _Added 2026-05-16 in the v1.4 closeout (the verification-core soundness home).
+> This subsection is **normative**: it states formally a property that the rest
+> of this document and Doc 04 already **entail** but do not state in one place.
+> It is the durable spec-layer record of the soundness argument for the v1.4
+> `fsm verify` digest's clock-origin normalisation (the project's "a verification
+> core's soundness argument must live in a durable record" principle, applied at
+> the spec level). The structural argument below has been independently
+> triple-derived across the v1.4 epic (the post-W1 audit, the post-W2 audit §2,
+> and `crates/fsm-verify/src/digest.rs`); it is restated here, not weakened._
+
+**Lemma (absolute-virtual-clock non-observability).** *The absolute value of the
+simulator virtual clock is non-observable by any FSM-Lang program: no FSM-Lang
+construct can read `virtual_clock_ms`. Only the **relative phase** of armed
+timers (each timer's remaining duration) is behaviourally significant. Two
+configurations that are identical in (active states, history, defer set,
+context, recursive sub-instance structure) and whose every armed timer has the
+same remaining duration — including configurations related by a uniform shift of
+`(virtual_clock_ms, every armed `expiry_ms`, recursively per sub-instance with
+its own origin)` — are **strongly bisimilar**.*
+
+**Proof basis (by citation — the structural argument).** The lemma holds because
+FSM-Lang has *no construct* — keyword, guard, expression, `pure extern`
+parameter, or timer duration — that can observe the absolute virtual clock, and
+the operational semantics read the clock in exactly one place via a *relative*
+delta:
+
+1. **No clock-reading surface syntax exists.** Doc 04 §1.5 (the single normative
+   keyword list + the contextual keywords) contains **no** `now` / `at` / `time`
+   / `clock` / `elapsed` / `uptime` / `timestamp` / `deadline` token.
+2. **Guards cannot read time.** Doc 04 §8.5: a guard is a pure predicate over
+   `ctx` / `payload` fields and `pure extern` references only — "No arithmetic.
+   No function calls except extern pure references." No clock term.
+3. **Expressions cannot read time.** Doc 04 §8.7: `primary = literal | field_ref
+   | identifier | "(" expr ")"`; there is no clock / `now` / `elapsed` built-in
+   primary.
+4. **Externs cannot receive the clock.** Doc 04 §8.7 (and the `extern_decl`
+   grammar): a `pure extern` guard's parameters are `ctx` and explicitly-typed
+   scalars/opaque pointers; the language has no clock/time parameter to pass to
+   an extern, and `virtual_clock_ms` is the simulator's private virtual time
+   (§13.4).
+5. **Timer durations are compile-time constants.** Doc 04 §9: every timer
+   duration is a `const_expr` resolved at compile time — there is no
+   `at <absolute>` / deadline / runtime-variable-duration form. §15.1's Note
+   forecloses the one construct that could make a duration time-dependent
+   (runtime-variable timer durations are explicitly post-v1.0).
+6. **The operational semantics read the clock in exactly one place, relatively.**
+   The RTC step (§3.1), transition selection (§4.1 — the selection key is
+   `(priority, document_order)` over guard-enabled candidates), and guard
+   evaluation (§4.3 — guards have no side effects, no clock term) contain **no
+   clock term**. Timers arm relative to owning-state entry (§13.1:
+   `expiry_ms = entry_clock + X`), `every` re-arms on a relative, drift-free
+   recurrence (§13.3: `next_fire = last_scheduled_fire + X`), and the clock is
+   read **only** at §13.4, where the host injects a *relative* `elapsed` delta
+   (`M_tick(elapsed)`); the program never reads the absolute clock. A
+   whole-document scan confirms §13.4 is the **only** occurrence of the virtual
+   clock in the operational semantics.
+
+**Bisimulation.** The only place absolute time enters the operational semantics
+is the timer-fire condition (§13.4 + §13.1: a timer fires when its owning
+runtime's `virtual_clock_ms` reaches `expiry_ms`). Every other RTC component is
+a function of `(active config, event, ctx, history, defer, payload)` and never
+reads `virtual_clock_ms` (§3.1/§4.1/§4.3/§4.4), and points 1–5 prove no surface
+syntax can read it. Let R relate configurations identical in (active states,
+history, defer set, context, recursive sub-instance structure) whose every armed
+timer has the same remaining duration (`expiry_ms − virtual_clock_ms`,
+recursively per sub-instance with its own origin). R is a strong bisimulation:
+event/completion edges have identical effect from either side (no clock
+dependence — §3.1/§4.1/§4.3/§4.4); the timer-fire edge advances each by the same
+δ, firing the same timer set in the same chronological order (§13.4) with the
+same effect, and `every`-restart preserves the same relative phase
+(`next_fire − new_clock = X` on both — §13.3). A uniform clock-origin shift is
+exactly such an R-pair.
+
+**Conclusion (the v1.4 clock-merge soundness, normatively).** Configurations
+related by a clock-origin shift are strongly bisimilar; a deadlock is reachable
+from one **iff** it is reachable from the other. Therefore the v1.4 `fsm verify`
+digest's clock-origin normalisation (`virtual_clock_ms → 0` + every armed
+`expiry_ms` rewritten to its remaining duration, recursively per sub-instance —
+`crates/fsm-verify/src/digest.rs`) merges only strongly-bisimilar configurations
+into one visited-set key. It can therefore **never hide a reachable deadlock**
+(it is **sound** in the cardinal direction: never a false `ProvenNoDeadlock`),
+while it remains necessary for termination of cyclic-timer / `every`-heartbeat
+FSMs (without it the absolute clock advances forever, the digest never repeats,
+and a genuine timer-deadlock would be wrongly reported `Inconclusive`). The
+*splitting* direction is also preserved: different remaining timer phase ⇒
+different normalised bytes ⇒ distinct configurations are not collapsed.
+
 ---
 
 # 14. Queue Drain Policy

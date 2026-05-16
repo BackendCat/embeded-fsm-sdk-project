@@ -65,6 +65,96 @@ These flags apply to every subcommand:
 (Doc 00 §11.9 / P1-8 wave) and surface as exit code 2; user-fixable input
 problems remain at exit code 1.
 
+## 3.1 Verdict subcommands (`fsm verify`, `fsm baseline`) — the 0/1/2/3/4 verification-verdict exit-code family
+
+> _Added 2026-05-16 in the v1.4 closeout (Doc 00 §11.68; the W4a factory-audit
+> §3.G surfacing — carry-list item 5). This sub-section is part of the single
+> authoritative exit-code source above; it documents the **sanctioned
+> per-subcommand verdict superset** for `fsm verify` / `fsm baseline`. The §3
+> process-exit table above remains authoritative for every OTHER subcommand
+> (`fsm check`, `fsm generate`, `fsm fmt`, `fsm test`, …); the two verdict
+> subcommands layer the family below ON TOP of it without contradiction (see
+> "No collision with §3" below)._
+
+`fsm verify` (v1.4 — bounded explicit-state verification) and `fsm baseline`
+(v1.4 — trace differential replay) each return a **first-class
+verification-verdict** via the process exit code. These are the
+**owner-mandated distinct verdict codes** (Doc 00 §11.63; Doc 30 §4.2-W4 /
+§5.2 explicitly **reject a generic `0/1`** — the three+ codes are the
+*distinct* `verified` / `property-violated` / `inconclusive` contract a CI /
+Make / factory step branches on). The family is **symmetric** across the two
+subcommands (a factory integrator who learns one knows the other):
+
+| Exit | `fsm verify` | `fsm baseline` |
+|---|---|---|
+| **0** | **verified** — all properties hold (no deadlock reachable; if the search was exhaustive, no unreachable-state error) | **no drift** — every FSM's replay matched its frozen baseline (or `--record` wrote the corpus successfully) |
+| **1** | **property-violated** — a deadlock is reachable (with a counterexample `witness`) OR a proven `FSM-E0400` unreachable-state error | **drift detected** — at least one FSM diverged from its baseline; the first-mismatch is reported |
+| **2** | **INCONCLUSIVE** — a bound was hit; the reachable space was **NOT** fully explored. **Explicitly NOT "verified"** — never a pass, never a blind retry. | **INCONCLUSIVE** — the baseline corpus is absent / unreadable / not `fsm-trace/v1` when comparing; drift could be neither confirmed nor denied. **Explicitly NOT "no drift"** — never a pass, never a blind retry. |
+| **3** | input file not found / unreadable (the §3 IO bucket) | IO error (suite dir missing, corpus dir unwritable on `--record`, a corpus file unreadable mid-walk) |
+| **4** | the model does not parse / analyze (cannot verify what won't compile — the §3 user-error bucket, kept **distinct from a verdict**) | out-of-scope — a suite `.fsm` does not parse/analyze, or its driver/trace is malformed (kept **distinct from a verdict**) |
+
+**Exit 2 is a VERDICT, not a tool error — the load-bearing clarification.** A
+factory integrator MUST treat a `fsm verify` / `fsm baseline` exit `2` as
+**failure-to-prove (INCONCLUSIVE)** — *never* as a pass, and *never* as a
+transient tool crash to blindly retry. It is the **honest-bound** outcome
+(Doc 30 R1: the verifier never reports "verified" when a bound was hit; the
+cardinal verification sin is a false proof). Branch on the exit code (or the
+`--json` `.verdict` / per-property `.result` field — see below); a script
+keying on `exit == 0` / `.verdict == "verified"` correctly rejects an exit-2
+run.
+
+**No collision with §3's process-error table.** §3 nominally uses exit `2`
+for "tool error / invalid flags". There is **no real collision**: `clap`
+emits exit `2` for *its own* usage/argument errors **before** the verdict
+logic runs, so a usage error never reaches — and never produces — a verdict
+(the reconciliation is reasoned in-source at
+`crates/fsm-cli/src/cmd/verify.rs:26-33`). For the verdict subcommands,
+exit `2` *after* argument parsing is unambiguously the INCONCLUSIVE verdict.
+The two contracts are internally coherent and do not overlap in practice.
+
+### 3.1.1 `--json` schema-versioning policy — `fsm-verify/vN`, `fsm-trace/vN`, `fsm-trace-diff/vN` (the factory-contract durability guarantee)
+
+`fsm verify --json` emits a single deterministic JSON object whose `schema`
+field is **`fsm-verify/v1`**; `fsm baseline --record` writes a corpus of
+`fsm-trace/v1` files; `fsm baseline --check --json` emits an
+`fsm-trace-diff/v1` result object. The `schema` field is the **stability
+contract a factory / CI integrates against**. The versioning rule is
+**explicit and binding**, identical in shape across all three so the CLI
+presents one coherent contract family (this policy is *also* co-located
+in-source at `crates/fsm-cli/src/cmd/verify.rs:70-101` and
+`crates/fsm-cli/src/cmd/baseline.rs:79-103` — a **positive credit**: W2/W3
+already satisfied the W1-audit "state the policy explicitly in-source"
+recommendation; this Doc 18 entry is the *spec-layer surfacing* so the
+contract is discoverable without reading source, NOT a fix for a defect):
+
+- **Additive changes keep the SAME major** (`fsm-verify/v1`,
+  `fsm-trace/v1`, `fsm-trace-diff/v1`). *Additive* = a NEW key under an
+  existing object, a NEW element kind in an existing array (e.g. a new
+  diagnostic `code`), or a NEW `skip_serializing_if`-omitted field on
+  `StepRecord`. A consumer that reads only the keys it knows is
+  **unaffected** (JSON object readers ignore unknown keys). *Worked
+  example:* W2's composite/parallel/history/timer/submachine coverage was
+  **purely additive** — same keys, same meanings; a timer-deadlock
+  counterexample is the *existing* `properties.deadlockFree.counterexample`
+  shape (its `witness` may carry a synthetic `"<timer-fire @ Nms>"` step
+  alongside declared-event names — a value-space extension of an existing
+  field, not a shape change) — so it stayed `fsm-verify/v1` and a W1-era
+  integration did not break.
+- **A breaking change bumps the major** (`fsm-verify/v2`, etc.). *Breaking*
+  = the meaning / type / shape of an EXISTING key changes, a key is
+  removed/renamed, or an exit-code's meaning changes. Only then. A corpus
+  with a major-mismatched `schema` is reported **INCONCLUSIVE (exit 2)** on
+  `--check`, never a false "no drift" and never a false "drift".
+- The **exit-code contract (0/1/2/3/4) is itself part of the versioned
+  surface** and is held stable across additive `vN` revisions.
+
+A consumer SHOULD branch on the major (`schema` prefix `fsm-verify/v1`) and
+tolerate unknown keys, rather than pinning an exact byte shape. The
+machine-readable `--json` body (sorted keys via `BTreeMap`; arrays in stable
+order — the project's reproducibility discipline) is the canonical contract
+a CI/Make/factory step parses; the full per-field schema for each is
+documented in-source at the module docs cited above.
+
 ---
 
 # 4. Stdout / Stderr Convention
