@@ -29,6 +29,47 @@ This keeps the validated v1.2/v1.3 small-tight-tagged cadence, avoids opening a 
 
 ---
 
+## Owner scope-confirmation + TL architecture decision (2026-05-16)
+
+> **Status of this document changes here.** Everything below this section (§1–§6) is the **verified reconciliation + recommendation of record** and is **NOT rewritten** — it stands as authored. This section records the owner's confirmation and the consequent TL architecture decision *on top of* that analysis. The owner message is persisted verbatim at `memory/project_user_messages_embeded_fsm_2026_05_16_v14_strategy.md`; this section is a faithful record of the decisions, not a reinterpretation. Recorded at the `phase4.0/v1_4-owner-reconcile` reconcile commit.
+
+### Scope — CONFIRMED (no longer a recommendation; the §2 cut stands as decided)
+
+The owner confirmed the §2.1 recommended cut **in full**: **v1.4 = the complete Verification core** = the plan's recommended cut **A + B**:
+
+- **A. Bounded explicit-state reachability + deadlock detection** driven by the *shipped interpreter as the semantic oracle* (the §4.1 keystone), surfaced as `fsm verify`, which **honestly closes FSM-E0400 / FSM-W0602** (the §1.3 catalog-reserved-but-unimplemented drift, fixed in the record).
+- **B. Trace differential replay** (`fsm test --baseline`).
+
+The deferred menu **stands exactly as recommended**: the **simulator WebSocket/JSON-RPC server → v1.5**; the **Web IDE / wasm32 / Monaco / project-index → v1.6**; **mechanised sim≡codegen equivalence → v1.4 stretch / v1.5**. (Owner: *"complete verification core is the priority"* — confirmed not a partial cut. The §2.1 alternatives were the re-cut menu; the owner did not re-cut, he confirmed.)
+
+### TL architecture decision (the open question the owner explicitly delegated to the TL)
+
+The owner posed the implementation-architecture question — *"the separate server, same server, or the verification server or whatever, or the plugin architecture … you select the architecture"* — and **explicitly delegated it to the TL** (*"you select the implementation way, you select the architecture, you select the technologies"*). Recorded decision (verbatim-in-substance):
+
+1. **The verification core is a NEW single library crate `fsm-verify`** — the **one source of truth for verification semantics**. This realizes the §4 / §4.3 W1-brief recommendation as the confirmed architecture (resolves the §4.2-W0 placement decision: a new `fsm-verify` crate, NOT a `fsm-analyzer` module, NOT a `fsm-simulator` module — the §4.2-W0 rationale holds: a reachability check in `fsm-analyzer` would drag the interpreter into the analyzer's dep graph, architecturally wrong; the most behaviourally-critical crate stays untouched).
+2. **`fsm-verify` drives the shipped `fsm_simulator::Interpreter` snapshot/restore seam as the semantic oracle — it NEVER re-implements FSM semantics.** This is the §4.1 keystone, **confirmed as the architecture, not merely the W1 instruction**. The forbidden second-semantics foot-gun (§4.1 / R2) is an architecture-level invariant for the whole epic.
+3. **The canonical, pipeline-grade interface is the CLI.** A new **`fsm verify` subcommand in the existing single `fsm` binary** — *not* a new binary, *not* a server, *not* a plugin host. It is:
+   - **scriptable with distinct exit codes** — `verified` / `property-violated` / `inconclusive` are three distinct process exit codes (Doc 18 mapping; the §4.2-W4 / §5.2 exit-code contract);
+   - **machine-readable `--json`** — structured property results + counterexample/witness traces, parseable by CI / Make / a factory build step;
+   - **deterministic, zero-daemon** — no long-lived process, no port, no network surface; a `fsm verify <file>` invocation behaves exactly like `fsm check` / `fsm generate` (the existing proven pipeline shape).
+4. **NO separate verification server. NO plugin architecture.** Rationale recorded so a future reader does not re-litigate:
+   - **Batch verification for pipelines / a factory is a CLI invocation, not a service.** A factory CI calls `fsm verify` the way it calls `fsm check`; a service would add an attack surface, a lifecycle, and a deployment story for *zero* batch-pipeline benefit (the same reasoning §2.2.5 / OWNER-DECISION-1 used to defer the WS *simulator* server — a server is a *delivery vehicle for interactive debugging*, not the verification trust itself).
+   - **"One core, many frontends" is this project's proven spine.** v1.2's "one analysis feeds all consumers" (Doc 26 §8; Doc 00 §11.34) means editor ≡ CLI *by construction*. The **LSP later surfaces verification in-editor by reusing the SAME `fsm-verify` library** — so VS Code ≡ CLI ≡ CI by construction, no divergence, no second implementation. The LSP already **IS** the long-lived process if interactive / incremental verification is ever wanted (a deferred DX concern, not a v1.4 concern) ⇒ **no new server is ever needed** — the question "separate vs same server" dissolves: the answer is "neither — a CLI now, the existing LSP process later, both reusing one lib".
+   - **A plugin architecture is YAGNI and fights the fixed/auditable/factory-trustable property.** A verifier a factory trusts for safety must be a *fixed, auditable* artifact, not a plugin-loader with third-party verification logic. Custom properties, *if ever wanted*, are a library API + a `fsm verify` flag — **not** a runtime loader.
+5. **Assembler codegen target = researched, deliberately-deferred non-goal.** The owner reasoned ~90–95% of binary targets have C compilers and C is the portable substrate; recorded as a **non-goal**, revisited *only* if a concrete no-C-compiler target emerges. (This is the §1-discipline "record the scope decision honestly" applied to a feature the owner explicitly mused about and then de-prioritized.)
+
+### v1.4 tag-gate ADDITION (folds into §5.2 — see the pointer there)
+
+The owner set an explicit bar **above** the §5.2 gate: *complete + factory-integratable pipeline BEFORE any UI*. The gate MUST therefore additionally require:
+
+> **The full `fsm verify → fsm generate → fsm check` workflow is CLI-only usable for CI / factory integration** — machine-readable output (`--json`), an exit-code contract (verified / property-violated / inconclusive), deterministic, scriptable, with **zero UI dependency and no workflow gaps**. The verification pipeline is *fully closeable headless* before any VS Code / DX convenience work begins.
+
+This is the governing **pipeline-before-UI** sequencing principle (memorialized as `[[feedback_embeded_fsm_pipeline_before_ui]]`): complete the full functional pipeline at the CLI + language-server layer (CI/factory-integratable) *before* the UI/DX convenience layer. **W4 (CLI/UX/docs) is sharpened accordingly** (see the §4.2-W4 + §5.2 pointers): W4's §5.4 acceptance is not just "the example deadlock is caught via the CLI" but "the *whole verify→generate→check* loop is demonstrably driveable by a CI script with machine-readable output and the documented exit codes, zero UI in the path".
+
+> **Pointers into the unchanged analysis below** (the analysis is NOT rewritten; these mark where the confirmed decision lands): §1.3 / §1.5 (FSM-E0400/W0602 — confirmed to be honestly closed by A) · §2.1 + §2.3 (the cut — now CONFIRMED, not awaiting) · §4.2-W0 (placement — RESOLVED: `fsm-verify` is its own crate) · §4.1 keystone (CONFIRMED as an epic-level architecture invariant, not just the W1 instruction) · §4.2-W4 + §5.2 (the CLI-pipeline-complete / exit-code / `--json` gate addition).
+
+---
+
 ## 1. ROADMAP-v1.4 ↔ shipped-reality reconciliation
 
 The ROADMAP §"v1.4 — Simulation & verification" (`docs/ROADMAP.md:160-170`) lists four bullets + the deferred-from-v1.3 carry-overs (`docs/ROADMAP.md:155-156`). Each is checked against code at `a036c38`. **`file:line` is cited for every claim that is already-done, infeasible-as-stated, or drifted.**
@@ -89,8 +130,10 @@ The ROADMAP §"v1.4 — Simulation & verification" (`docs/ROADMAP.md:160-170`) l
 ### 2.1 Recommended v1.4 cut: "Verification core" (zero new network/wasm surface)
 
 > **This is a recommendation with rationale + explicitly-stated deferred alternatives, NOT a pre-commitment.** The owner confirms or re-cuts at the upcoming review (the ROADMAP's own "propose-with-rationale, orchestrator/owner weighs" mechanism, the §11.40 v1.2 re-scope precedent).
+>
+> **➤ CONFIRMED 2026-05-16 (see the "Owner scope-confirmation" section at the top).** The owner confirmed this cut **in full** — A + B ship as v1.4; WS → v1.5, Web IDE → v1.6, sim≡codegen → stretch/v1.5 all stand as recommended. The owner did NOT re-cut (the alternatives below were the re-cut *menu*; they were not taken). This subsection is no longer a "proposal awaiting confirmation" — it is the **decided** scope. The architecture (`fsm-verify` lib + CLI-canonical, no server, no plugin) and the CLI-pipeline-complete gate addition are recorded in that top section.
 
-**v1.4 ships (proposed):**
+**v1.4 ships (proposed → CONFIRMED):**
 
 - **A. Bounded explicit-state reachability + deadlock detection** — a new `fsm-verify` capability (crate or `fsm-analyzer` module — design decision deferred to W1, see §4) that, *driven by the shipped interpreter as the transition oracle*, performs a bounded BFS/DFS over the reachable configuration×context space and proves/​reports: (a) **deadlock** = a reachable non-final configuration with no enabled transition for any declared event and no pending timer/completion; (b) **unreachable states** (closes FSM-E0400/W0602 — they fall out of the same reachable-set); (c) **unreachable transitions** (declared transitions never taken on any reachable path). Surfaced as `fsm verify <file>` (new subcommand) + integrated diagnostics. **Bounded** = explicit owner-tunable state/step ceiling with an honest "bound reached, result is INCONCLUSIVE not PROVEN" verdict (never a false "proven deadlock-free").
 - **B. Trace differential replay** — `fsm test --baseline <captured-trace-dir>`: re-run captured baseline traces through the *current* build's interpreter and fail on any `StepRecord` divergence (consumes the existing `execute_trace`/`first_mismatch` seam). Protects against silent semantic drift across releases (the cross-version commitment in `ROADMAP.md:197-199`).
@@ -111,8 +154,10 @@ The ROADMAP §"v1.4 — Simulation & verification" (`docs/ROADMAP.md:160-170`) l
 
 ### 2.3 What the owner is being asked to confirm
 
-- Confirm v1.4 = verification core (A+B), WS→v1.5, Web IDE→v1.6; OR re-cut (the §2.1 alternatives are the menu).
-- Decide the two §3 owner-decisions (network surface posture; model-check compute envelope) — both have non-blocking defaults so planning/W1 is not stalled.
+> **➤ ANSWERED 2026-05-16 (top section).** Item 1 = **CONFIRMED as-recommended** (verification core A+B; WS→v1.5; Web IDE→v1.6). Item 2: OWNER-DECISION-1 (network surface) does not bite — the owner confirmed the no-server architecture, so there is **no new network surface in v1.4 at all** (option A holds *a fortiori*); OWNER-DECISION-2 (model-check compute envelope) keeps its non-blocking default (A: conservative bound, `INCONCLUSIVE`-honest, opt-in raise) — unchanged by the owner, the bounded-by-construction design proceeds.
+
+- Confirm v1.4 = verification core (A+B), WS→v1.5, Web IDE→v1.6; OR re-cut (the §2.1 alternatives are the menu). — **CONFIRMED A+B as recommended.**
+- Decide the two §3 owner-decisions (network surface posture; model-check compute envelope) — both have non-blocking defaults so planning/W1 is not stalled. — **#1 moot (no server architecture confirmed); #2 default A holds.**
 
 ---
 
@@ -154,6 +199,7 @@ The project's load-bearing recurring lesson (P0-1 non-functional lowering; the L
 > Depth-first = each wave delivers a *thin but complete vertical slice* with a real behavioural gate before the next builds on it (the v1.2 L1-spine / v1.3 V1-spine precedent), and a §11.3 phase-boundary audit after the keystone wave (W2) before downstream waves build on it.
 
 - **W0 (gate prerequisite — small, may be folded into W1's brief).** Resolve the `fsm verify` *placement* decision (new `fsm-verify` crate vs `fsm-analyzer` module vs `fsm-simulator` module) by extraction against current code: the engine *depends on* `fsm-simulator` (the interpreter) AND emits `fsm_diagnostics::Diagnostic` AND wires into `fsm-cli`. *Recommendation to validate in W0/W1:* a new `fsm-verify` crate depending on `fsm-simulator` + `fsm-ir` + `fsm-diagnostics` (keeps `fsm-analyzer` — the most behaviourally-critical crate — untouched; the W0/§11.49 "don't churn the critical crate" precedent). No reachability check belongs in `fsm-analyzer` (it would drag the interpreter into the analyzer's dep graph — architecturally wrong). **W0 is design-confirmation only**; if trivial, fold into W1.
+  > **➤ RESOLVED 2026-05-16 by the TL architecture decision (top section): the placement IS a new single `fsm-verify` crate** = the one source of truth for verification semantics, driving the shipped `fsm_simulator::Interpreter` as the oracle; `fsm-analyzer` stays untouched. W0 collapses to confirming the crate skeleton/dep edges; effectively folded into W1 (no open design question remains).
 
 - **W1 (KEYSTONE — the bounded reachability spine).** Build the minimal complete vertical slice: drive the interpreter over the reachable configuration-digest space for a *flat, single-machine* FSM; detect (a) deadlock and surface ONE witnessing event trace, bounded with the `INCONCLUSIVE`-honest verdict. **§5.4 acceptance:** a hand-written `.fsm` that genuinely deadlocks (a state with one guarded transition whose guard is statically unsatisfiable on the reachable context) → `fsm verify` reports DEADLOCK + the exact event sequence to reach it, verified by hand against Doc 08; a known-clean FSM → PROVEN-CLEAN within bound; a too-small `--max-states` → INCONCLUSIVE (never a false PROVEN). Deadlock-free FSM proof cross-checked against Doc 08 semantics, not just "the simulator said so." **Self-contained implementer brief in §4.3.**
 
@@ -162,6 +208,7 @@ The project's load-bearing recurring lesson (P0-1 non-functional lowering; the L
 - **W3 (trace differential replay — item B).** `fsm test --baseline <dir>`: capture-and-compare harness consuming `execute_trace`/`first_mismatch`. Includes a baseline-trace corpus captured from `a036c38` (the v1.3 semantics) committed as the drift oracle. **§5.4 acceptance:** a deliberately-mutated interpreter behaviour (in a test-only fixture) is caught as drift with the exact diverging `StepRecord`; an unchanged build passes clean; the baseline corpus round-trips. (Low-risk; could run parallel to W2 if disk allows — but §3.2 posture = one build-heavy wave at a time, so sequence after W2 unless the owner lifts the constraint.)
 
 - **W4 (CLI/UX polish + diagnostics integration + docs).** `fsm verify` exit codes (Doc 18 mapping), `--max-states`/`--max-steps`/`--max-wall` flags, JSON output for the VS Code extension to *optionally* consume later, a worked `examples/verify/` showing a caught deadlock, Doc 13/Doc 10/ROADMAP/CHANGELOG/Doc 00 §11 reconciliation. **§5.4 acceptance:** the example deadlock FSM is caught end-to-end via the CLI with the documented exit code.
+  > **➤ SHARPENED 2026-05-16 by the owner pipeline-before-UI bar (top section + §5.2 gate addition).** W4 is the wave that makes the **whole pipeline factory-integratable BEFORE any UI**, so its scope and §5.4 acceptance are explicitly raised: (1) the three exit codes are the **distinct verified / property-violated / inconclusive contract** (not a generic 0/1); (2) `--json` is a **first-class machine-readable** mode (property results + counterexample/witness traces), specified as the contract a CI/Make/factory step parses — *not* "for the VS Code extension to optionally consume" framing only; (3) the §5.4 acceptance is upgraded from "the example deadlock is caught via the CLI" to **"the full `fsm verify → fsm generate → fsm check` workflow is driveable by a CI/factory script end-to-end with machine-readable output and the documented exit-code contract, deterministic, with ZERO UI dependency and no workflow gaps"** — a worked CI-shaped script (or `examples/verify/` + a documented invocation recipe) demonstrating the headless closed loop is part of W4's deliverable. This is the load-bearing "pipeline complete + factory-integratable before UI" gate ([[feedback_embeded_fsm_pipeline_before_ui]]).
 
 - **Pre-tag:** independent four-lens pre-tag audit (the v1.1/v1.2/v1.3 §11.30 pattern) → `GATE_VERIFICATION_v1_4.md` → cold-from-source quad at the gate-doc commit → tag (§11.30 commit-ordering, strictly).
 
@@ -331,6 +378,9 @@ why; any interpreter-API insufficiency found; judgment calls (§8 format).
 
 ### 5.2 v1.4-tag gate criteria
 
+> **➤ ADDITION 2026-05-16 (owner pipeline-before-UI bar — top section).** The single new gate row below (the **CLI-only pipeline-complete** criterion) is added on top of the existing list; everything else stands. The "No new network surface" row is sharpened to reflect the confirmed no-server architecture.
+
+- **The full verify → generate → check workflow is CLI-only usable for CI / factory integration** — `fsm verify` emits **machine-readable `--json`** (property results + counterexample/witness traces) and a **distinct exit-code contract** (verified / property-violated / inconclusive, Doc 18 mapping), is **deterministic**, **scriptable**, with **zero UI dependency and no workflow gaps**: a CI/factory script can drive `fsm verify → fsm generate → fsm check` end-to-end headless, demonstrated by a worked recipe/example (§4.2-W4 sharpened acceptance). This is the owner's "pipeline complete + factory-integratable BEFORE any UI" bar ([[feedback_embeded_fsm_pipeline_before_ui]]) — a hard tag-gate, not a nice-to-have.
 - **0 open P0**, ≤5 well-scoped P1 in the independent pre-tag four-lens audit (the v1.1/v1.2/v1.3 standard).
 - **§5.4 behavioural-acceptance on every wave** — for verification: a *genuinely deadlocking FSM is caught with a valid witness*, a *clean FSM is proven within bound*, a *too-small bound is INCONCLUSIVE not false-proven*, all cross-checked against Doc 08 (not just the simulator). Symbol-presence is not acceptance for a prover.
 - **The keystone proven structurally** (post-W2 §11.3 phase-audit): the explorer drives `fsm_simulator::Interpreter`; there is NO second transition-selection / guard-eval / completion implementation (independently re-derived from source, the §11.29 verify-the-audit-too rigor on the riskiest wave).
@@ -338,7 +388,7 @@ why; any interpreter-API insufficiency found; judgment calls (§8 format).
 - **Trace differential replay proven**: a mutated behaviour is caught with the exact diverging `StepRecord`; the `a036c38` baseline corpus round-trips clean.
 - **Cold-from-source quad green at the gate-doc commit** (§11.22), §11.30 commit-ordering strictly (gate-doc commit → cold quad at THAT commit → tag at THAT commit; the 3rd-consecutive prospective-clean release).
 - `#![forbid(unsafe_code)]` extended to `fsm-verify` (workspace 12 roots / 11 crates).
-- **No new network surface** (the §2 cut) — if the owner re-cut WS into v1.4, add the SEC-P0-1-grade security audit lens as a gate (OWNER-DECISION-1 option B).
+- **No new network surface** (the §2 cut, **CONFIRMED** — and the TL architecture decision makes this structural: `fsm-verify` is a library + a `fsm verify` CLI subcommand, **no server, no daemon, no plugin host** ⇒ OWNER-DECISION-1 cannot bite in v1.4; the WS *simulator* server stays a v1.5 concern with its own SEC-P0-1 gate then). If a future minor re-introduces any listener, the SEC-P0-1-grade security audit lens is a gate for *that* minor (OWNER-DECISION-1 option B), not v1.4.
 - **Carry-overs honoured/recorded** (not necessarily resolved — the v1.3 pattern): G9 CI-never-run + the JS lane (owner push); the v1.3.x `makeNonce`/JC-3 tracked items; R-1..R-4 cst residuals — re-stated in `GATE_VERIFICATION_v1_4.md` §"carried owner-escalations" so they are not silently dropped (the §11.62 discipline).
 - **CHANGELOG `[1.4.0]`** + Doc 00 §11 rows (v1.4 rows start **§11.63** — next free after §11.62) + ROADMAP retrospective.
 
