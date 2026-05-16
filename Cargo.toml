@@ -8,6 +8,7 @@ members = [
     "crates/fsm-ir",
     "crates/fsm-codegen-c",
     "crates/fsm-simulator",
+    "crates/fsm-verify",
     "crates/fsm-formatter",
     "crates/fsm-cli",
     "crates/fsm-lsp",

@@ -51,6 +51,11 @@ pub(crate) enum Command {
 
     /// Initialize a new FSM Studio project in the current directory.
     Init(InitArgs),
+
+    /// Bounded explicit-state verification: prove deadlock-freedom +
+    /// report unreachable states (drives the shipped interpreter as the
+    /// semantic oracle). v1.4-W1: flat single-machine FSMs.
+    Verify(VerifyArgs),
 }
 
 #[derive(Args, Debug)]
@@ -169,4 +174,30 @@ pub(crate) struct DecompileArgs {
 pub(crate) struct InitArgs {
     /// Project name (also the directory name to create).
     pub(crate) name: String,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct VerifyArgs {
+    /// Emit a machine-readable JSON result on stdout (per-property verdict,
+    /// counterexample/witness trace, the bound + whether it was hit)
+    /// instead of the human summary. The contract a CI / Make / factory
+    /// step parses.
+    #[arg(long)]
+    pub(crate) json: bool,
+    /// Verify a specific machine by name. Defaults to the first machine in
+    /// the file.
+    #[arg(long)]
+    pub(crate) machine: Option<String>,
+    /// Visited-configuration ceiling. Hitting it ⇒ INCONCLUSIVE (exit 2),
+    /// never a false "verified". Defaults to the crate's conservative
+    /// bound.
+    #[arg(long)]
+    pub(crate) max_states: Option<usize>,
+    /// Explored-edge ceiling. Hitting it ⇒ INCONCLUSIVE (exit 2).
+    /// Defaults to the crate's conservative bound.
+    #[arg(long)]
+    pub(crate) max_steps: Option<usize>,
+    /// Input .fsm file.
+    #[arg(required = true)]
+    pub(crate) file: PathBuf,
 }

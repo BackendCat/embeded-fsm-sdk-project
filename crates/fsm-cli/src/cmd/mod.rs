@@ -9,3 +9,4 @@ pub(crate) mod generate;
 pub(crate) mod init;
 pub(crate) mod parse;
 pub(crate) mod test;
+pub(crate) mod verify;
