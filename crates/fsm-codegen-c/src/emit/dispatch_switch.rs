@@ -345,13 +345,20 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
             // also defer it (it was handled inside the sub).
             String::from(" && !__delegated_any")
         };
+        // W1: a held event is the simulator's `EventDeferred` record — emit
+        // the `event_deferred` step line before the early return so the
+        // differential's record sequence matches (the C already decided to
+        // hold it; this records that observed fact, not a re-derivation).
+        let trace_deferred = super::trace_hook::emit_trace_deferred_emit(ctx, "        ");
         format!(
             "    if (!fired_any{sub_guard} && {prefix}_active_config_defers(m, ev->id)) {{\n\
              \x20       {prefix}_defer_push(m, ev);\n\
+             {trace_deferred}\
              \x20       return;\n\
              \x20   }}\n",
             prefix = prefix,
             sub_guard = sub_guard,
+            trace_deferred = trace_deferred,
         )
     } else {
         String::new()
@@ -379,10 +386,19 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
         String::new()
     };
     let drain_released = if has_defer {
+        // W1: a released-deferred event re-dispatched here is the
+        // simulator's `EventRedispatched`. Flag it (compile-time-gated) so
+        // the step emitter tags it `event_redispatched` — the C records the
+        // observed fact that it IS releasing a held event (not a
+        // re-derivation of defer semantics). `#ifndef FSM_TRACE` ⇒ the
+        // drain loop is byte-identical to before.
         format!(
             "        {{\n\
              \x20           {prefix}_Event_t __rd;\n\
              \x20           while ({prefix}_dequeue(m, &__rd)) {{\n\
+             \x20               #ifdef FSM_TRACE\n\
+             \x20               m->_trace_redispatch = true;\n\
+             \x20               #endif\n\
              \x20               {prefix}_dispatch(m, &__rd);\n\
              \x20           }}\n\
              \x20       }}\n",
@@ -409,7 +425,7 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
      * exact code they did before. */
     bool fired_any = false;
     bool fired_in_region[{macro}_MAX_PARALLEL_REGIONS] = {{ false }};
-{delegated_decl}    /* Snapshot active region count up front so transition side effects
+{trace_begin}{delegated_decl}    /* Snapshot active region count up front so transition side effects
      * that change `_active_count` (e.g. cross-out-of-parallel) do not
      * shrink the iteration mid-walk. Doc 08 §4.1: process innermost
      * leaves first (slots 1..N are nested below slot 0), so iterate
@@ -432,7 +448,7 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
             s = {prefix}_parent_table[s];
         }}
     }}
-{delegation}{defer_hold}    if (fired_any) {{
+{delegation}{defer_hold}{trace_emit}    if (fired_any) {{
 {release_call}        {prefix}_handle_completion(m);
 {drain_released}    }}
     /* Otherwise: no ancestor handled the event — discard per Doc 08 §3.1. */
@@ -456,6 +472,15 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
         defer_hold = defer_hold,
         release_call = release_call,
         drain_released = drain_released,
+        // W1 R7 host-trace differential (Doc 32 §1 W1, compile-time-gated).
+        // step-begin: reset per-step scratch + snapshot config-before at the
+        // top of dispatch. step-emit: emit ONE canonical line after the
+        // walk + delegation + defer-hold and before completion (so the
+        // ordering matches the simulator: this event's record, then
+        // completion is a separate queued event → a separate record).
+        // Both stripped entirely by `#ifndef FSM_TRACE` (no-regression).
+        trace_begin = super::trace_hook::emit_trace_step_begin(ctx, "    "),
+        trace_emit = super::trace_hook::emit_trace_step_emit(ctx, "    "),
     )
 }
 

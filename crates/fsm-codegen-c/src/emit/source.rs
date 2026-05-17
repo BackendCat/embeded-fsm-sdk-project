@@ -9,8 +9,8 @@ use crate::state_index::StateRecordKind;
 
 use super::license::header_block;
 use super::{
-    completion, dispatch_switch, dispatch_table, history, queue, timer, EmittedFile, FileRole,
-    MachineEmitCtx,
+    completion, dispatch_switch, dispatch_table, history, queue, timer, trace_hook, EmittedFile,
+    FileRole, MachineEmitCtx,
 };
 
 pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
@@ -24,6 +24,18 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
     body.push_str(&format!("#include \"{}.h\"\n", stem));
     body.push_str(&format!("#include \"{}_impl.h\"\n", stem));
     body.push_str("#include <string.h> /* memset */\n\n");
+
+    // W1 R7 host-trace differential (Doc 32 §1 W1). All compile-time-gated
+    // (`#ifdef FSM_TRACE`) — emitted into the file text unconditionally but
+    // the preprocessor strips every byte unless the consumer compiles with
+    // -DFSM_TRACE, so the default `fsm generate` C is byte-identical (the
+    // keystone no-regression, Doc 32 §2). The preamble (weak sink + state
+    // table + line builder) and the event-name helper are emitted here, up
+    // front, so the dispatch body below can reference them.
+    body.push_str(&trace_hook::emit_trace_preamble(ctx));
+    body.push_str("\n");
+    body.push_str(&trace_hook::emit_trace_event_name_fn(ctx));
+    body.push_str("\n");
 
     // History helpers, completion helpers, timer tick.
     //
@@ -196,6 +208,36 @@ fn emit_init(ctx: &MachineEmitCtx<'_>) -> String {
             ));
         }
     }
+    // W1 R7 host-trace differential (Doc 32 §1 W1, compile-time-gated):
+    // emit the `init` step line AFTER the entry sequence and BEFORE
+    // `handle_completion` — matching the simulator's order (the init
+    // StepRecord, then the internal queue / completion drains as separate
+    // records). The entered set is THIS code's own init entry path (the
+    // active-at-rest, non-final states it just entered), the cross-check
+    // target the differential diffs against the simulator's `init` record.
+    {
+        let mut entered_ir: Vec<String> = Vec::new();
+        let mut seen: std::collections::BTreeSet<u8> = std::collections::BTreeSet::new();
+        for e in &entries {
+            for anc in &e.ancestors {
+                if !seen.insert(*anc) {
+                    continue;
+                }
+                let rec = ctx.index.get(*anc);
+                if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
+                    entered_ir.push(rec.ir_id.clone());
+                }
+            }
+            if seen.insert(e.leaf) {
+                let leaf = ctx.index.get(e.leaf);
+                if leaf.kind.is_active_at_rest() && leaf.kind != StateRecordKind::Final {
+                    entered_ir.push(leaf.ir_id.clone());
+                }
+            }
+        }
+        s.push_str(&trace_hook::emit_trace_init_emit(ctx, &entered_ir, "    "));
+    }
+
     // Run completion handling after the initial entry sequence — Doc 08
     // §2.2 + §9.1. If any state entered during init carries a `done` /
     // Final-state completion, this lets the auto-transition fire before

@@ -218,6 +218,38 @@ pub fn emit_transition_body(
             emit_initial_expansion_for_target(ctx, target_idx, &pad, out);
         }
     }
+
+    // W1 R7 host-trace differential (Doc 32 §1 W1, compile-time-gated):
+    // record WHICH transition this generated C just fired. `stable_id` /
+    // `source` / `target` are compile-time literals of the transition the
+    // C's OWN dispatch selected; the entered/exited IR ids are this code's
+    // OWN `entry_path`/`exit_path` decisions (the very thing the
+    // differential cross-checks against the simulator). This is a trace
+    // tap, not a re-derivation — `#ifndef FSM_TRACE` strips it entirely so
+    // the production C is byte-identical (the keystone, Doc 32 §2).
+    let entered_ir: Vec<String> = entry_path(t, ctx.index, ctx.parents)
+        .into_iter()
+        .filter(|i| {
+            let k = ctx.index.get(*i).kind;
+            k.is_active_at_rest() && k != StateRecordKind::Final
+        })
+        .map(|i| ctx.index.get(i).ir_id.clone())
+        .collect();
+    let exited_ir: Vec<String> = exits
+        .iter()
+        .copied()
+        .filter(|i| {
+            let k = ctx.index.get(*i).kind;
+            k.is_active_at_rest() && k != StateRecordKind::Final
+        })
+        .map(|i| ctx.index.get(i).ir_id.clone())
+        .collect();
+    out.push_str(&super::trace_hook::emit_trace_record_transition(
+        t,
+        &entered_ir,
+        &exited_ir,
+        &pad,
+    ));
 }
 
 /// Collect every leaf state in every region of `parallel_idx` EXCEPT the

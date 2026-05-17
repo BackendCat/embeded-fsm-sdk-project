@@ -338,6 +338,10 @@ fn emit_machine_struct(ctx: &MachineEmitCtx<'_>) -> String {
             name = sr.parent_state_c,
         ));
     }
+    // W1 R7 host-trace differential scratch (Doc 32 §1 W1). The whole block
+    // is `#ifdef FSM_TRACE`-gated, so `#ifndef FSM_TRACE` ⇒ this struct is
+    // byte-identical to before the wave (the keystone no-regression).
+    s.push_str(&super::trace_hook::emit_trace_struct_fields());
     s.push_str(&format!("}} {prefix}_t;\n", prefix = prefix));
     s
 }

@@ -36,6 +36,16 @@ insta = { workspace = true }
 # P1-A2 concern) while keeping that example compilable — mirroring the
 # `fsm-parser` dev-dep below, which exists for the very same example.
 fsm-analyzer = { path = "../fsm-analyzer" }
-# Used only by `examples/capture_trace.rs` — a scratch helper for refreshing
-# example traces after simulator-semantic changes.
+# Used by `examples/capture_trace.rs` (a scratch trace-refresh helper) and
+# the Phase-6.0-W1 host-trace differential
+# (`tests/codegen_equivalence_smoke.rs`) — both need the parser front-end.
 fsm-parser = { path = "../fsm-parser" }
+# Phase-6.0-W1 (Doc 32 §1 W1 — the R7 host-trace differential): the test
+# generates the `#ifdef FSM_TRACE` C from the SAME IR the simulator runs,
+# compiles it with the on-box gcc, runs it, and byte-diffs its emitted
+# trace against the shipped `fsm_simulator::execute_trace` StepRecord
+# oracle. Dev-dep ONLY — no dependency cycle: fsm-codegen-c depends on
+# fsm-ir + fsm-diagnostics ONLY, never on fsm-simulator.
+fsm-codegen-c = { path = "../fsm-codegen-c" }
+# Each differential fixture gets its own clean compile/run temp dir.
+tempfile = "3"

@@ -535,12 +535,14 @@ name = "fsm-simulator"
 version = "0.1.0"
 dependencies = [
  "fsm-analyzer",
+ "fsm-codegen-c",
  "fsm-diagnostics",
  "fsm-ir",
  "fsm-parser",
  "insta",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 

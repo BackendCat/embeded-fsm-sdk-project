@@ -30,6 +30,7 @@ pub mod queue;
 pub mod source;
 pub mod submachine;
 pub mod timer;
+pub mod trace_hook;
 pub mod transition;
 
 /// Bundle of generated files. Extensible Vec form per Doc 00 §5.6 NIT.
