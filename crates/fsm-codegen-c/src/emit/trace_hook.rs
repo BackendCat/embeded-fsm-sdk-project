@@ -682,7 +682,7 @@ pub fn emit_trace_event_name_fn(ctx: &MachineEmitCtx<'_>) -> String {
 /// minimal escaping the generated ids/names need (`\`, `"`). IR ids and
 /// event names are `[A-Za-z0-9:_-]`-shaped so this is conservative but
 /// total.
-fn c_string_literal(s: &str) -> String {
+pub(crate) fn c_string_literal(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for ch in s.chars() {

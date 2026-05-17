@@ -73,6 +73,30 @@ pub fn emit_transition_body(
     let source_idx = ctx.index.must_lookup(&t.source);
     let target_idx = ctx.index.must_lookup(&t.target);
     let exits = exit_path(t, ctx.index, ctx.parents);
+
+    // FW1-FU-2 (Doc 08 §6.4, Doc 32 §1 W1): snapshot history BEFORE running
+    // any exit actions. The shipped `fsm_simulator` calls
+    // `record_history_before_exit(rt, &exits)` first thing in
+    // `execute_one_transition` — for every exited composite that declares a
+    // `history` pseudo-state it records the (shallow: direct-child /
+    // deep: full descendant) live config. The prior codegen emitted the
+    // `_history_record_X` helper but NEVER called it ("the dispatch path
+    // does not yet target history-pseudo restore" — history.rs), so a later
+    // `RESUME -> HAuto` had nothing to restore. We now wire the snapshot in
+    // at exactly the simulator's point (before exit actions), so the next
+    // history-targeted entry resolves to the remembered leaf.
+    for exit_idx in &exits {
+        let rec = ctx.index.get(*exit_idx);
+        if rec.history_pseudo.is_some() {
+            out.push_str(&format!(
+                "{pad}{prefix}_history_record_{name}(m); /* Doc 08 §6.4 — snapshot before exit (FW1-FU-2) */\n",
+                pad = pad,
+                prefix = prefix,
+                name = rec.c_name,
+            ));
+        }
+    }
+
     // If the exit set crosses a parallel state, exit every active leaf
     // in EVERY region of that parallel — Doc 08 §6.3.
     let parallel_being_exited = exits
@@ -106,9 +130,102 @@ pub fn emit_transition_body(
     // Emit the source-region exit chain.
     // P0-4: when a state owns timers, disarm them on exit so they cannot
     // fire after the owning state is no longer active (Doc 08 §13.2).
+    //
+    // FW1-FU-2 (Doc 32 §1 W1): the *full exit-set* of a composite includes
+    // its currently-active descendant substate(s) — exiting `Auto` (with
+    // active leaf `Red`) must also exit `Red`. The shipped
+    // `fsm_simulator::execute_one_transition` does this by walking
+    // `active_states` for descendants of every exited state
+    // (interpreter.rs `full_exits` loop) and emitting them innermost-first
+    // (Doc 08 §6.1/§6.3). The prior codegen only exited the static
+    // source→LCA chain, so when the *source itself* is a composite the
+    // active leaf was never exited (the simulator recorded
+    // `ext=Auto,Red`; the C recorded only `Auto`). We mirror the simulator:
+    // for each exited composite whose active leaf is NOT already on the
+    // static exit chain, emit a runtime switch on its `_active[]` slot that
+    // exits the live descendant leaf FIRST (innermost-first), then the
+    // composite. (The parallel case is already handled above by the
+    // sibling-region leaf emitter; this is the composite analogue. A
+    // composite's descendants all share the composite's slot in the v1.0
+    // single-region layout, so the live leaf is `m->_active[slot]`.)
     let all_timers = super::timer::collect_timers(ctx);
+    let statically_exited: std::collections::HashSet<u8> = exits.iter().copied().collect();
     for exit_idx in &exits {
         let rec = ctx.index.get(*exit_idx);
+        // Composite exit: first exit whichever descendant leaf is live now
+        // (the simulator's active-descendant exit), then the composite
+        // itself. Skip leaves already on the static chain (they are exited
+        // by the loop body below) to avoid a double `_exit_X`.
+        if rec.kind == StateRecordKind::Composite {
+            let descendant_leaves = composite_descendant_leaves(ctx, *exit_idx);
+            let slot = ctx.layout.slot(*exit_idx);
+            let mut emitted_header = false;
+            for leaf_idx in descendant_leaves {
+                if statically_exited.contains(&leaf_idx) {
+                    continue;
+                }
+                let leaf = ctx.index.get(leaf_idx);
+                if super::submachine::ref_state_member(ctx, &leaf.ir_id).is_some() {
+                    // Sub-instance teardown is implicit (W2d) — no `_exit_X`,
+                    // but the leaf IS still part of the exit-set the trace
+                    // must record.
+                    if !emitted_header {
+                        out.push_str(&format!(
+                            "{pad}/* Composite active-descendant exit-set (Doc 08 §6.1, FW1-FU-2) */\n",
+                            pad = pad,
+                        ));
+                        emitted_header = true;
+                    }
+                    out.push_str(&format!(
+                        "{pad}#ifdef FSM_TRACE\n{pad}if (m->_active[{slot}] == {macro}_STATE_{lname}) fsm_trace_csv_append(m->_trace_ext, sizeof(m->_trace_ext), {lit});\n{pad}#endif\n",
+                        pad = pad,
+                        slot = slot,
+                        macro = ctx.macro_prefix(),
+                        lname = leaf.c_name,
+                        lit = super::trace_hook::c_string_literal(&leaf.ir_id),
+                    ));
+                    continue;
+                }
+                if !emitted_header {
+                    out.push_str(&format!(
+                        "{pad}/* Composite active-descendant exit-set (Doc 08 §6.1, FW1-FU-2) */\n",
+                        pad = pad,
+                    ));
+                    emitted_header = true;
+                }
+                out.push_str(&format!(
+                    "{pad}if (m->_active[{slot}] == {macro}_STATE_{lname}) {{\n",
+                    pad = pad,
+                    slot = slot,
+                    macro = ctx.macro_prefix(),
+                    lname = leaf.c_name,
+                ));
+                out.push_str(&format!(
+                    "{pad}    {prefix}_exit_{lname}(m);\n",
+                    pad = pad,
+                    prefix = prefix,
+                    lname = leaf.c_name,
+                ));
+                // Disarm any timer the live leaf owns (P0-4 parity — the
+                // static loop below disarms timers for statically-exited
+                // states; the runtime-resolved leaf needs the same).
+                for timer in &all_timers {
+                    if timer.owner_state == leaf_idx {
+                        out.push_str(&format!(
+                            "{pad}    m->_timer_{tname}_remaining_ms = 0u; /* P0-4: cancel owned timer on exit */\n",
+                            pad = pad,
+                            tname = timer.field_name,
+                        ));
+                    }
+                }
+                out.push_str(&format!(
+                    "{pad}    #ifdef FSM_TRACE\n{pad}    fsm_trace_csv_append(m->_trace_ext, sizeof(m->_trace_ext), {lit});\n{pad}    #endif\n",
+                    pad = pad,
+                    lit = super::trace_hook::c_string_literal(&leaf.ir_id),
+                ));
+                out.push_str(&format!("{pad}}}\n", pad = pad));
+            }
+        }
         if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
             // v1.1-W2d: a submachine ref-state has no user `_exit_X`. Its
             // sub-instance is a value member — teardown is implicit (no
@@ -160,9 +277,34 @@ pub fn emit_transition_body(
         indent_spaces,
     ));
 
+    // FW1-FU-2: is the transition target a history pseudo-state? The
+    // shipped simulator's `resolve_target` resolves a History target to the
+    // recorded child (or its default) and runs the full entry sequence to
+    // that leaf. The prior codegen wrote `_active[slot] = STATE_HAuto` (a
+    // pseudo-state, which never appears at rest) and never entered the
+    // restored leaf. We instead enter the *owning composite* via the static
+    // `entry_path` below (History is filtered out of it — see step 4 / the
+    // `entered_ir` filter), then call `<M>_history_restore_<composite>`
+    // which writes the real leaf slot + records the restored leaf in the
+    // trace `ent` set (history.rs). Find the composite that owns this
+    // history pseudo.
+    let history_owner_idx: Option<u8> =
+        if ctx.index.get(target_idx).kind == StateRecordKind::History {
+            ctx.index
+                .records
+                .iter()
+                .position(|r| r.history_pseudo == Some(target_idx))
+                .map(|p| p as u8)
+        } else {
+            None
+        };
+
     // 3. Update `_active[]` slot. Internal transitions leave the
-    // configuration unchanged.
-    if !matches!(t.kind, TransitionKind::Internal) {
+    // configuration unchanged. A history target does NOT write the slot
+    // here — `<M>_history_restore_*` writes the *resolved leaf* slot
+    // (writing `STATE_HAuto`, a pseudo-state, would corrupt the config and
+    // the cfgA projection, exactly the prior bug).
+    if !matches!(t.kind, TransitionKind::Internal) && history_owner_idx.is_none() {
         let target_rec = ctx.index.get(target_idx);
         let target_slot = ctx.layout.slot(target_idx);
         out.push_str(&format!(
@@ -217,6 +359,25 @@ pub fn emit_transition_body(
         ) {
             emit_initial_expansion_for_target(ctx, target_idx, &pad, out);
         }
+    }
+
+    // FW1-FU-2: history-target restore. The owning composite was just
+    // entered by the static `entry_path` loop (its `_entry_X` ran and it is
+    // in `entered_ir`); now resolve + enter the *remembered child leaf*.
+    // `<M>_history_restore_<composite>` writes the resolved leaf into its
+    // `_active[]` slot and, under `#ifdef FSM_TRACE`, appends the entered
+    // child ids to `m->_trace_ent` — mirroring the simulator's
+    // `resolve_target(History) -> entry_path/expand_initial -> leaf`. The
+    // composite itself is NOT re-appended here (it is already in
+    // `entered_ir`); only the runtime-resolved inner leaf is, which is why
+    // it must be emitted inline (it is not statically known).
+    if let Some(owner_idx) = history_owner_idx {
+        out.push_str(&format!(
+            "{pad}{prefix}_history_restore_{name}(m); /* FW1-FU-2: resolve shallow_history → remembered leaf */\n",
+            pad = pad,
+            prefix = prefix,
+            name = ctx.index.get(owner_idx).c_name,
+        ));
     }
 
     // W1 R7 host-trace differential (Doc 32 §1 W1, compile-time-gated):
@@ -286,6 +447,53 @@ fn collect_parallel_region_leaves_excluding(
         }
     }
     out
+}
+
+/// Collect every leaf state (simple / final / submachine-ref) nested
+/// anywhere inside the composite `composite_idx`, in declaration order.
+///
+/// FW1-FU-2: the set of states whose `_exit_X` may need to run when the
+/// composite is left, depending on which one is the live leaf at runtime.
+/// Mirrors the simulator's "active descendant of an exited state" walk
+/// (interpreter.rs `full_exits`), but expressed as the *static* candidate
+/// set the runtime switch selects from (the codegen analogue of the
+/// simulator's `active_states` membership test). Nested composites are
+/// recursed into so a deep leaf is reached; the composite/parallel
+/// container states themselves are NOT leaves (the simulator records them
+/// via the static exit chain / parallel emitter, not here).
+fn composite_descendant_leaves(ctx: &MachineEmitCtx<'_>, composite_idx: u8) -> Vec<u8> {
+    let rec = ctx.index.get(composite_idx);
+    let Some(c) = find_composite(ctx.machine, &rec.ir_id) else {
+        return Vec::new();
+    };
+    fn walk(states: &[StateNode], leaves: &mut Vec<String>) {
+        for s in states {
+            match s {
+                StateNode::Simple(x) => leaves.push(x.id.clone()),
+                StateNode::Final(f) => leaves.push(f.id.clone()),
+                StateNode::Submachine(sm) => leaves.push(sm.id.clone()),
+                StateNode::Composite(cc) => {
+                    for r in &cc.regions {
+                        walk(&r.states, leaves);
+                    }
+                }
+                StateNode::Parallel(p) => {
+                    for r in &p.regions {
+                        walk(&r.states, leaves);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut leaf_ids = Vec::new();
+    for r in &c.regions {
+        walk(&r.states, &mut leaf_ids);
+    }
+    leaf_ids
+        .into_iter()
+        .filter_map(|id| ctx.index.lookup(&id))
+        .collect()
 }
 
 fn states_inside_parallel(m: &fsm_ir::MachineObject, parallel_ir_id: &str) -> Vec<String> {

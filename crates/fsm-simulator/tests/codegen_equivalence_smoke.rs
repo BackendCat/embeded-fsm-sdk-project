@@ -767,61 +767,88 @@ fn run_differential(example: &str) -> Result<(), String> {
 //                        a payload `FAULT(code)`. The differential mechanism
 //                        is proven end-to-end here: §5.4(a)'s "at least one
 //                        non-trivial path byte-equal".)
-//   • traffic-light  → RED — but the FIRST DIVERGENCE has MOVED from step
-//                        #1 to step #5: the W1-FU wave FIXED the codegen
-//                        `<M>_advance_clock` TIMER OVER-FIRE
-//                        (`crates/fsm-codegen-c/src/emit/timer.rs::
-//                        emit_advance_clock`). The original defect: a timer
-//                        ARMED during an `advance_clock(Δ)` was immediately
-//                        re-fired by the SAME call's leftover `Δ` (the
-//                        elapsed budget was re-used per timer instead of
-//                        being CONSUMED as timers fire); the generated C
-//                        fired the Red→GreenAccel→Green chain TWICE and
-//                        landed in the WRONG state. The fix mirrors the
-//                        shipped `fsm_simulator::Interpreter::advance_clock`
-//                        expiry-walk (consume the budget timer-by-timer at
-//                        each expiry; a timer armed during the walk is
-//                        anchored to the advanced point, not the start) —
-//                        steps #0–#4 (the entire timer chain) are now
-//                        BYTE-EQUAL to the shipped-simulator oracle, and the
-//                        FSM lands in the CORRECT state. *That part of this
-//                        fixture is now byte-equal.*
+//   • traffic-light  → BYTE-EQUAL ✓ — converged across TWO sequential
+//                        codegen fixes, each landed and verified by THIS
+//                        differential (the catalogue-tracks-reality
+//                        mechanism working as designed):
 //
-//                        traffic-light stays KNOWN_DIVERGENT because the
-//                        timer over-fire was MASKING a SECOND, INDEPENDENT
-//                        codegen divergence at steps #5–#6 (pre-existing;
-//                        unmasked, NOT introduced, by the timer fix — the
-//                        diff previously short-circuited at step #1 so #5
-//                        was never reached). It is a `shallow_history` /
-//                        composite-exit-set CODEGEN defect, NOT a timer or
-//                        harness/projection artifact and NOT in
-//                        `emit/timer.rs`:
+//                        (W1-FU) the codegen `<M>_advance_clock` TIMER
+//                        OVER-FIRE (`emit/timer.rs::emit_advance_clock`): a
+//                        timer ARMED during an `advance_clock(Δ)` was
+//                        immediately re-fired by the SAME call's leftover
+//                        `Δ` (the elapsed budget was re-used per timer
+//                        instead of being CONSUMED as timers fire); the
+//                        generated C fired the Red→GreenAccel→Green chain
+//                        TWICE and landed in the WRONG state. Fixed to
+//                        mirror `fsm_simulator::Interpreter::advance_clock`
+//                        (consume the budget timer-by-timer at each expiry;
+//                        a timer armed during the walk is anchored to the
+//                        advanced point). Steps #0–#4 (the timer chain)
+//                        became byte-equal — which *unmasked* a second,
+//                        independent, pre-existing defect at #5–#6 (the
+//                        diff had short-circuited at step #1). W1-FU
+//                        correctly STOPPED there (timer-only scope) and
+//                        kept traffic-light KNOWN_DIVERGENT.
+//
+//                        (FW1-FU-2) the unmasked `shallow_history` /
+//                        composite-exit-set CODEGEN defect
+//                        (`emit/transition.rs` + `emit/history.rs`, NOT a
+//                        timer/harness/projection artifact):
 //                          – step #5 (`OVERRIDE`, `Auto`→`Manual`): the
-//                            simulator records the exited set as the
-//                            composite `Auto` AND its active leaf `Red`
-//                            (`ext=…Auto,…Red`); the generated C records
-//                            only `Auto` (the composite-exit-set codegen
-//                            omits the active leaf).
+//                            shipped simulator's `execute_one_transition`
+//                            exits the composite `Auto` AND its active
+//                            descendant leaf `Red` (its `full_exits` walk
+//                            adds active descendants of every exited state;
+//                            `ext=Auto,Red`). The prior codegen exited only
+//                            the static source→LCA chain, so when the
+//                            *source itself* was the composite the live
+//                            leaf was never exited (`ext=Auto` only). FIXED:
+//                            `emit_transition_body` now emits, for each
+//                            exited composite, a runtime switch on its
+//                            `_active[]` slot that exits the live
+//                            descendant leaf FIRST (innermost-first, Doc 08
+//                            §6.1) — the composite analogue of the existing
+//                            parallel sibling-leaf emitter.
 //                          – step #6 (`RESUME`, `Manual`→`HAuto` via
-//                            `shallow_history`): the simulator resolves the
-//                            history pseudostate to its restored leaf `Red`
-//                            (`cfgA=…Red`, `ent=…Auto,…Red`); the generated
-//                            C reports the raw `HAuto` pseudostate in the
-//                            config and never enters the resolved leaf.
-//                        Fixing the shallow-history / composite-exit-set
-//                        codegen is a DIFFERENT codegen surface
-//                        (`transition.rs`/`history.rs`) and is OUT of
-//                        W1-FU's scope (the W1-FU brief: scope =
-//                        `emit/timer.rs` + this catalogue note only;
-//                        STOP+report on a second divergence behind the
-//                        timer one; catalogue-gaming is the explicit "worst
-//                        outcome"). Recorded as a finding for a follow-on
-//                        wave; traffic-light therefore stays RED and stays
-//                        KNOWN_DIVERGENT — moving it to BYTE_EQUAL would
-//                        make the keystone-mechanism gate panic on the next
-//                        run (it is genuinely still RED, just for a
-//                        narrower, different reason).
-//   • submachine / vending-machine / deferred → RED — the generated C and
+//                            `shallow_history`): the simulator's
+//                            `resolve_target` resolves the History pseudo
+//                            to the recorded child (or its default) and
+//                            runs the full entry sequence to that leaf
+//                            (`cfgA=Red`, `ent=Auto,Red`). The prior
+//                            codegen wrote `_active[slot]=STATE_HAuto` (a
+//                            pseudo-state, never a resting config) and
+//                            never entered the restored leaf, AND never
+//                            called the `_history_record_X` helper so there
+//                            was nothing to restore. FIXED: `transition.rs`
+//                            now snapshots history at the simulator's
+//                            `record_history_before_exit` point (before
+//                            exit actions, Doc 08 §6.4), skips the
+//                            pseudo-state slot write for a history target,
+//                            enters the owning composite via the static
+//                            `entry_path`, and calls the rewritten
+//                            `history.rs` `_history_restore_<composite>`
+//                            which runtime-resolves the remembered child,
+//                            runs its entry sequence, writes the *real*
+//                            leaf slot, and (gated) records the restored
+//                            leaf in the trace `ent` set.
+//
+//                        With both fixes the `FSM_TRACE`-compiled-and-RUN
+//                        generated C byte-equals the shipped
+//                        `fsm_simulator::execute_trace` oracle for ALL 7
+//                        steps. The precondition the gate is *designed* to
+//                        require before a fixture may move from
+//                        KNOWN_DIVERGENT to BYTE_EQUAL is now genuinely met
+//                        (contrast W1-FU, where it was NOT met so the
+//                        fixture correctly stayed divergent). Moved to
+//                        BYTE_EQUAL below — verify-the-record applied to
+//                        this test's own claims.
+//   • deferred       → BYTE-EQUAL ✓  (the full UML defer→hold→release→
+//                        redispatch cycle: BOTH the `event_deferred` and
+//                        the `event_redispatched` records byte-equal — the
+//                        W1 trace hook tags the release exactly as the
+//                        simulator does. NOT a record-model divergence,
+//                        unlike submachine/vending below.)
+//   • submachine / vending-machine → RED — the generated C and
 //                        the shipped simulator use STRUCTURALLY DIFFERENT
 //                        (each internally-valid) RECORD MODELS for the
 //                        submachine lifecycle (sim: parent-level
@@ -868,23 +895,23 @@ fn run_differential(example: &str) -> Result<(), String> {
 ///                   (`event_deferred` AND `event_redispatched` records
 ///                   byte-equal — the W1 trace hook tags the release the
 ///                   same way the simulator does).
-const BYTE_EQUAL: &[&str] = &["motor", "deferred"];
+///   • `traffic-light` — a periodic `after`-timer chain (Red→GreenAccel→
+///                   Green→Yellow→Red) + a composite-exit-set
+///                   (`OVERRIDE`: `Auto`→`Manual` exits the live leaf
+///                   `Red` too) + a `shallow_history` restore (`RESUME`:
+///                   `Manual`→`HAuto` resolves to the remembered leaf
+///                   `Red`). Converged via the W1-FU timer fix
+///                   (`emit/timer.rs`) THEN the FW1-FU-2 history /
+///                   composite-exit-set fix (`emit/transition.rs` +
+///                   `emit/history.rs`) — both verified by this
+///                   differential; see the ground-truth block above.
+const BYTE_EQUAL: &[&str] = &["motor", "deferred", "traffic-light"];
 
 /// Corpus members the differential (correctly) REDs on, each a GENUINE
 /// verified divergence that is OUT of the respective wave's scope to fix
 /// (projection-gaming / catalogue-gaming is the explicit "worst outcome").
 /// Locked so the catalogue tracks ground truth.
 ///
-///   • `traffic-light` — the W1-FU wave FIXED the codegen
-///                  `advance_clock` timer over-fire (`emit/timer.rs`);
-///                  steps #0–#4 (the whole timer chain) are now BYTE-EQUAL.
-///                  It stays RED only because the timer over-fire was
-///                  MASKING a SEPARATE, pre-existing `shallow_history` /
-///                  composite-exit-set CODEGEN defect at steps #5–#6
-///                  (`transition.rs`/`history.rs`, NOT `emit/timer.rs`,
-///                  NOT a timer/harness/projection artifact) — out of
-///                  W1-FU scope; a follow-on-wave finding. See the
-///                  ground-truth block above for the per-step detail.
 ///   • `vending-machine` / `submachine` — STRUCTURALLY DIFFERENT (each
 ///                  internally-valid) engine RECORD MODELS for the
 ///                  submachine lifecycle / completion granularity /
@@ -894,9 +921,9 @@ const BYTE_EQUAL: &[&str] = &["motor", "deferred"];
 ///                  hook to re-derive the simulator's record sequence in C
 ///                  — bordering on the "re-implemented step semantics in
 ///                  the codegen runtime" the §2 keystone FORBIDS. A
-///                  separate record-model design decision, NOT W1-FU; DO
-///                  NOT touch (touching risks the keystone).
-const KNOWN_DIVERGENT: &[&str] = &["traffic-light", "vending-machine", "submachine"];
+///                  separate record-model design decision (#109), NOT
+///                  FW1-FU-2; DO NOT touch (touching risks the keystone).
+const KNOWN_DIVERGENT: &[&str] = &["vending-machine", "submachine"];
 
 #[test]
 fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
