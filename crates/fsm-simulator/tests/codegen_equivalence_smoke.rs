@@ -176,6 +176,17 @@ const SEP: char = '\u{1f}';
 ///   • `stress-parallel-cross-exit` — exit a parallel composite mid-flight
 ///                                    (both regions in live non-Final
 ///                                    leaves at different depths).
+/// **FW-F1** adds `timer-const-ref` — the *only* corpus member using
+/// `const`-referenced timer durations (`after STARTUP_MS ms` /
+/// `every HEARTBEAT_MS ms`). Every prior corpus/example FSM used
+/// integer-literal durations exclusively, so the FW110 5→12 broadening
+/// structurally could **not** catch Finding F-1 (the silent drop of the
+/// Doc 02 §6 / Doc 04 §12 mandated const-ref idiom — audit §1.1
+/// corpus-blind-spot note). Post-F-1 (the unified file-consts-aware
+/// resolver shared by lower≡check) it lowers byte-identically to the
+/// literal form ⇒ BYTE_EQUAL; this permanently closes the blind spot (a
+/// future regression re-breaking const-ref lowering REDs the differential).
+///
 /// Each is wired the SAME way as the original 5 (an `examples/<name>/`
 /// dir with `<name>.fsm` + `<name>.trace`; `load_trace` resolves it) and
 /// is classified below with the FW109 discipline.
@@ -192,6 +203,7 @@ const CORPUS: &[&str] = &[
     "stress-choice-guard-payload",
     "stress-completion-chain",
     "stress-parallel-cross-exit",
+    "timer-const-ref",
 ];
 
 fn gcc_available() -> bool {
@@ -1174,6 +1186,30 @@ fn run_differential(example: &str) -> Result<(), String> {
 /// `run_differential` now returns `Ok` for this fixture, which is why the
 /// FW109 catalogue-stale guard FORCED this move (verify-the-record applied
 /// reflexively — an honest converged fixture MUST move).
+///
+/// **FW-F1 addition — `timer-const-ref` (BYTE_EQUAL, NOT a divergence).**
+/// The const-ref-timer regression fixture (`after STARTUP_MS ms` +
+/// `every HEARTBEAT_MS ms : tick()`). Finding F-1 was a *producer*
+/// (analyzer-lowerer) defect: the lowerer's timer-duration const-fold
+/// omitted `EXPR_NAME_REF` and SILENTLY DROPPED the whole timer for the
+/// Doc-02-§6/Doc-04-§12-mandated const-ref idiom. The FW-F1 fix unifies
+/// the lowerer and the check onto ONE file-consts-aware resolver
+/// (`fsm_analyzer::util::eval_const_expr_value` /
+/// `file_const_table`) — so `after CONST ms` now lowers to **exactly** the
+/// IR the integer literal produces (proven directly: the generated
+/// production C for the const-ref machine is byte-identical to the same
+/// machine written with `5000`/`1000` literals — see the FW-F1 completion
+/// report). The shipped `fsm_simulator::execute_trace` oracle (the
+/// UNFORKED keystone) and the FSM_TRACE-compiled-and-RUN generated C are
+/// therefore byte-identical here for the SAME reason `motor`/
+/// `traffic-light` (literal one-shot `after`) + `stress-every-timer`
+/// (periodic `every`) are: the fix changed only how the duration scalar is
+/// *resolved* (now const-ref-aware), not the timer codegen/sim path the
+/// folded `u32` flows into. Classified BYTE_EQUAL honestly — there is NO
+/// record-model residual (the resolver fix makes const-ref ≡ literal at
+/// the IR level), so a JUSTIFIED classification would be vacuous and is
+/// (correctly) NOT used. The differential going RED here in future = a
+/// real F-1-class regression (const-ref lowering re-broken).
 const BYTE_EQUAL: &[&str] = &[
     "motor",
     "deferred",
@@ -1184,6 +1220,7 @@ const BYTE_EQUAL: &[&str] = &[
     "stress-self-transitions-actions",
     "stress-choice-guard-payload",
     "stress-every-timer",
+    "timer-const-ref",
 ];
 
 /// Corpus members whose byte-diff (correctly) REDs because the two engines
@@ -1442,7 +1479,7 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
     // Post-FW110-FU-E exact honest distribution (asserted dynamically below
     // — this comment is the human-readable record, the verify-the-record
     // discipline applied to the catalogue's own arithmetic):
-    //   BYTE_EQUAL                          = 9  (motor, deferred,
+    //   BYTE_EQUAL                          = 10 (motor, deferred,
     //       traffic-light, stress-parallel-cross-exit, stress-deep-history
     //       [MOVED by FW110-FU-B], stress-self-transitions [MOVED by
     //       FW110-FU-C: sibling-local LCA fixed], stress-self-transitions-
@@ -1457,7 +1494,13 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
     //       select_transitions's EventKind::TimerFire early-return, so the
     //       every-1000:beat() Internal runs at clk=3000 even though Pulsing
     //       was exited the same instant — beat()==4, byte-identical end-to-
-    //       end])
+    //       end], timer-const-ref [NEW in FW-F1: the const-ref-timer
+    //       regression fixture closing the §1.1 literal-only corpus blind
+    //       spot — `after STARTUP_MS ms`/`every HEARTBEAT_MS ms` now lower
+    //       byte-identically to the integer-literal form because the
+    //       analyzer-producer fix unified lower≡check onto ONE
+    //       file-consts-aware resolver; no record-model residual, so
+    //       BYTE_EQUAL not JUSTIFIED — a JUSTIFIED here would be vacuous])
     //   BEHAVIOURALLY_EQUIVALENT_JUSTIFIED  = 3  (vending-machine,
     //       submachine, stress-completion-chain — record-model differs,
     //       observable behaviour proven identical)
@@ -1470,8 +1513,10 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
     //       equivalence guards — NOT gamed; a future genuine divergence
     //       MUST be re-listed here honestly.)
     //   ──────────────────────────────────────────────────────────────────
-    //   SUM                                 = 12 == CORPUS.len()
-    //   (9 + 3 + 0 = 12; dynamically enforced — the prose tracks reality)
+    //   SUM                                 = 13 == CORPUS.len()
+    //   (10 + 3 + 0 = 13; dynamically enforced — the prose tracks reality.
+    //    FW-F1 added timer-const-ref to BOTH CORPUS and BYTE_EQUAL, +1 each,
+    //    so the sum stays consistent and KNOWN_DIVERGENT stays empty.)
     {
         let mut all: Vec<&str> = BYTE_EQUAL
             .iter()

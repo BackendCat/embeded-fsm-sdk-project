@@ -1,7 +1,7 @@
 //! Small utilities shared across the analyzer pipeline.
 
 use fsm_diagnostics::{LineColUnit, SourceLocation, Span};
-use fsm_parser::ast;
+use fsm_parser::ast::{self, AstNode};
 // **W0 / Doc 29 §3.4 (R-4 — the Archetype-C leave-and-explain residual).**
 // This file legitimately retains `fsm_parser::cst` for the *positional*
 // helpers: `span_of(&SyntaxNode) -> Span` is pure rowan-positional
@@ -114,6 +114,93 @@ pub fn parse_int_literal_i128(text: &str) -> Option<i128> {
         return i128::from_str_radix(rest, 2).ok();
     }
     cleaned.parse::<i128>().ok()
+}
+
+/// Walk file-level `const NAME = <expr>` declarations and fold each value
+/// into a `(name, i64)` pair, in source order, resolving later consts
+/// against earlier ones. A const whose value cannot be folded is skipped
+/// (it is reported elsewhere by the reference-resolution pass).
+///
+/// **F-1 single-source-of-truth (Finding F-1, audit §1.1 / §6 items 1-2).**
+/// This is THE one file-consts-aware const-fold table builder, consumed by
+/// BOTH the timer-duration *check* (`checks::timer`, the bounds check) AND
+/// the *lowerer*'s timer-duration fold (`lower::state::duration_ms` →
+/// [`eval_const_expr_value`]). Before F-1 the lowerer had its own
+/// `eval_i64` that handled only `EXPR_LITERAL`/`EXPR_UNARY`/`EXPR_PAREN`
+/// and **omitted `EXPR_NAME_REF`**, while the check had a *separate*
+/// `resolve_expr_value` that *did* resolve `EXPR_NAME_REF` against the file
+/// consts — so `after CONST ms` (the Doc 02 §6 / Doc 04 §12 *mandated*
+/// idiom) passed the bounds check but the lowerer silently returned `None`
+/// and dropped the whole timer (a #110-class silent miscompile). The fix is
+/// not to paste `EXPR_NAME_REF` into the lowerer (that would re-create the
+/// asymmetry latently); it is to make lower≡check *by construction* — one
+/// resolver, one consts table builder, here. The submachine-`is`-nested
+/// helper below is the prior in-tree precedent for this "shared so the two
+/// sites can never drift apart" doctrine.
+pub fn file_const_table(file: &ast::File) -> Vec<(String, i64)> {
+    let mut out: Vec<(String, i64)> = Vec::new();
+    for c in file.consts() {
+        if let (Some(name), Some(ce)) = (c.name(), c.value()) {
+            // `ConstExpr` wraps a single expression child.
+            if let Some(expr) = ce.syntax().children().next() {
+                if let Some(v) = eval_const_expr_value(&expr, &out) {
+                    out.push((name, v));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Fold a single expression CST node to an `i64` compile-time constant, or
+/// `None` if it is not const-foldable. Resolves `EXPR_NAME_REF` against the
+/// `consts` table (built by [`file_const_table`]).
+///
+/// **F-1 single-source-of-truth.** This is THE shared const evaluator the
+/// timer-duration check and the lowerer both call (see [`file_const_table`]
+/// for the full rationale). The accepted forms are *exactly* the four the
+/// deliberately-shallow expression CST admits — integer literal, unary
+/// `+`/`-`, parenthesised, and a `const` name reference. A duration that is
+/// still `None` after this (a `ctx.`/`payload.` ref or non-const-foldable
+/// arithmetic) is a genuine runtime-variable duration: the explicitly-
+/// post-v1.0-deferred form the §2.3 rejecting diagnostic (`FSM-E0411`)
+/// hard-errors on, rather than the lowerer silently dropping it.
+pub fn eval_const_expr_value(expr: &SyntaxNode, consts: &[(String, i64)]) -> Option<i64> {
+    match expr.kind() {
+        SyntaxKind::EXPR_LITERAL => {
+            let tok = expr
+                .children_with_tokens()
+                .filter_map(|el| el.into_token())
+                .find(|t| matches!(t.kind(), SyntaxKind::IntLiteral | SyntaxKind::FloatLiteral))?;
+            parse_int_literal_i64(tok.text())
+        }
+        SyntaxKind::EXPR_UNARY => {
+            let op_tok = expr
+                .children_with_tokens()
+                .filter_map(|el| el.into_token())
+                .find(|t| matches!(t.kind(), SyntaxKind::Minus | SyntaxKind::Plus))?;
+            let inner = expr.children().next()?;
+            let v = eval_const_expr_value(&inner, consts)?;
+            match op_tok.kind() {
+                SyntaxKind::Minus => Some(-v),
+                _ => Some(v),
+            }
+        }
+        SyntaxKind::EXPR_PAREN => {
+            let inner = expr.children().next()?;
+            eval_const_expr_value(&inner, consts)
+        }
+        SyntaxKind::EXPR_NAME_REF => {
+            let name = expr
+                .children_with_tokens()
+                .filter_map(|el| el.into_token())
+                .find(|t| t.kind() == SyntaxKind::Ident)?
+                .text()
+                .to_string();
+            consts.iter().find(|(n, _)| n == &name).map(|(_, v)| *v)
+        }
+        _ => None,
+    }
 }
 
 /// Is this `SUBMACHINE_REF` nested inside a composite or parallel state

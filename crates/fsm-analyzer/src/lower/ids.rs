@@ -22,6 +22,15 @@ pub(crate) struct IdMinter {
     /// fate.)
     #[allow(dead_code)]
     pub(crate) m_idx: usize,
+    /// The file-level `const NAME = <expr>` fold table `(name, i64)`, built
+    /// once by `crate::util::file_const_table` (the F-1 single source of
+    /// truth). Carried here because `IdMinter` is the only context already
+    /// threaded through every lowering free function: the timer-duration
+    /// fold (`lower::state::duration_ms`) needs it to resolve `after CONST
+    /// ms` / `every CONST ms` — the Doc 02 §6 / Doc 04 §12 *mandated*
+    /// idiom. Before F-1 the lowerer's `eval_i64` had no consts table at
+    /// all and so silently dropped every const-ref timer (audit §1.1).
+    pub(crate) file_consts: Vec<(String, i64)>,
     /// Counter for auto-generated transition IDs.
     transition_counter: usize,
     /// Counter for auto-generated pseudo-state IDs.
@@ -31,10 +40,11 @@ pub(crate) struct IdMinter {
 }
 
 impl IdMinter {
-    pub(crate) fn new(machine_name: &str, m_idx: usize) -> Self {
+    pub(crate) fn new(machine_name: &str, m_idx: usize, file_consts: Vec<(String, i64)>) -> Self {
         Self {
             machine_name: machine_name.to_string(),
             m_idx,
+            file_consts,
             transition_counter: 0,
             pseudo_counter: 0,
             state_counter: 0,

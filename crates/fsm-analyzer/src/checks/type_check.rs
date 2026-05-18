@@ -235,9 +235,22 @@ fn field_type_text(scope: &Scope, st: &SymbolTable, name: &str) -> Option<String
 }
 
 fn resolve_simple_literal(expr: &SyntaxNode) -> Option<i128> {
-    // Walk through EXPR_LITERAL / EXPR_UNARY / EXPR_PAREN — same recursion
-    // shape as `timer::resolve_expr_value` but returns i128 to defer overflow
-    // decisions to the caller.
+    // Walk through EXPR_LITERAL / EXPR_UNARY / EXPR_PAREN. Recursion shape
+    // rhymes with the shared `util::eval_const_expr_value` (the FW-F1 F-1
+    // single-source-of-truth) but this is DELIBERATELY a separate function
+    // and NOT unified with it (characterized, not gamed — the W1-FU
+    // "keep-scope-unless-provably-the-same-defect" precedent): (1) it
+    // returns `i128`, not `i64`, to *defer overflow decisions to the
+    // caller* — the unsigned-bound / `FSM-E0206` overflow check needs the
+    // wider range to *detect* values that overflow `i64`, so it uses
+    // `parse_int_literal_i128`; collapsing it onto the `i64` resolver would
+    // LOSE that overflow-detection range (an injected bug). (2) It is
+    // intentionally literal-only (no `EXPR_NAME_REF`) — it bounds-checks a
+    // *literal* context default; it is a check-only path with no lowerer
+    // counterpart, so it is NOT subject to F-1 (F-1 is specifically the
+    // lower≡check *timer-duration* asymmetry). Different type, different
+    // purpose, no producer/consumer divergence ⇒ provably NOT the same
+    // defect; out of FW-F1 scope by the brief's scope-discipline rule.
     let kind = expr.kind();
     match kind {
         SyntaxKind::EXPR_LITERAL => {

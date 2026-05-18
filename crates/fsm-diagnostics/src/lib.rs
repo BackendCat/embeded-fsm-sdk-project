@@ -320,6 +320,15 @@ macro_rules! for_each_code {
             E0401 => (Error,   "FSM-E0401", "external self-transition on composite state without exit"),
             // Reconciler addition (Doc 00 §8 Doc 10 patch — formerly W0400):
             E0410 => (Error,   "FSM-E0410", "timer duration must be greater than zero"),
+            // FW-F1 (audit AUDIT_DETERMINISTIC_PRIMITIVE_COMPLETENESS_2026_05_18
+            // §2.3, the silent-drop's sibling fix): a timer duration that is
+            // NOT a compile-time constant (a runtime/context-variable expr —
+            // `after ctx.deadline_ms ms` — or any non-const-foldable form) is
+            // explicitly post-v1.0 (Doc 02 §6 / Doc 08 §13.5 pt 5 / Doc 15.1).
+            // Before this it was SILENTLY DROPPED by the lowerer (Finding F-1
+            // class). Rejected loudly now, mirroring the `defer`→`FSM-E0903`
+            // deferred-construct precedent (Doc 02 §5.3 / §9.4).
+            E0411 => (Error,   "FSM-E0411", "timer duration must be a compile-time constant (runtime-variable durations are post-v1.0)"),
 
             // §9 — Submachine Errors (FSM-E0500 – FSM-E0599)
             E0500 => (Error,   "FSM-E0500", "submachine entry point not declared"),
@@ -809,15 +818,21 @@ mod tests {
 
     #[test]
     fn all_codes_matches_expected_count() {
-        // Live variants: 73 (51 E + 12 W + 4 I + 6 H).
+        // Live variants: 74 (52 E + 12 W + 4 I + 6 H).
         // E0903 retired to `deprecated` in v1.1 (defer runtime shipped),
         // dropping the Error count from 52 to 51.
         // W0500 retired to `deprecated` in v1.2-FU-DEAD-CODES (vestigial,
         // never emitted, no normative spec), dropping the Warning count
         // from 13 to 12. Its honest counterpart W0200 was IMPLEMENTed
         // (not retired) in the same wave because the corpus mandates it.
+        // FW-F1 (2026-05-18): E0411 ADDED (timer duration must be a
+        // compile-time constant — the audit §2.3 rejecting diagnostic for
+        // the F-1 silent-timer-drop class), raising the Error count 51→52
+        // and the total 73→74. This is the live-enum SoT the G7
+        // conformance-coverage lock derives from; its exact-set fixture is
+        // `VAL-NEG-009` (`validator/neg/009_runtime_variable_timer/`).
         // If a new code is added, update this constant in lockstep.
-        const EXPECTED: usize = 73;
+        const EXPECTED: usize = 74;
         let table = DiagnosticCode::all_codes();
         assert_eq!(
             table.len(),

@@ -1,0 +1,12 @@
+{
+  "machineFile": "timer-const-ref.fsm",
+  "description": "FW-F1 const-ref-timer regression driver. GO (Idle->Warming, arms the one-shot `after STARTUP_MS ms` where STARTUP_MS=5000 — the const-ref form F-1 silently dropped). advance 5001ms: the `after STARTUP_MS` fires Warming->Active (proves the const-ref one-shot timer lowered at all — pre-F-1 this edge VANISHED and Warming was a dead state). advance 3500ms: the periodic `every HEARTBEAT_MS ms : tick()` internal (HEARTBEAT_MS=1000 — also a const-ref) ticks WITHOUT changing the config (proves the const-ref periodic timer lowered). STOP (Active->Idle). `expected` intentionally empty — the harness drives the LIVE shipped fsm_simulator::execute_trace oracle and the differential byte-compares the FSM_TRACE-compiled-and-RUN generated C against it; a dropped const-ref timer would diverge immediately.",
+  "init": { "machineName": "ConstRefTimer" },
+  "steps": [
+    { "action": "dispatch", "event": "GO" },
+    { "action": "advance_clock", "deltaMs": 5001 },
+    { "action": "advance_clock", "deltaMs": 3500 },
+    { "action": "dispatch", "event": "STOP" }
+  ],
+  "expected": []
+}

@@ -16,27 +16,35 @@ use fsm_ir::{
     DEFAULT_TRANSITION_PRIORITY,
 };
 use fsm_parser::ast::{self, AstNode, BranchHint as AstBranchHint};
-// **W0 / Doc 29 §3.4 (R-2 + R-3 leave-and-explain).** This file
-// deliberately retains `fsm_parser::cst` for: (R-2) `lower_state_children`'s
-// `children()+kind()` dispatch over INITIAL/STATE/REGION/FINAL/HISTORY/
-// CHOICE/JUNCTION/FORK/JOIN children in **exact source order across
-// heterogeneous kinds** — the IR id-minter is order-sensitive
-// (`lower_split_byte_identity.rs` pins it byte-for-byte); the typed AST has
-// per-kind iterators but no ordered heterogeneous-child iterator, and adding
-// a typed `enum StateChild` ordered iterator whose only consumer is this one
-// loop is the refactor-to-number trap; (R-3) the `eval_i64` timer-duration
-// const-fold over the deliberately-shallow expression CST. Folding either
-// would worsen clarity / risk the P0-1 byte-identity regression class for
-// zero behaviour gain — Doc 00 §11.44/§11.49, the DRIFT-2 `LineIndex`
-// precedent. The single-construct scans were relocated to typed parser
-// accessors (see the free-helpers section below); only the order-critical /
-// shallow-AST residuals stay.
+// **W0 / Doc 29 §3.4 (R-2 leave-and-explain).** This file deliberately
+// retains `fsm_parser::cst` for `lower_state_children`'s `children()+kind()`
+// dispatch over INITIAL/STATE/REGION/FINAL/HISTORY/CHOICE/JUNCTION/FORK/JOIN
+// children in **exact source order across heterogeneous kinds** — the IR
+// id-minter is order-sensitive (`lower_split_byte_identity.rs` pins it
+// byte-for-byte); the typed AST has per-kind iterators but no ordered
+// heterogeneous-child iterator, and adding a typed `enum StateChild` ordered
+// iterator whose only consumer is this one loop is the refactor-to-number
+// trap. Folding it would worsen clarity / risk the P0-1 byte-identity
+// regression class for zero behaviour gain — Doc 00 §11.44/§11.49, the
+// DRIFT-2 `LineIndex` precedent.
+//
+// **F-1 (audit §1.1 / §6 item 1):** the former R-3 residual — the lowerer's
+// own `eval_i64` timer-duration const-fold — is DELETED. It handled only
+// `EXPR_LITERAL`/`EXPR_UNARY`/`EXPR_PAREN` and **omitted `EXPR_NAME_REF`**,
+// so `after CONST ms` (the Doc 02 §6 / Doc 04 §12 *mandated* idiom) folded
+// to `None` and the timer was **silently dropped from the IR** while the
+// `checks::timer` bounds check (its separate resolver) saw the const fine —
+// a #110-class silent miscompile. `duration_ms` now calls the ONE shared
+// `crate::util::eval_const_expr_value` against the file-consts table the
+// `IdMinter` carries (built by the SAME `util::file_const_table` the check
+// uses): lower≡check by construction, the only fix that cannot re-create
+// the asymmetry latently.
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use super::expr::{lower_action_block, lower_guard_clause};
 use super::ids::IdMinter;
 use super::loc::LocCtx;
-use crate::util::submachine_ref_is_nested;
+use crate::util::{eval_const_expr_value, submachine_ref_is_nested};
 
 /// Lower the direct children of `parent` (a machine or a state) into a
 /// list of [`StateNode`]s. Returns the produced state list and the
@@ -719,8 +727,15 @@ fn lower_timers(
 ) -> (Vec<TimerObject>, Vec<TransitionObject>) {
     let mut timers = Vec::new();
     let mut transitions = Vec::new();
+    // Snapshot the shared file-consts fold table once. `duration_ms` needs
+    // an immutable view of it; the loop bodies mutably borrow `ids`
+    // (`next_pseudo_id`, `build_transition`). Cloning the small per-machine
+    // `(name,i64)` table here keeps every counter-bump / traversal in the
+    // loop bodies byte-identical (no borrow restructuring that could
+    // reorder id minting — the P0-1 byte-identity invariant).
+    let file_consts = ids.file_consts.clone();
     for (kind_idx, a) in state.after().enumerate() {
-        if let Some(ms) = a.duration().and_then(|ce| duration_ms(&ce)) {
+        if let Some(ms) = a.duration().and_then(|ce| duration_ms(&ce, &file_consts)) {
             let target = a.target();
             let actions = a
                 .action_block()
@@ -760,7 +775,7 @@ fn lower_timers(
         }
     }
     for (kind_idx, e) in state.every().enumerate() {
-        if let Some(ms) = e.duration().and_then(|ce| duration_ms(&ce)) {
+        if let Some(ms) = e.duration().and_then(|ce| duration_ms(&ce, &file_consts)) {
             let target = e.target();
             let actions = e
                 .action_block()
@@ -800,7 +815,7 @@ fn lower_timers(
         }
     }
     for (kind_idx, e) in state.every_internal().enumerate() {
-        if let Some(ms) = e.duration().and_then(|ce| duration_ms(&ce)) {
+        if let Some(ms) = e.duration().and_then(|ce| duration_ms(&ce, &file_consts)) {
             let actions = e
                 .action_block()
                 .map(|ab| lower_action_block(ids, locs, &ab))
@@ -922,49 +937,32 @@ fn extract_history(
 /// `{After,Every,EveryInternal}Decl::duration()` accessor) to a `u32`
 /// milliseconds value, or `None` if it is negative / non-foldable.
 ///
-/// **R-3 residual (Doc 29 §3.4).** `eval_i64` walks the *deliberately
-/// shallow* expression CST (`EXPR_LITERAL`/`EXPR_UNARY`/`EXPR_PAREN`). The
-/// `Expr` typed AST is `cast`/`syntax`-only by design (no structural
-/// accessors); a full typed accessor layer would relocate — not eliminate —
-/// this walk into `fsm-parser` (the analyzer would still depend on the
-/// shape, just via more indirection) and add a large parser public surface
-/// in a 0-new-API-intended wave. This is internal-to-analyzer const folding
-/// over the parser's *public* CST type used for its intended purpose; it is
-/// left-and-explained, the canonical SUBAGENT §10 / Doc 00 §11.44 case.
-fn duration_ms(ce: &ast::ConstExpr) -> Option<u32> {
+/// **F-1 single-source-of-truth (audit §1.1 / §6 item 1).** This delegates
+/// to the ONE shared [`eval_const_expr_value`] (`crate::util`) — the SAME
+/// resolver `checks::timer` calls for the duration-bounds check — against
+/// the file-consts fold table the [`IdMinter`] carries (built by the SAME
+/// `util::file_const_table`). The prior private `eval_i64` here handled
+/// only `EXPR_LITERAL`/`EXPR_UNARY`/`EXPR_PAREN` and omitted
+/// `EXPR_NAME_REF`, so `after CONST ms` (the Doc 02 §6 / Doc 04 §12
+/// mandated idiom) returned `None` and `lower_timers` silently dropped the
+/// whole timer while the check (its divergent resolver) saw the const fine
+/// — the #110-class silent miscompile F-1. Unifying onto one resolver is
+/// the principled fix: lower≡check by construction (a `None` here is now
+/// the SAME `None` the check sees, and the check turns it into the hard
+/// `FSM-E0411` — no path silently drops a timer).
+///
+/// A `None` return means a genuinely non-const-foldable duration (a
+/// runtime/context-variable expr or unresolved name). `lower_timers` skips
+/// that timer's IR exactly as before — but it is no longer *silent*:
+/// `checks::timer` emits `FSM-E0411` (error severity) for the identical
+/// fold result, so `fsm check` / `fsm generate` reject the model loudly
+/// instead of producing a corrupted IR (the deferred-construct discipline,
+/// `defer`→`FSM-E0903` precedent).
+fn duration_ms(ce: &ast::ConstExpr, file_consts: &[(String, i64)]) -> Option<u32> {
     let expr = ce.syntax().children().next()?;
-    let v = eval_i64(&expr)?;
+    let v = eval_const_expr_value(&expr, file_consts)?;
     if v < 0 {
         return None;
     }
     u32::try_from(v).ok()
-}
-
-fn eval_i64(node: &SyntaxNode) -> Option<i64> {
-    match node.kind() {
-        SyntaxKind::EXPR_LITERAL => {
-            let tok = node
-                .children_with_tokens()
-                .filter_map(|el| el.into_token())
-                .find(|t| t.kind() == SyntaxKind::IntLiteral)?;
-            crate::util::parse_int_literal_i64(tok.text())
-        }
-        SyntaxKind::EXPR_UNARY => {
-            let op = node
-                .children_with_tokens()
-                .filter_map(|el| el.into_token())
-                .find(|t| matches!(t.kind(), SyntaxKind::Minus | SyntaxKind::Plus))?;
-            let inner = node.children().next()?;
-            let v = eval_i64(&inner)?;
-            match op.kind() {
-                SyntaxKind::Minus => Some(-v),
-                _ => Some(v),
-            }
-        }
-        SyntaxKind::EXPR_PAREN => {
-            let inner = node.children().next()?;
-            eval_i64(&inner)
-        }
-        _ => None,
-    }
 }

@@ -34,7 +34,7 @@ use fsm_parser::ast::{self, AstNode};
 use fsm_parser::cst::{SyntaxKind, SyntaxNode};
 
 use crate::symbol_table::SymbolTable;
-use crate::util::parse_int_literal_i64;
+use crate::util::{file_const_table, parse_int_literal_i64};
 
 use super::ids::IdMinter;
 use super::loc::LocCtx;
@@ -142,7 +142,13 @@ fn lower_machine_inner<M: MachineLike>(
     let stable_id = machine
         .stable_id_text()
         .unwrap_or_else(|| format!("M:{name}"));
-    let mut ids = IdMinter::new(&name, m_idx);
+    // The ONE shared file-consts fold table (F-1 single source of truth).
+    // `ast_file` is the whole-file AST (consts are file-level, mirrored
+    // onto every machine — same convention as file-level externs/consts
+    // below); the timer-duration fold resolves `after CONST ms` against
+    // this exactly as `checks::timer` does, so check≡lower by construction.
+    let file_consts = file_const_table(ast_file);
+    let mut ids = IdMinter::new(&name, m_idx, file_consts);
     let locs = LocCtx::new(file, src);
 
     // Context fields.

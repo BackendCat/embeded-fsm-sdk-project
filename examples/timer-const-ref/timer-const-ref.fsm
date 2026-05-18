@@ -1,0 +1,50 @@
+language fsm 2.0
+
+// FW-F1 regression fixture — `const`-referenced timer durations.
+//
+// Finding F-1 (audit AUDIT_DETERMINISTIC_PRIMITIVE_COMPLETENESS_2026_05_18
+// §1.1): the lowerer's timer-duration const-fold omitted `EXPR_NAME_REF`,
+// so `after CONST ms` / `every CONST ms` — the Doc 02 §6 / Doc 04 §12
+// *mandated* idiom — was SILENTLY DROPPED from the IR (the whole timer
+// vanished; `fsm check` clean) while the bounds check (its divergent
+// second resolver) saw the const fine. The entire example/differential
+// CORPUS used integer-literal durations ONLY, so the FW110 5→12 broadening
+// structurally could not catch it (audit §1.1 corpus-blind-spot note).
+//
+// This fixture closes that blind spot PERMANENTLY: it uses a `const` for
+// BOTH a one-shot `after CONST ms` AND a periodic `every CONST ms`. Post
+// F-1 (the unified file-consts-aware resolver shared by lower≡check) it
+// lowers IDENTICALLY to the same machine written with the integer literal
+// — proven BYTE_EQUAL in the W1 differential. Any future regression that
+// re-breaks const-ref timer lowering makes this fixture RED in
+// `codegen_equivalence_smoke.rs`.
+
+feature timers
+
+extern tick()
+
+const STARTUP_MS = 5000
+const HEARTBEAT_MS = 1000
+
+machine ConstRefTimer {
+    events {
+        GO
+        STOP
+    }
+
+    initial Idle
+
+    state Idle {
+        on GO -> Warming
+    }
+
+    state Warming {
+        after STARTUP_MS ms -> Active
+        on STOP -> Idle
+    }
+
+    state Active {
+        every HEARTBEAT_MS ms : tick()
+        on STOP -> Idle
+    }
+}

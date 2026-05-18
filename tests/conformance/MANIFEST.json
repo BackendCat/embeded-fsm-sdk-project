@@ -226,6 +226,20 @@
           "tags": [
             "g7-code-lock"
           ]
+        },
+        {
+          "id": "VAL-NEG-009",
+          "kind": "negative",
+          "path": "validator/neg/009_runtime_variable_timer/",
+          "description": "Runtime/context-variable timer duration (`after ctx.deadline_ms ms`) is post-v1.0 (deferred) — FSM-E0411 hard error, the audit §2.3 rejecting diagnostic for the F-1 silent-timer-drop class (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0411"
+          ],
+          "tags": [
+            "g7-code-lock",
+            "timer"
+          ]
         }
       ]
     },

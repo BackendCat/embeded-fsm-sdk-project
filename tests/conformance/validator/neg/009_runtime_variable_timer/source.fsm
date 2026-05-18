@@ -1,0 +1,23 @@
+language fsm 2.0
+
+feature timers
+
+machine M {
+    context {
+        deadline_ms : u32 = 5000
+    }
+
+    events {
+        E
+    }
+
+    initial A
+
+    state A {
+        after ctx.deadline_ms ms -> B
+    }
+
+    state B {
+        on E -> A
+    }
+}
