@@ -1,0 +1,103 @@
+# Phase-6.0-W2 — the `on-target` CI lane (the discrete, reviewable,
+# self-contained unit W5 wires into `.github/workflows/ci.yml`).
+#
+# ─────────────────────────────────────────────────────────────────────────
+# WHAT THIS IS / THE W2 ↔ W5 BOUNDARY
+# ─────────────────────────────────────────────────────────────────────────
+# W2 (this wave) delivers the on-target MECHANISM + its lane DEFINITION as a
+# discrete artifact. W2 does **NOT** edit `.github/workflows/ci.yml` — W5 is
+# the dedicated ci.yml-integration wave that composes ALL lanes
+# (conformance / extension-host / coverage-rust / on-target) + `make
+# ci-local`, keeping the existing `build`(matrix)+`sca` jobs UNTOUCHED
+# (Doc 32 §1 W5 / §6 H6 / GT-1). This file is the on-target job block W5
+# pastes/`uses:` under `jobs:`. It is intentionally a standalone YAML
+# fragment (a job map), not a full workflow, so W5 composes it verbatim.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# DESIGN — the additive-isolated-job pattern (the proven `sca` precedent)
+# ─────────────────────────────────────────────────────────────────────────
+# - A DISTINCT job (`on-target`), `runs-on: ubuntu-latest`, that NEVER
+#   gates the 1.75 build matrix — exactly the `sca` job's
+#   additive-isolation rationale (Doc 32 §6 H4 / GT-1). The heavy
+#   `apt-get install` of `gcc-arm-none-eabi` + `qemu-system-arm` happens
+#   ONLY in this CI runner, NEVER on the dev box (Doc 32 §W2 deliverable
+#   (2) / GT-10 / OWNER-2: the box is disk-tight; the on-target lane is
+#   CI-runner-only by design).
+# - It runs the SAME `fsm-simulator` test binary the dev box runs. On the
+#   box the on-target test SKIPS-IF-ABSENT with an honest notice (the
+#   `gcc_compile.rs` precedent); HERE the toolchain IS installed, so the
+#   `on_target_qemu_trace_byte_equals_simulator_oracle_for_byte_equal_corpus`
+#   test is a HARD byte-differential: the QEMU `mps2-an385` target's
+#   emitted `FSM_TRACE` stream must byte-equal the shipped
+#   `fsm_simulator::execute_trace` oracle for every `BYTE_EQUAL` catalogue
+#   member (Doc 32 §W2 §5.4 + §2 — "qemu boots" is explicitly NOT
+#   acceptance; the *trace* must be byte-equal).
+# - The 1.75 pin is honoured from inside the repo (`rustup show
+#   active-toolchain` — the toolchain-probe-trap discipline, Doc 32 §6 H4 /
+#   GT-2). No `stable` is needed here (unlike `sca`); the on-target test is
+#   a normal `fsm-simulator` integration test on the pinned toolchain.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# THE KEYSTONE (Doc 32 §2 — the W6 phase-audit re-derives this from source)
+# ─────────────────────────────────────────────────────────────────────────
+# This lane adds the runner toolchain + the test invocation but **NOT a
+# second oracle**. The comparison oracle stays the shipped
+# `fsm_simulator::execute_trace`; the C is the UNMODIFIED codegen
+# `FSM_TRACE` hook (its `__attribute__((weak)) fsm_trace_emit` is
+# overridden by the harness's strong semihosting `fsm_trace_emit` with ZERO
+# codegen change). No step / transition-selection / guard-eval / deadlock
+# semantics is defined in this YAML, the harness C (`crates/fsm-simulator/
+# tests/on-target/*`), or the host test. The W6 audit negative-greps all
+# three (∅ on non-comment lines) and re-runs the differential.
+
+# ── The job block (W5 composes this under `jobs:` in ci.yml) ────────────
+on-target:
+  name: on-target / QEMU mps2-an385 trace differential
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+
+    # The ONLY place the ARM cross-toolchain + QEMU are installed — the CI
+    # runner, NEVER the dev box (Doc 32 §W2 deliverable (2) / GT-10 /
+    # OWNER-2). `gcc-arm-none-eabi` = arm-none-eabi-gcc (the cross
+    # compiler/linker); `qemu-system-arm` = the `-M mps2-an385` Cortex-M3
+    # emulator with semihosting. Both are stock Ubuntu apt packages (the
+    # canonical embedded-CI pattern; Doc 32 §1 W2 emulator-decision (b)).
+    - name: Install the ARM cross-toolchain + QEMU (CI-runner-only)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          gcc-arm-none-eabi qemu-system-arm
+
+    # Sanity: both tools resolve (so a packaging change fails here with a
+    # clear message, not an opaque skip — the on-target test would
+    # otherwise silently skip-if-absent and the lane would be a no-op).
+    - name: Verify the on-target toolchain is present
+      run: |
+        arm-none-eabi-gcc --version
+        qemu-system-arm --version
+
+    # rust-toolchain.toml pins the channel + components; assert from inside
+    # the repo (the probe-trap discipline — a bare `rustc` would read the
+    # box-default stable, a benign artifact, NOT pin drift; Doc 32 §6 H4).
+    - name: Install Rust toolchain (the pinned 1.75)
+      run: rustup show active-toolchain || rustup toolchain install
+
+    - name: Cache cargo registry and target/
+      uses: Swatinem/rust-cache@v2
+
+    # The HARD on-target differential. With the toolchain installed the
+    # skip-if-absent gate is NOT taken — this is the real QEMU byte-diff
+    # vs the shipped `fsm_simulator::execute_trace` oracle for every
+    # `BYTE_EQUAL` catalogue member (Doc 32 §W2 §5.4 + §2). `--nocapture`
+    # surfaces the per-fixture BYTE-EQUAL ✓ / precise first-divergence
+    # report in the CI log. The keystone/contract guards
+    # (`oracle_is_the_shipped_execute_trace_seam_not_a_fork`,
+    # `projection_shape_matches_w1_canonical_form`,
+    # `byte_equal_corpus_matches_w1_catalogue`,
+    # `on_target_harness_artifacts_present`) run in the same binary.
+    - name: on-target QEMU mps2-an385 trace differential (HARD in CI)
+      run: >
+        cargo test -p fsm-simulator
+        --test on_target_qemu_differential
+        -- --nocapture
