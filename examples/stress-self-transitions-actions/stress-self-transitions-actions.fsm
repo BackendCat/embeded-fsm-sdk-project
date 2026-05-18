@@ -1,0 +1,71 @@
+language fsm 2.0
+
+// FW110-FU-C VACUITY-CLOSING fixture — the actions-bearing twin of
+// `stress-self-transitions`.
+//
+// Identical in SHAPE to `stress-self-transitions` (a composite `Box` with
+// two SIBLING inner leaves `Inner1`/`Inner2`, the same INTERNAL /
+// EXTERNAL-SELF / LOCAL trigger set) but every state declares `entry:` /
+// `exit:` ACTIONS. The base `stress-self-transitions` fixture has NO
+// entry/exit actions, so the FW110-FU-C local-LCA defect is invisible to
+// the quiescent-config behavioural-equivalence proof (it converges only
+// VACUOUSLY). This twin makes the defect BEHAVIOURALLY observable:
+//
+//   On `REENTER` (`Inner1 ~> Inner2`, siblings in `Box`) the pre-fix
+//   codegen emitted `<M>_entry_Box(m); <M>_entry_Inner2(m);` and NO
+//   `<M>_exit_Inner1(m)` — it RE-RAN the containing composite's entry
+//   action and SKIPPED the source leaf's exit action. With actions
+//   declared here, that is `box_entered()` wrongly re-invoked +
+//   `inner1_exited()` wrongly skipped — a real production side-effect bug.
+//   The shipped simulator (the unforked oracle) correctly does
+//   `ext=Inner1, ent=Inner2` and never re-enters `Box`.
+//
+// Post-FW110-FU-C this fixture is BYTE_EQUAL vs the shipped oracle: the
+// differential's `ent`/`ext` STATE-set projection asserts `ent={Inner2}`
+// `ext={Inner1}` on `REENTER` (NOT `ent={Box,Inner2} ext={}`), proving
+// `entry_Box` is NOT re-run and `exit_Inner1` IS run. THIS is the test
+// that actually exercises the bug — the audit explicitly requires it.
+
+extern note_ping()
+extern box_entered()
+extern box_exited()
+extern inner1_entered()
+extern inner1_exited()
+extern inner2_entered()
+extern inner2_exited()
+
+machine SelfTA {
+    events {
+        PING
+        CYCLE
+        REENTER
+        NEXT
+    }
+
+    initial Box
+
+    state Box {
+        entry : box_entered()
+        exit  : box_exited()
+
+        initial Inner1
+
+        on PING : note_ping()
+
+        state Inner1 {
+            entry : inner1_entered()
+            exit  : inner1_exited()
+
+            on CYCLE -> Inner1
+            on NEXT -> Inner2
+            on REENTER ~> Inner2
+        }
+
+        state Inner2 {
+            entry : inner2_entered()
+            exit  : inner2_exited()
+
+            on NEXT -> Inner1
+        }
+    }
+}

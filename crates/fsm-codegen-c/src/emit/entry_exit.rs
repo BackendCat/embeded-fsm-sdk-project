@@ -13,8 +13,51 @@
 //!
 //! Codegen emits an inline sequence of `Motor_exit_X(m); ...; m->_state = T;
 //! Motor_entry_T(m);` lines that walks the exit set leaf-first and the
-//! entry set root-first. For `Local` and `Internal` transitions the sets
-//! are empty (or empty on the source side); the LCA is the source itself.
+//! entry set root-first.
+//!
+//! ## Transition-kind LCA semantics (Doc 00 §7.7 B-09 / Doc 08 §5.1, §6.1)
+//!
+//! `effective_lca` is the SHARED transition-LCA algorithm consumed by every
+//! kind. Per the authoritative reconciliation (Doc 00 §7.7 B-09, mirrored
+//! verbatim by the unforked `fsm_ir::effective_lca` the shipped
+//! `fsm_simulator` uses) it is `lca_inclusive(source, target)` with **one**
+//! exception: an `External` self-transition (`source == target`) lifts to
+//! `parent(source)` so the leaf still exits + re-enters. There is **no**
+//! `Local`/`Internal` LCA special-case — the B-09 table's
+//! `Local (~>): LCA(S,S) = S` row is the *self* case, which falls straight
+//! out of `lca_inclusive(S, S) = S` (S is its own ancestor); a *non-self*
+//! local transition uses the genuine common ancestor exactly like every
+//! other kind. The exit/entry walk then naturally yields the correct set
+//! for BOTH a within-subtree local (`Outer ~> Inner`, Inner a descendant of
+//! Outer: LCA = Outer ⇒ source not exited, only Outer→Inner entered) and a
+//! sibling/cousin local (`Inner1 ~> Inner2`: LCA = the common composite ⇒
+//! exit the source leaf-chain, enter the target leaf-chain, the common
+//! composite NOT re-entered). This is leaf-symmetric and byte-identical in
+//! observable behaviour to the shipped simulator's `effective_lca` /
+//! `exit_set` / `entry_path` for every kind (the carriers differ only in
+//! whether *region* ids appear in the chain — both stop at the LCA and emit
+//! STATE ids only, so the externally-observable exit/entry STATE sequences
+//! agree by construction).
+//!
+//! `Internal` keeps a no-exit / no-entry contract, but enforced where the
+//! shipped simulator enforces it — `execute_one_transition`'s Internal
+//! early-return, mirrored by the `Internal` short-circuits in `exit_path` /
+//! `entry_path` below — NOT by collapsing the LCA (an Internal transition
+//! never moves state, so its LCA value is unobservable anyway).
+//!
+//! ### FW110-FU-C judgment call — the sibling-local fixture vs `FSM-E0110`
+//!
+//! Doc 04 §8.3 states a local (`~>`) target MUST be a *proper descendant* of
+//! the source (`FSM-E0110` otherwise). That validation is **unimplemented**
+//! (a phantom code in Doc 10; no analyzer enforcement) and is an
+//! analyzer-side concern explicitly out of this codegen wave's scope. The
+//! shipped `fsm_simulator` (the unforked differential oracle) does NOT gate
+//! on E0110 either — it lowers a sibling-targeted local via the genuine LCA
+//! above. The defined behaviour the differential measures against is
+//! therefore the genuine-LCA lowering; converging codegen onto it (rather
+//! than rejecting the corpus fixture) is the correct, well-defined fix here.
+//! Even if E0110 were enforced, the only legal local would be the
+//! within-subtree case — for which this same algorithm is also correct.
 
 use fsm_ir::{ParentResolver, TransitionKind, TransitionObject};
 
@@ -44,15 +87,27 @@ impl ParentResolver for ParentTable {
     }
 }
 
-/// Compute the effective LCA index for a transition, per B-09.
+/// Compute the effective LCA index for a transition, per Doc 00 §7.7 B-09.
 ///
-/// NOTE: codegen carries two extra kind rules the analyzer/simulator
-/// `effective_lca` do not model — `Local`/`Internal` collapse the LCA to
-/// `source` (their exit/entry sets are empty by construction in
-/// `exit_path`/`entry_path`). The shared [`fsm_ir::effective_lca`] only
-/// encodes the universal external-self lift, so codegen keeps this thin
-/// wrapper around the shared base walk rather than delegating wholesale —
-/// preserving the exact prior behaviour.
+/// `effective_lca = lca_inclusive(source, target)`, with the SOLE kind
+/// exception being an `External` self-transition lifting to `parent(source)`
+/// (so the leaf still fires exit + re-entry — UML 2.5.1 §14.2.3.9.6). This
+/// is the shared transition-LCA algorithm for EVERY kind and is identical to
+/// the authoritative Doc 00 §7.7 B-09 encoding and the unforked
+/// [`fsm_ir::effective_lca`] the shipped `fsm_simulator` consumes (the
+/// `String` simulator carrier and this `u8` codegen carrier differ only in
+/// whether region ids appear in the parent chain — the LCA *index* and the
+/// resulting exit/entry STATE sequences are observably identical).
+///
+/// FW110-FU-C: the prior `Local | Internal => source` collapse was WRONG for
+/// a non-self local transition whose target is a sibling/cousin (it re-ran
+/// the common composite's entry action and skipped the source leaf's exit
+/// action). `Local` now uses the genuine common ancestor exactly like every
+/// other kind; `Internal`'s no-exit/no-entry contract is enforced (as the
+/// simulator does) by the `Internal` early-return in `exit_path`/`entry_path`
+/// below, NOT by collapsing the unobservable LCA of a state-preserving
+/// transition. See this module's doc comment for the full re-derivation and
+/// the within-subtree-vs-sibling discriminator.
 pub fn effective_lca(t: &TransitionObject, index: &StateIndex, parents: &ParentTable) -> u8 {
     let source = index.must_lookup(&t.source);
     let target = index.must_lookup(&t.target);
@@ -60,7 +115,6 @@ pub fn effective_lca(t: &TransitionObject, index: &StateIndex, parents: &ParentT
 
     match t.kind {
         TransitionKind::External if source == target => parents.parents[source as usize],
-        TransitionKind::Local | TransitionKind::Internal => source,
         _ => base,
     }
 }
@@ -82,20 +136,21 @@ pub fn exit_path(t: &TransitionObject, index: &StateIndex, parents: &ParentTable
     let lca = effective_lca(t, index, parents);
     let mut path = Vec::new();
 
-    // For an internal transition there is no exit at all.
+    // For an internal transition there is no exit at all — mirrors the
+    // shipped `fsm_simulator::execute_one_transition` Internal early-return.
     if matches!(t.kind, TransitionKind::Internal) {
         return path;
     }
-    // For a local transition the source is NOT exited; only its descendants
-    // along the path to the target are. v1.0 codegen treats local self
-    // transitions as no-op exit; nested local transitions inherit the
-    // descendant-only invariant from B-09.
-    if matches!(t.kind, TransitionKind::Local) {
-        return path;
-    }
 
-    // External transition: walk source upward until we hit (but do NOT
-    // include) the effective LCA.
+    // Every other kind (External / Local / Completion / pseudostate): walk
+    // the source upward until we hit (but do NOT include) the effective LCA.
+    // For a within-subtree local (`Outer ~> Inner`) the effective LCA *is*
+    // the source, so this loop runs zero times and the source is correctly
+    // NOT exited (the descendant-only invariant — B-09 / Doc 08 §6.1 — falls
+    // out of the genuine LCA, no Local special-case needed). For a
+    // sibling/cousin local the LCA is the common composite, so the source
+    // leaf-chain up to (excluding) that composite IS exited — byte-identical
+    // to the shipped simulator's `exit_set(source, effective_lca)`.
     let mut cur = source;
     while cur != lca && cur != ROOT_SENTINEL {
         path.push(cur);
@@ -109,12 +164,18 @@ pub fn entry_path(t: &TransitionObject, index: &StateIndex, parents: &ParentTabl
     let target = index.must_lookup(&t.target);
     let lca = effective_lca(t, index, parents);
 
-    // Internal transitions never enter anything.
+    // Internal transitions never enter anything — mirrors the shipped
+    // `fsm_simulator::execute_one_transition` Internal early-return.
     if matches!(t.kind, TransitionKind::Internal) {
         return Vec::new();
     }
-    // Local transitions enter from (but not including) the LCA down to the
-    // target.
+    // Every other kind: walk the target upward to (but NOT including) the
+    // effective LCA, then reverse to root-first. For a within-subtree local
+    // (`Outer ~> Inner`) the LCA is `Outer`, so this yields exactly
+    // `[Inner]` — `Outer` is NOT re-entered. For a sibling/cousin local the
+    // LCA is the common composite, so only the target leaf-chain is entered
+    // and the common composite is NOT re-entered — byte-identical to the
+    // shipped simulator's `entry_path(effective_lca, target)`.
     let mut chain = Vec::new();
     let mut cur = target;
     while cur != lca && cur != ROOT_SENTINEL {
@@ -351,5 +412,179 @@ mod tests {
         let faulted = index.lookup("s-faulted").unwrap();
         assert_eq!(exits, vec![running, op]);
         assert_eq!(entry_path(&tt, &index, &parents), vec![faulted]);
+    }
+
+    /// Topology mirroring the `stress-self-transitions` corpus fixture:
+    /// `root → Box(composite) → {Inner1, Inner2}` (two SIBLING leaves inside
+    /// one composite). The FW110-FU-C regression vehicle.
+    fn box_two_inner_index() -> (
+        crate::state_index::StateIndex,
+        crate::parent_table::ParentTable,
+    ) {
+        let inner1 = StateNode::Simple(SimpleState {
+            id: "s-inner1".into(),
+            stable_id: "M:Inner1".into(),
+            name: "Inner1".into(),
+            entry: vec![],
+            exit: vec![],
+            transitions: vec![],
+            timers: vec![],
+            defers: vec![],
+            loc: loc(),
+        });
+        let inner2 = StateNode::Simple(SimpleState {
+            id: "s-inner2".into(),
+            stable_id: "M:Inner2".into(),
+            name: "Inner2".into(),
+            entry: vec![],
+            exit: vec![],
+            transitions: vec![],
+            timers: vec![],
+            defers: vec![],
+            loc: loc(),
+        });
+        let m = MachineObject {
+            id: "m".into(),
+            stable_id: "M".into(),
+            name: "M".into(),
+            context: ContextSchema::default(),
+            events: vec![],
+            externs: vec![],
+            root: RegionObject {
+                id: "r-root".into(),
+                stable_id: None,
+                name: "__root".into(),
+                initial: "ps-init".into(),
+                states: vec![
+                    StateNode::Initial(InitialPseudo {
+                        id: "ps-init".into(),
+                        target: "s-box".into(),
+                        loc: loc(),
+                    }),
+                    StateNode::Composite(CompositeState {
+                        id: "s-box".into(),
+                        stable_id: "M:Box".into(),
+                        name: "Box".into(),
+                        entry: vec![],
+                        exit: vec![],
+                        transitions: vec![],
+                        timers: vec![],
+                        defers: vec![],
+                        regions: vec![RegionObject {
+                            id: "r-box".into(),
+                            stable_id: None,
+                            name: "Box".into(),
+                            initial: "ps-box-init".into(),
+                            states: vec![
+                                StateNode::Initial(InitialPseudo {
+                                    id: "ps-box-init".into(),
+                                    target: "s-inner1".into(),
+                                    loc: loc(),
+                                }),
+                                inner1,
+                                inner2,
+                            ],
+                            priority: 0,
+                            loc: loc(),
+                        }],
+                        history: None,
+                        loc: loc(),
+                    }),
+                ],
+                priority: 0,
+                loc: loc(),
+            },
+            submachines: vec![],
+            consts: vec![],
+            imports: vec![],
+            features: vec![],
+            queue: QueueConfig::default(),
+            targets: vec![],
+            loc: loc(),
+        };
+        let index = crate::state_index::build_state_index(&m).expect("build_state_index");
+        let parents = crate::parent_table::build_parent_table(&index);
+        (index, parents)
+    }
+
+    /// FW110-FU-C — the core regression. A SIBLING-targeted local transition
+    /// (`Inner1 ~> Inner2`, both inside composite `Box`) MUST exit the
+    /// source leaf `Inner1`, enter the target leaf `Inner2`, and MUST NOT
+    /// re-enter (or exit) the common composite `Box`. The prior
+    /// `Local => source` LCA collapse produced LCA=Inner1, an empty exit
+    /// set (skipping `exit_Inner1`) and an entry path that walked PAST `Box`
+    /// (wrongly re-running `entry_Box`). Now LCA = the genuine common
+    /// ancestor (`Box`'s index — regions are collapsed in the codegen `u8`
+    /// carrier) so the sets are leaf-symmetric and `Box` is excluded from
+    /// both — byte-identical to the shipped simulator.
+    #[test]
+    fn sibling_local_exits_source_leaf_enters_target_leaf_not_composite() {
+        let (index, parents) = box_two_inner_index();
+        let tt = t("s-inner1", "s-inner2", TransitionKind::Local);
+        let box_idx = index.lookup("s-box").unwrap();
+        let inner1 = index.lookup("s-inner1").unwrap();
+        let inner2 = index.lookup("s-inner2").unwrap();
+
+        // Genuine common ancestor — NOT the source (the FW110-FU-C fix).
+        assert_eq!(
+            effective_lca(&tt, &index, &parents),
+            box_idx,
+            "sibling-local effective_lca must be the common composite, not the source"
+        );
+        // Source leaf IS exited (the prior bug skipped this entirely).
+        assert_eq!(
+            exit_path(&tt, &index, &parents),
+            vec![inner1],
+            "sibling-local must exit exactly the source leaf — Box NOT exited"
+        );
+        // Only the target leaf is entered — Box is NOT re-entered (the prior
+        // bug walked past Box and wrongly included it).
+        assert_eq!(
+            entry_path(&tt, &index, &parents),
+            vec![inner2],
+            "sibling-local must enter exactly the target leaf — Box NOT re-entered"
+        );
+        assert!(
+            !exit_path(&tt, &index, &parents).contains(&box_idx)
+                && !entry_path(&tt, &index, &parents).contains(&box_idx),
+            "the common composite must never appear in either set for a sibling-local"
+        );
+    }
+
+    /// FW110-FU-C — the within-subtree local must STILL not exit the source
+    /// (the descendant-only invariant, B-09 / Doc 08 §6.1). `Box ~> Inner2`
+    /// (Inner2 a descendant of Box): LCA = Box ⇒ empty exit (Box not
+    /// exited), entry = `[Inner2]` only (Box not re-entered). Proves the fix
+    /// did not regress the case the old collapse handled.
+    #[test]
+    fn within_subtree_local_does_not_exit_source() {
+        let (index, parents) = box_two_inner_index();
+        let tt = t("s-box", "s-inner2", TransitionKind::Local);
+        let box_idx = index.lookup("s-box").unwrap();
+        let inner2 = index.lookup("s-inner2").unwrap();
+        assert_eq!(effective_lca(&tt, &index, &parents), box_idx);
+        assert_eq!(
+            exit_path(&tt, &index, &parents),
+            Vec::<u8>::new(),
+            "within-subtree local must NOT exit the source composite"
+        );
+        assert_eq!(
+            entry_path(&tt, &index, &parents),
+            vec![inner2],
+            "within-subtree local enters only the path below the source, source NOT re-entered"
+        );
+    }
+
+    /// FW110-FU-C guard — `Internal` keeps the no-exit / no-entry contract
+    /// even though its LCA is no longer collapsed (it is now the genuine
+    /// `lca_inclusive`, which is unobservable for a state-preserving
+    /// transition — the contract is enforced by the `Internal`
+    /// short-circuits, exactly as the shipped simulator does).
+    #[test]
+    fn internal_non_self_still_has_no_entry_or_exit() {
+        let (index, parents) = box_two_inner_index();
+        let tt = t("s-inner1", "s-inner2", TransitionKind::Internal);
+        assert!(exit_path(&tt, &index, &parents).is_empty());
+        assert!(entry_path(&tt, &index, &parents).is_empty());
     }
 }

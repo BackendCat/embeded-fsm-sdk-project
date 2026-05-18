@@ -134,6 +134,18 @@ const SEP: char = '\u{1f}';
 ///                                    `after` was covered).
 ///   • `stress-self-transitions`    — internal vs external-self vs local
 ///                                    entry/exit-set distinctions.
+///                                    BYTE_EQUAL since FW110-FU-C (the
+///                                    sibling-local LCA fix landed; was
+///                                    KNOWN_DIVERGENT — see the BYTE_EQUAL
+///                                    catalogue note).
+///   • `stress-self-transitions-actions` — FW110-FU-C VACUITY-CLOSING twin
+///                                    of `stress-self-transitions` WITH
+///                                    entry/exit actions on Box/Inner1/
+///                                    Inner2, so the sibling-local defect is
+///                                    BEHAVIOURALLY observable (not vacuous
+///                                    w.r.t. the quiescent config). The test
+///                                    that actually exercises the bug.
+///                                    BYTE_EQUAL post-FW110-FU-C.
 ///   • `stress-choice-guard-payload`— `choice` pseudostate routed by a
 ///                                    payload-derived context guard.
 ///   • `stress-completion-chain`    — a 2-level cascading `done ->`
@@ -153,6 +165,7 @@ const CORPUS: &[&str] = &[
     "stress-deep-history",
     "stress-every-timer",
     "stress-self-transitions",
+    "stress-self-transitions-actions",
     "stress-choice-guard-payload",
     "stress-completion-chain",
     "stress-parallel-cross-exit",
@@ -985,12 +998,52 @@ fn run_differential(example: &str) -> Result<(), String> {
 ///      separable, NOT exercised by this single-region fixture; the
 ///      anti-scope-creep discipline (a dedicated follow-up wave recommended
 ///      if/when a parallel-region-history fixture is added).
+///
+/// **FW110-FU-C addition — `stress-self-transitions` (MOVED from
+/// KNOWN_DIVERGENT) + `stress-self-transitions-actions` (NEW).** The
+/// sibling-targeted local (`~>`) transition LCA / entry-exit lowering was
+/// WRONG: `emit/entry_exit.rs::effective_lca` collapsed `Local`→`source`
+/// unconditionally, so for `Inner1 ~> Inner2` (siblings in composite `Box`)
+/// the generated C emitted `<M>_entry_Box(m); <M>_entry_Inner2(m);` with NO
+/// `<M>_exit_Inner1(m)` — it RE-RAN the containing composite's entry action
+/// and SKIPPED the source leaf's exit action (a PRODUCTION side-effect bug,
+/// NOT a record-model artifact). The fix re-derives `effective_lca` against
+/// the authoritative Doc 00 §7.7 B-09 encoding / the unforked
+/// `fsm_ir::effective_lca` the shipped simulator consumes: the genuine
+/// `lca_inclusive(source, target)` for EVERY kind, the SOLE exception being
+/// the `External` self-transition parent-lift. `Local`'s correct exit/entry
+/// set then falls out of the genuine LCA for BOTH a within-subtree local
+/// (LCA = source ⇒ source not exited — the descendant-only invariant) and a
+/// sibling/cousin local (LCA = the common composite ⇒ leaf-symmetric: source
+/// leaf-chain exits, target leaf-chain enters, the common composite NOT
+/// re-entered); `Internal`'s no-exit/no-entry contract is enforced by the
+/// `Internal` short-circuits in `exit_path`/`entry_path` exactly as the
+/// shipped `fsm_simulator::execute_one_transition` does. The production C
+/// for `REENTER` is now `<M>_exit_Inner1(m); … <M>_entry_Inner2(m);` (NO
+/// `entry_Box` re-run) — byte-identical to the shipped oracle's
+/// `ext=Inner1, ent=Inner2`. **Why two fixtures:** base
+/// `stress-self-transitions` has NO entry/exit *actions*, so the defect was
+/// invisible to the quiescent-config behavioural proof (it converged only
+/// VACUOUSLY — exactly why it was NOT JUSTIFIED-classifiable). The new
+/// `stress-self-transitions-actions` is its action-bearing twin (every
+/// state declares `entry:`/`exit:` externs), so the byte-diff `ent`/`ext`
+/// STATE-set projection asserts the corrected sets are byte-equal — THE
+/// test that actually exercises the bug (audit-required, the
+/// vacuity-closing proof). Both are BYTE_EQUAL post-FW110-FU-C. The change
+/// is in the SHARED transition-LCA algorithm; the mandatory `#ifndef
+/// FSM_TRACE` byte-identity proof for every other currently-green fixture
+/// (motor / deferred / traffic-light / parallel-cross-exit / deep-history,
+/// and the JUSTIFIED set) is in the completion report — zero production-C
+/// delta on any of them (only the two self-transition fixtures' production C
+/// changes, which IS the fix).
 const BYTE_EQUAL: &[&str] = &[
     "motor",
     "deferred",
     "traffic-light",
     "stress-parallel-cross-exit",
     "stress-deep-history",
+    "stress-self-transitions",
+    "stress-self-transitions-actions",
 ];
 
 /// Corpus members whose byte-diff (correctly) REDs because the two engines
@@ -1193,29 +1246,18 @@ const BEHAVIOURALLY_EQUIVALENT_JUSTIFIED: &[&str] =
 ///     subsystem (analyzer), out of the codegen-side scope this wave was
 ///     chartered for.
 ///
-///   • **`stress-self-transitions`** — LOCAL (`~>`) transition LCA / entry-
-///     exit lowering is WRONG when the local transition's target is a
-///     SIBLING (not a descendant) of the source. PROVEN production
-///     divergence (NOT a record-model artifact): on `REENTER` (`Inner1 ~>
-///     Inner2`, siblings in composite `Box`) the generated C emits
-///     `<M>_entry_Box(m); <M>_entry_Inner2(m);` and NO `<M>_exit_Inner1(m)`
-///     — it **re-runs the containing composite's ENTRY ACTION** and **skips
-///     the source leaf's EXIT ACTION** (`SelfT.c` `case
-///     SELFT_EVENT_REENTER`). The shipped simulator correctly does
-///     `ext=Inner1, ent=Inner2` and never re-enters `Box`. ROOT CAUSE:
-///     `emit/entry_exit.rs::effective_lca` collapses `Local`→`source`
-///     unconditionally; correct only when the target is within the source
-///     subtree — for a sibling-targeted local transition the LCA must be
-///     the common ancestor and the entry/exit sets must be leaf-symmetric
-///     (the codegen's own comment concedes "v1.0 codegen treats local self
-///     transitions as no-op exit; nested local transitions inherit …").
-///     The quiescent config converges ONLY because this fixture has no
-///     entry/exit *actions* (the convergence is VACUOUS w.r.t. the bug — a
-///     `Box`/`Inner1` with entry/exit actions WOULD observably diverge), so
-///     it is NOT classifiable as JUSTIFIED (the NEVER-GAME razor). A
-///     transition-LCA-algorithm fix touching all transition kinds — NOT a
-///     safe inline change without a full re-derivation. **RECOMMENDED
-///     DEDICATED FIX-WAVE** (spec in the audit doc).
+///   • **`stress-self-transitions`** — RESOLVED by FW110-FU-C → MOVED to
+///     BYTE_EQUAL (the sibling-targeted local-LCA defect is fixed:
+///     `emit/entry_exit.rs::effective_lca` no longer collapses
+///     `Local`→`source`; it is now the genuine `lca_inclusive(source,
+///     target)` for every kind per Doc 00 §7.7 B-09 / the unforked
+///     `fsm_ir::effective_lca`, with only the `External` self parent-lift.
+///     `REENTER` (`Inner1 ~> Inner2`) now emits `<M>_exit_Inner1(m); …
+///     <M>_entry_Inner2(m);` with NO `entry_Box` re-run — byte-identical to
+///     the shipped oracle's `ext=Inner1, ent=Inner2`). The audit-required
+///     vacuity-closing twin `stress-self-transitions-actions` (entry/exit
+///     actions on Box/Inner1/Inner2) is ALSO BYTE_EQUAL — it is the test
+///     that actually exercises the bug. See the BYTE_EQUAL catalogue note.
 ///
 ///   • **`stress-every-timer`** — PERIODIC (`every N ms`) timer fires one
 ///     too FEW times across a multi-period `advance_clock`. PROVEN
@@ -1238,8 +1280,10 @@ const BEHAVIOURALLY_EQUIVALENT_JUSTIFIED: &[&str] =
 const KNOWN_DIVERGENT: &[&str] = &[
     // `stress-deep-history` RESOLVED by FW110-FU-B → moved to BYTE_EQUAL
     // (deep_history restore implemented; see the BYTE_EQUAL note).
+    // `stress-self-transitions` RESOLVED by FW110-FU-C → moved to BYTE_EQUAL
+    // (+ its vacuity-closing twin `stress-self-transitions-actions` NEW in
+    // BYTE_EQUAL; the sibling-local LCA fix landed — see the BYTE_EQUAL note).
     "stress-choice-guard-payload",
-    "stress-self-transitions",
     "stress-every-timer",
 ];
 
@@ -1261,21 +1305,25 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
     // (the FW109 self-consistency requirement). No fixture may appear in
     // two buckets; none may be missing.
     //
-    // Post-FW110-FU-B exact honest distribution (asserted dynamically below
+    // Post-FW110-FU-C exact honest distribution (asserted dynamically below
     // — this comment is the human-readable record, the verify-the-record
     // discipline applied to the catalogue's own arithmetic):
-    //   BYTE_EQUAL                          = 5  (motor, deferred,
+    //   BYTE_EQUAL                          = 7  (motor, deferred,
     //       traffic-light, stress-parallel-cross-exit, stress-deep-history
-    //       — the last MOVED here by FW110-FU-B: `deep_history` restore now
-    //       byte-identical to the unforked oracle)
+    //       [MOVED by FW110-FU-B], stress-self-transitions [MOVED by
+    //       FW110-FU-C: sibling-local LCA fixed], stress-self-transitions-
+    //       actions [NEW in FW110-FU-C: the audit-required vacuity-closing
+    //       twin — entry/exit actions make the local-LCA bug behaviourally
+    //       observable; byte-equal proves entry_Box NOT re-run + exit_Inner1
+    //       run])
     //   BEHAVIOURALLY_EQUIVALENT_JUSTIFIED  = 3  (vending-machine,
     //       submachine, stress-completion-chain — record-model differs,
     //       observable behaviour proven identical)
-    //   KNOWN_DIVERGENT                     = 3  (stress-choice-guard-payload,
-    //       stress-self-transitions, stress-every-timer — real shipped-
-    //       codegen defects, each with a recommended dedicated fix-wave)
+    //   KNOWN_DIVERGENT                     = 2  (stress-choice-guard-payload,
+    //       stress-every-timer — real shipped-codegen defects, each with a
+    //       recommended dedicated fix-wave)
     //   ──────────────────────────────────────────────────────────────────
-    //   SUM                                 = 11 == CORPUS.len()
+    //   SUM                                 = 12 == CORPUS.len()
     {
         let mut all: Vec<&str> = BYTE_EQUAL
             .iter()

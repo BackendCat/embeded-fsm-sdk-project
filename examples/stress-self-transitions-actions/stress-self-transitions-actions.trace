@@ -1,0 +1,13 @@
+{
+  "machineFile": "stress-self-transitions-actions.fsm",
+  "description": "FW110-FU-C VACUITY-CLOSING twin of stress-self-transitions, WITH entry/exit actions on Box/Inner1/Inner2. Same drive: PING (internal on Box), CYCLE (external self on leaf Inner1 — ext==ent=={Inner1}, fires inner1_exited+inner1_entered, Box untouched), NEXT (Inner1->Inner2), NEXT (Inner2->Inner1), REENTER (local ~> Inner2 — SIBLING target: ext={Inner1} ent={Inner2}, Box NOT re-entered: inner1_exited + inner2_entered, NO box_entered/box_exited re-run). Pre-FW110-FU-C the codegen wrongly emitted entry_Box re-run + skipped exit_Inner1 on REENTER; the differential's ent/ext STATE-set projection now asserts the correct sets byte-equal — the test that actually exercises the bug (audit-required). `expected` intentionally empty — the harness drives the LIVE shipped simulator oracle.",
+  "init": { "machineName": "SelfTA" },
+  "steps": [
+    { "action": "dispatch", "event": "PING" },
+    { "action": "dispatch", "event": "CYCLE" },
+    { "action": "dispatch", "event": "NEXT" },
+    { "action": "dispatch", "event": "NEXT" },
+    { "action": "dispatch", "event": "REENTER" }
+  ],
+  "expected": []
+}
