@@ -464,3 +464,31 @@ guards.
 `CARGO_TARGET_DIR=/root/dev/embeded-fsm-sdk-target` kept warm throughout
 (no `cargo clean` needed; no other project's `target/` touched). No disk
 constraint encountered.
+
+---
+
+## Errata — 2026-05-18 (post-FW110-FU-A; appended; original §Stream-1 preserved as frozen evidence)
+
+**FW110-FU-A root-cause attribution corrected.** §Stream-1 FW110-FU-A above
+attributes the `choice`/`junction` divergence to *codegen only* ("NO `emit/`
+site lowers the runtime guard-chain resolution; the shipped `resolve_target`
+implements it fully"). The FW110-FU-A implementation wave (merged `de10291`)
+verified that premise against actual code and found it **incomplete**: the
+codegen gap is real and is now fixed (new `emit/pseudostate.rs` mirroring
+`resolve_target`), but the *governing* root cause is upstream in
+**`fsm-analyzer` `lower_choice`/`lower_junction`**
+(`crates/fsm-analyzer/src/lower/state.rs` ≈329-373) — every branch is lowered
+with `guard: GuardExpr::Else, actions: Vec::new()` and the branch target is
+left as the raw DSL name (never resolved via `IdMinter::state_target_id`).
+Consequently **both** engines receive garbage IR and the *shipped simulator
+itself* emits `sim=[]`, so `resolve_target` is **not a usable oracle** for
+this fixture until the analyzer is fixed. FU-A therefore — correctly, per the
+never-game razor — did **not** move `stress-choice-guard-payload` out of
+`KNOWN_DIVERGENT`; it landed only the proven-correct codegen half and
+recommended the analyzer-side follow-up **FW110-FU-A2** (tracker #119). The
+fixture's `BYTE_EQUAL` move is FU-A2's acceptance gate (FU-A's reverted,
+validation-only experiment already proved byte-equality across all 7 records
+and all 3 guard arms once the analyzer lands). This errata is the
+audit-integrity reconciliation — the verify-status-claims-vs-code discipline
+applied to an audit's *own* root-cause attribution; the original finding text
+above is intentionally preserved unaltered.
