@@ -26,6 +26,7 @@ pub mod header;
 pub mod history;
 pub mod impl_header;
 pub mod license;
+pub mod pseudostate;
 pub mod queue;
 pub mod source;
 pub mod submachine;

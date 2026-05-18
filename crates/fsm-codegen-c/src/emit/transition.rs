@@ -377,12 +377,43 @@ pub fn emit_transition_body(
             None
         };
 
+    // FW110-FU-A: is the transition target a `choice` / `junction`
+    // pseudostate? Like the History case above, the prior codegen wrote
+    // `_active[slot] = STATE_<CHOICE>` (a pseudo-state, never a resting
+    // config) and never resolved the guard chain — the machine rested on
+    // the choice forever (the FW110 differential's `[DIFF] sim=[]
+    // gen=[s-Router-Decide]`). When set, the static slot-write (step 3) and
+    // the static `entry_path` loop + `emit_initial_expansion_for_target`
+    // (step 4) are SUPPRESSED exactly as they are for a history target;
+    // `super::pseudostate::emit_choice_resolution` instead emits the runtime
+    // guard chain mirroring the shipped `fsm_simulator::resolve_target` +
+    // its post-resolve `entry_path`/`expand_initial`, terminating each
+    // branch in the resolved concrete state's full entry sequence (incl. the
+    // `#ifdef FSM_TRACE` `m->_trace_ent` appends), so the emitted
+    // `StepRecord` (`cfgA`/`ent`) byte-matches the simulator. (Internal
+    // transitions never have a pseudostate target — guarded by the
+    // `!Internal` checks below, same as history.)
+    let choice_target_idx: Option<u8> =
+        if super::pseudostate::is_choice_or_junction(ctx, target_idx) {
+            Some(target_idx)
+        } else {
+            None
+        };
+
     // 3. Update `_active[]` slot. Internal transitions leave the
     // configuration unchanged. A history target does NOT write the slot
     // here — `<M>_history_restore_*` writes the *resolved leaf* slot
     // (writing `STATE_HAuto`, a pseudo-state, would corrupt the config and
     // the cfgA projection, exactly the prior bug).
-    if !matches!(t.kind, TransitionKind::Internal) && history_owner_idx.is_none() {
+    // FW110-FU-A: a choice/junction target also does NOT write the slot
+    // here — `emit_choice_resolution` writes the *resolved concrete leaf*
+    // slot (writing `STATE_<CHOICE>`, a pseudo-state, would corrupt the
+    // config + the cfgA projection — the exact prior bug, the History
+    // analogue).
+    if !matches!(t.kind, TransitionKind::Internal)
+        && history_owner_idx.is_none()
+        && choice_target_idx.is_none()
+    {
         let target_rec = ctx.index.get(target_idx);
         let target_slot = ctx.layout.slot(target_idx);
         out.push_str(&format!(
@@ -396,7 +427,25 @@ pub fn emit_transition_body(
 
     // 4. Entry sequence — root first.
     // P0-4: arm any timers owned by states being entered (Doc 08 §13.1).
-    for entry_idx in entry_path(t, ctx.index, ctx.parents) {
+    //
+    // FW110-FU-A: SUPPRESSED for a choice/junction target. The static
+    // `entry_path(t)` would walk the CHOICE pseudostate's static ancestor
+    // chain — but the resolved concrete leaf (and the correct LCA→leaf
+    // ancestor entry sequence) is only known at runtime via the guard
+    // chain. `emit_choice_resolution` (called below) emits the entire
+    // entry sequence for the resolved branch, including ancestors, so the
+    // static loop here must NOT also run (it would double-enter ancestors
+    // / enter the wrong path). Symmetric to how the History target relies
+    // on `<M>_history_restore_*` for the runtime-resolved leaf — except a
+    // choice has NO statically-entered owning composite at all, so the
+    // WHOLE static entry is skipped (history keeps the owning composite's
+    // static entry; a choice's resolved target may be anywhere).
+    let static_entry: Vec<u8> = if choice_target_idx.is_some() {
+        Vec::new()
+    } else {
+        entry_path(t, ctx.index, ctx.parents)
+    };
+    for entry_idx in static_entry {
         let rec = ctx.index.get(entry_idx);
         if rec.kind.is_active_at_rest() && rec.kind != StateRecordKind::Final {
             // v1.1-W2d: entering a submachine ref-state instantiates its
@@ -429,7 +478,12 @@ pub fn emit_transition_body(
 
     // If the target is a parallel state (or composite that contains a
     // parallel), expand its initial chain to populate every region slot.
-    if !matches!(t.kind, TransitionKind::Internal) {
+    // (A choice/junction target's kind is Choice/Junction — never
+    // Parallel/Composite — so `choice_target_idx.is_none()` is redundant
+    // with the `matches!` below, but stated for intent: the
+    // resolved-branch initial expansion is emitted by
+    // `emit_choice_resolution`, not here.)
+    if !matches!(t.kind, TransitionKind::Internal) && choice_target_idx.is_none() {
         let target_rec = ctx.index.get(target_idx);
         if matches!(
             target_rec.kind,
@@ -437,6 +491,23 @@ pub fn emit_transition_body(
         ) {
             emit_initial_expansion_for_target(ctx, target_idx, &pad, out);
         }
+    }
+
+    // FW110-FU-A: the runtime choice/junction guard-chain resolution. The
+    // owning context's exit + the transition action block already ran
+    // above (steps 1-2, byte-identical to the History/normal path); now
+    // emit the `if (<g0>) {<enter branch-0 target>} else if (<g1>) {…}
+    // else {<[else] / trap>}` chain mirroring the shipped
+    // `fsm_simulator::resolve_target` (interpreter.rs:1572-1612) + its
+    // caller's post-resolve `entry_path(lca,tgt)` / `expand_initial`
+    // (interpreter.rs:1360-1391). The terminal concrete-state entry
+    // sequence is the SAME a direct transition to that state emits, so
+    // the resulting `StepRecord` (`cfgA`/`ent`) is byte-identical to the
+    // simulator's. `effective_lca(t)` is the transition's LCA — the same
+    // value the simulator passes to its post-resolve `entry_path`.
+    if let Some(choice_idx) = choice_target_idx {
+        let lca = super::entry_exit::effective_lca(t, ctx.index, ctx.parents);
+        super::pseudostate::emit_choice_resolution(ctx, choice_idx, lca, payload_prefix, &pad, out);
     }
 
     // FW1-FU-2: history-target restore. The owning composite was just
@@ -484,11 +555,27 @@ pub fn emit_transition_body(
     // `&& != Final` (a Final state has no user `_entry_X`/`_exit_X`); ONLY
     // this trace-record set is corrected to `is_active_at_rest()` (which
     // already *includes* Final — the simulator's exact record set).
-    let entered_ir: Vec<String> = entry_path(t, ctx.index, ctx.parents)
-        .into_iter()
-        .filter(|i| ctx.index.get(*i).kind.is_active_at_rest())
-        .map(|i| ctx.index.get(i).ir_id.clone())
-        .collect();
+    //
+    // FW110-FU-A: for a choice/junction target the STATIC `entry_path(t)`
+    // resolves the CHOICE pseudostate's ancestor chain (and the choice
+    // itself is filtered by `is_active_at_rest` anyway) — but the actually-
+    // entered concrete state(s) are runtime-resolved by the guard chain.
+    // `emit_choice_resolution` emits the `#ifdef FSM_TRACE`
+    // `m->_trace_ent` append for every runtime-entered `is_active_at_rest`
+    // state itself (the LCA→resolved-leaf path), exactly as
+    // `<M>_history_restore_*` does for a history target's runtime leaf. So
+    // the static `entered_ir` here MUST be empty for a choice target — the
+    // resolver owns the entire `ent` set (a non-empty static set would
+    // double-count or record the wrong path).
+    let entered_ir: Vec<String> = if choice_target_idx.is_some() {
+        Vec::new()
+    } else {
+        entry_path(t, ctx.index, ctx.parents)
+            .into_iter()
+            .filter(|i| ctx.index.get(*i).kind.is_active_at_rest())
+            .map(|i| ctx.index.get(i).ir_id.clone())
+            .collect()
+    };
     let exited_ir: Vec<String> = exits
         .iter()
         .copied()
@@ -677,7 +764,7 @@ fn states_inside_parallel(m: &fsm_ir::MachineObject, parallel_ir_id: &str) -> Ve
 /// composite or parallel state. For a parallel target, every region's
 /// initial leaf is assigned to its slot and entry actions run; for a
 /// composite, the single region's initial chain is followed.
-fn emit_initial_expansion_for_target(
+pub(crate) fn emit_initial_expansion_for_target(
     ctx: &MachineEmitCtx<'_>,
     target_idx: u8,
     pad: &str,

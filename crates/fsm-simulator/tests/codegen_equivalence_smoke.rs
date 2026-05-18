@@ -1124,22 +1124,74 @@ const BEHAVIOURALLY_EQUIVALENT_JUSTIFIED: &[&str] =
 ///     scope-decision record (history across parallel regions remains a
 ///     documented, genuinely-separable v1.0 limitation — anti-scope-creep).
 ///
-///   • **`stress-choice-guard-payload`** — `choice` / `junction`
-///     pseudostate RESOLUTION is NOT implemented in codegen-c. PROVEN
-///     behavioural divergence: on `CLASSIFY` the shipped simulator resolves
-///     the choice through its guard chain to High/Mid/Low; the generated C
-///     sets `_active[0] = <CHOICE pseudostate>` and **rests there
-///     forever** — no guard-chain code is emitted ANYWHERE
-///     (`dump_all_corpus_quiescent` prefixes 1-6 `[DIFF] sim=[] gen=
-///     [s-Router-Decide]`; the machine is permanently stuck in `Decide`).
-///     ROOT CAUSE: `state_index.rs`/`region_layout.rs` INDEX Choice/Junction
-///     as state records + slots, but NO `emit/` site lowers the runtime
-///     guard-chain resolution (`grep Choice crates/fsm-codegen-c/src/emit`
-///     ⇒ zero hits); the shipped `fsm_simulator` `resolve_target`
-///     (`interpreter.rs:1572-1612`) implements it fully. A whole missing
-///     feature lowering (guard-chain + chained-transition + resolved-target
-///     entry + `[else]` + recursive choice→choice). NOT inline-fixable.
-///     **RECOMMENDED DEDICATED FIX-WAVE** (spec in the audit doc).
+///   • **`stress-choice-guard-payload`** — STILL RED, but the root cause
+///     MOVED (FW110-FU-A; the W1-FU "fixing one bug unmasks the next"
+///     precedent — recorded HONESTLY, NOT gamed into BYTE_EQUAL).
+///
+///     **The codegen half is now DONE and PROVEN CORRECT.** FW110-FU-A
+///     implemented the missing `choice`/`junction` guard-chain resolution
+///     lowering (`crates/fsm-codegen-c/src/emit/pseudostate.rs` +
+///     `transition.rs` — the History-precedent suppress-static /
+///     emit-runtime pattern; byte-mirrors `fsm_simulator::resolve_target`
+///     interpreter.rs:1572-1612 + its post-resolve `entry_path`/
+///     `expand_initial` interpreter.rs:1356-1391). Verified: with a
+///     hand-correct IR (the analyzer defect below patched LOCALLY for
+///     validation only, NOT committed — out of this wave's codegen-side
+///     scope) the FSM_TRACE-compiled-and-RUN generated C is **BYTE-EQUAL**
+///     to the shipped `execute_trace` oracle across ALL 7 trace records and
+///     all 3 guard arms (`CLASSIFY(12)→High [ctx.last>=10]`,
+///     `CLASSIFY(7)→Mid [ctx.last>=5]`, `CLASSIFY(2)→Low [else]`), and
+///     `dump_all_corpus_quiescent` is `EQUIVALENT across all 7 prefixes`.
+///     The codegen guard chain (`if (ctx.last>=10){_active[0]=HIGH;…} else
+///     if (ctx.last>=5){…} else {…LOW…}`, `dst=s-Router-Decide`) is the
+///     byte-exact mirror of the simulator. So the prior root-cause claim
+///     ("NO `emit/` site lowers it") is RESOLVED — `grep -rn Choice
+///     crates/fsm-codegen-c/src/emit/` is now non-empty and CORRECT.
+///
+///     **The residual divergence is a SEPARATE, UPSTREAM ANALYZER/IR
+///     defect** (NOT codegen, NOT in this wave's scope): the analyzer's
+///     `lower_choice` / `lower_junction`
+///     (`crates/fsm-analyzer/src/lower/state.rs:329-373`) **discard the
+///     parsed branch guard and actions and never resolve the branch
+///     target**: every `IrChoiceBranch` is hardcoded `guard:
+///     GuardExpr::Else, actions: Vec::new()`, and `target` is left as the
+///     raw DSL name (`"High"`) instead of the canonical IR id
+///     (`"s-Router-High"` — every transition uses
+///     `IdMinter::state_target_id`; choice branches do not). The parser
+///     DOES build the `GUARD_CLAUSE`/`ACTION_BLOCK` CST nodes
+///     (`grammar/state.rs::parse_choice_branch`); the AST helper layer just
+///     lacks `ChoiceBranch::guard()`/`actions()` accessors and the lowering
+///     never calls `lower_guard_clause`/`lower_action_block` the way
+///     transition lowering does. CONSEQUENCE — the BROKEN IR breaks BOTH
+///     engines, so there is no correct oracle to byte-match: the shipped
+///     `resolve_target`, fed all-`Else`-branches with an unresolvable
+///     target id, picks the (last) `Else`, then its
+///     `rt.machine.node("High")` misses → its silent `else { return
+///     Ok(vec![target]) }` fallback → the caller's `entry_path`/
+///     `is_leaflike` drop the unknown id → `sim=[]` (empty quiescent
+///     config, NO error). The generated C now byte-MIRRORS exactly that
+///     (FW110-FU-A makes the unresolvable-branch-target path the SAME
+///     silent no-op as `resolve_target`'s `node() else` fallback — NOT a
+///     trap; the FSM-E0100 trap is reserved for the genuine
+///     no-matching-branch-and-no-`[else]` case, `resolve_target`'s separate
+///     `.ok_or_else`). So the byte-diff RED here is a pure RECORD-MODEL
+///     difference around the (mutually-empty) config of a broken-IR step —
+///     the engines agree by construction on the malformed input; it is
+///     correctly KNOWN_DIVERGENT (no behavioural-equivalence proof is
+///     claimed: the input itself is malformed, equivalence on garbage is
+///     not a meaningful claim). It is NOT a process abort (the FW110-FU-A
+///     faithfulness fix); `host_trace_differential` runs it clean.
+///     **RECOMMENDED DEDICATED FOLLOW-UP WAVE (analyzer-side, FW110-FU-B):**
+///     wire `lower_choice`/`lower_junction` to (1) add AST
+///     `ChoiceBranch::guard()`/`actions()` (typed-child accessors,
+///     mirroring `TransitionDecl`), (2) call `lower_guard_clause`/
+///     `lower_action_block` (absent guard ⇒ `GuardExpr::Else`), (3) resolve
+///     the target via `IdMinter::state_target_id` like every transition.
+///     Once landed, the FW110-FU-A codegen is already proven to make this
+///     fixture **BYTE_EQUAL** — the catalogue MUST then move it (the
+///     verify-the-record discipline). NOT done here: it is a different
+///     subsystem (analyzer), out of the codegen-side scope this wave was
+///     chartered for.
 ///
 ///   • **`stress-self-transitions`** — LOCAL (`~>`) transition LCA / entry-
 ///     exit lowering is WRONG when the local transition's target is a
