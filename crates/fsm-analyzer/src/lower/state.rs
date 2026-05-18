@@ -326,19 +326,98 @@ fn lower_history(
     })
 }
 
+// FW110-FU-A2: a `choice`/`junction` branch carries the SAME three IR
+// fields a transition does — a guard, an action list, and a *resolved*
+// target id — and the shipped, unforked `fsm_simulator::resolve_target`
+// (interpreter.rs ≈1572-1612) is the correctness oracle: it walks the
+// branches top-to-bottom, takes the first whose `eval_guard` is `Ok(true)`,
+// falls back to the `GuardExpr::Else` branch, errors if none, then runs
+// `branch.actions` and recurses on `branch.target`. The pre-fix lowering
+// hardcoded every branch `guard: Else, actions: []` and left `target` as
+// the raw DSL name (`"High"`), so `resolve_target`'s `rt.machine.node()`
+// lookup missed and the engines silently produced an empty config. The
+// guard/action sub-language and the target-id form are lowered EXACTLY as
+// every ordinary transition does (`lower_guard_clause` /
+// `lower_action_block` / `IdMinter::state_target_id` — see `lower_external`
+// et al.). `[else]` needs no special-case: the grammar emits a
+// `GUARD_CLAUSE` whose expr is `Expr::GuardElse`, and `lower_guard_clause`
+// → `lower_guard_expr` already maps that to `GuardExpr::Else` (the exact
+// discriminant `resolve_target` matches on). The `unwrap_or(Else)` is the
+// defensive parse-error fallback (a branch with no `GUARD_CLAUSE` child at
+// all): treating it as the else branch is the most-recoverable choice and
+// is consistent with how `resolve_target` handles a non-`true` guard.
+fn lower_choice_branch<B>(ids: &mut IdMinter, locs: &LocCtx, branch: &B) -> IrChoiceBranch
+where
+    B: ChoiceBranchAst,
+{
+    let guard = branch
+        .branch_guard()
+        .map(|g| lower_guard_clause(ids, locs, &g))
+        .unwrap_or(GuardExpr::Else);
+    let actions = branch
+        .branch_actions()
+        .map(|ab| lower_action_block(ids, locs, &ab))
+        .unwrap_or_default();
+    IrChoiceBranch {
+        guard,
+        // A branch target is a *reference* to a declared state, never a
+        // declaration — so `state_target_id` (the non-mutating
+        // `s-<machine>-<name>` form every transition target uses), NOT
+        // `state_id` (which auto-numbers anonymous declarations).
+        target: ids.state_target_id(&branch.branch_target().unwrap_or_default()),
+        actions,
+        loc: locs.loc(branch.syntax()),
+    }
+}
+
+/// The choice/junction branch shape `lower_choice_branch` needs. `ChoiceBranch`
+/// and `JunctionBranch` are distinct AST node kinds with identical accessors
+/// (the grammar builds the same `GUARD_CLAUSE`/`ACTION_BLOCK`/target shape for
+/// both); this trait lets one lowering serve both without duplicating it.
+trait ChoiceBranchAst {
+    fn branch_guard(&self) -> Option<ast::GuardClause>;
+    fn branch_actions(&self) -> Option<ast::ActionBlock>;
+    fn branch_target(&self) -> Option<String>;
+    fn syntax(&self) -> &SyntaxNode;
+}
+
+impl ChoiceBranchAst for ast::ChoiceBranch {
+    fn branch_guard(&self) -> Option<ast::GuardClause> {
+        self.guard()
+    }
+    fn branch_actions(&self) -> Option<ast::ActionBlock> {
+        self.actions()
+    }
+    fn branch_target(&self) -> Option<String> {
+        self.target()
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        AstNode::syntax(self)
+    }
+}
+
+impl ChoiceBranchAst for ast::JunctionBranch {
+    fn branch_guard(&self) -> Option<ast::GuardClause> {
+        self.guard()
+    }
+    fn branch_actions(&self) -> Option<ast::ActionBlock> {
+        self.actions()
+    }
+    fn branch_target(&self) -> Option<String> {
+        self.target()
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        AstNode::syntax(self)
+    }
+}
+
 fn lower_choice(ids: &mut IdMinter, locs: &LocCtx, node: &SyntaxNode) -> StateNode {
     let c = ast::ChoiceDecl::cast(node.clone());
     let name = c.as_ref().and_then(|n| n.name()).unwrap_or_default();
     let mut branches = Vec::new();
     if let Some(c) = c {
         for branch in c.branches() {
-            let target = branch.target().unwrap_or_default();
-            branches.push(IrChoiceBranch {
-                guard: GuardExpr::Else,
-                target,
-                actions: Vec::new(),
-                loc: locs.loc(branch.syntax()),
-            });
+            branches.push(lower_choice_branch(ids, locs, &branch));
         }
     }
     StateNode::Choice(ChoiceState {
@@ -355,13 +434,7 @@ fn lower_junction(ids: &mut IdMinter, locs: &LocCtx, node: &SyntaxNode) -> State
     let mut branches = Vec::new();
     if let Some(j) = j {
         for branch in j.branches() {
-            let target = branch.target().unwrap_or_default();
-            branches.push(IrChoiceBranch {
-                guard: GuardExpr::Else,
-                target,
-                actions: Vec::new(),
-                loc: locs.loc(branch.syntax()),
-            });
+            branches.push(lower_choice_branch(ids, locs, &branch));
         }
     }
     StateNode::Junction(JunctionState {

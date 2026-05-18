@@ -985,12 +985,56 @@ fn run_differential(example: &str) -> Result<(), String> {
 ///      separable, NOT exercised by this single-region fixture; the
 ///      anti-scope-creep discipline (a dedicated follow-up wave recommended
 ///      if/when a parallel-region-history fixture is added).
+///
+/// **FW110-FU-A2 addition — `stress-choice-guard-payload`.** A `choice`
+/// pseudostate routed by a payload-derived context guard
+/// (`[ctx.last>=10]→High`, `[ctx.last>=5]→Mid`, `[else]→Low`; the
+/// transition into the choice copies `payload.level` into `ctx.last`).
+/// **MOVED here from `KNOWN_DIVERGENT`.** This completes the two-wave fix
+/// the FW110-FU-A `KNOWN_DIVERGENT` note chartered:
+///   - **FW110-FU-A (already merged, `de10291`)** implemented the
+///     `choice`/`junction` guard-chain *codegen* (`emit/pseudostate.rs` +
+///     `transition.rs`) — the byte-exact mirror of the shipped, UNFORKED
+///     `fsm_simulator::resolve_target` (interpreter.rs ≈1572-1612). It was
+///     proven correct then ONLY against a hand-patched IR (the analyzer
+///     defect below), and the fixture stayed HONESTLY `KNOWN_DIVERGENT`
+///     because the *shared* IR producer was still wrong, so there was no
+///     correct oracle (`resolve_target`, fed all-`Else` branches with
+///     unresolvable raw-name targets, emitted `sim=[]`).
+///   - **FW110-FU-A2 (this wave)** fixed the GOVERNING root cause in the
+///     SHARED IR producer `fsm-analyzer` (NOT a fork — `fsm-simulator/src`
+///     is byte-untouched; the unforked simulator now simply receives
+///     correct IR): `lower_choice`/`lower_junction`
+///     (`crates/fsm-analyzer/src/lower/state.rs`) previously hardcoded
+///     every `IrChoiceBranch` `guard: Else, actions: []` and left `target`
+///     as the raw DSL name. It now (1) reads the parser-built
+///     `GUARD_CLAUSE`/`ACTION_BLOCK` CST via NEW typed AST accessors
+///     `ChoiceBranch::guard()`/`actions()` (+ `JunctionBranch`), mirroring
+///     `TransitionDecl` exactly; (2) lowers them with the SAME
+///     `lower_guard_clause`/`lower_action_block` every transition uses
+///     (`[else]`→`GuardExpr::Else` already, no special-case); (3) resolves
+///     the target via `IdMinter::state_target_id` like every transition
+///     target. The IR is now exactly what makes the unforked
+///     `resolve_target` evaluate the guard chain top-to-bottom,
+///     first-true-wins, `[else]` fallback.
+/// RESULT: the FSM_TRACE-compiled-and-RUN generated C is **byte-identical**
+/// to the shipped `execute_trace` oracle across **all 7 trace records and
+/// all 3 guard arms** (`CLASSIFY(12)→s-Router-High [ctx.last>=10]`,
+/// `CLASSIFY(7)→s-Router-Mid [ctx.last>=5]`, `CLASSIFY(2)→s-Router-Low
+/// [else]`); `dump_all_corpus_quiescent` is `EQUIVALENT across all 7
+/// prefixes`. A mis-ordered guard chain / mis-evaluated payload-derived
+/// guard / wrong choice target would change a quiescent config and RED this
+/// — it does not. NOT gamed: the projection/comparator are byte-untouched
+/// (the no-fork attestation in the FU-A2 completion report); the byte-diff
+/// itself (`run_differential`) now returns `Ok` for this fixture, which is
+/// why the FW109 catalogue-stale guard FORCED this move (verify-the-record).
 const BYTE_EQUAL: &[&str] = &[
     "motor",
     "deferred",
     "traffic-light",
     "stress-parallel-cross-exit",
     "stress-deep-history",
+    "stress-choice-guard-payload",
 ];
 
 /// Corpus members whose byte-diff (correctly) REDs because the two engines
@@ -1124,74 +1168,26 @@ const BEHAVIOURALLY_EQUIVALENT_JUSTIFIED: &[&str] =
 ///     scope-decision record (history across parallel regions remains a
 ///     documented, genuinely-separable v1.0 limitation — anti-scope-creep).
 ///
-///   • **`stress-choice-guard-payload`** — STILL RED, but the root cause
-///     MOVED (FW110-FU-A; the W1-FU "fixing one bug unmasks the next"
-///     precedent — recorded HONESTLY, NOT gamed into BYTE_EQUAL).
-///
-///     **The codegen half is now DONE and PROVEN CORRECT.** FW110-FU-A
-///     implemented the missing `choice`/`junction` guard-chain resolution
-///     lowering (`crates/fsm-codegen-c/src/emit/pseudostate.rs` +
-///     `transition.rs` — the History-precedent suppress-static /
-///     emit-runtime pattern; byte-mirrors `fsm_simulator::resolve_target`
-///     interpreter.rs:1572-1612 + its post-resolve `entry_path`/
-///     `expand_initial` interpreter.rs:1356-1391). Verified: with a
-///     hand-correct IR (the analyzer defect below patched LOCALLY for
-///     validation only, NOT committed — out of this wave's codegen-side
-///     scope) the FSM_TRACE-compiled-and-RUN generated C is **BYTE-EQUAL**
-///     to the shipped `execute_trace` oracle across ALL 7 trace records and
-///     all 3 guard arms (`CLASSIFY(12)→High [ctx.last>=10]`,
-///     `CLASSIFY(7)→Mid [ctx.last>=5]`, `CLASSIFY(2)→Low [else]`), and
-///     `dump_all_corpus_quiescent` is `EQUIVALENT across all 7 prefixes`.
-///     The codegen guard chain (`if (ctx.last>=10){_active[0]=HIGH;…} else
-///     if (ctx.last>=5){…} else {…LOW…}`, `dst=s-Router-Decide`) is the
-///     byte-exact mirror of the simulator. So the prior root-cause claim
-///     ("NO `emit/` site lowers it") is RESOLVED — `grep -rn Choice
-///     crates/fsm-codegen-c/src/emit/` is now non-empty and CORRECT.
-///
-///     **The residual divergence is a SEPARATE, UPSTREAM ANALYZER/IR
-///     defect** (NOT codegen, NOT in this wave's scope): the analyzer's
-///     `lower_choice` / `lower_junction`
-///     (`crates/fsm-analyzer/src/lower/state.rs:329-373`) **discard the
-///     parsed branch guard and actions and never resolve the branch
-///     target**: every `IrChoiceBranch` is hardcoded `guard:
-///     GuardExpr::Else, actions: Vec::new()`, and `target` is left as the
-///     raw DSL name (`"High"`) instead of the canonical IR id
-///     (`"s-Router-High"` — every transition uses
-///     `IdMinter::state_target_id`; choice branches do not). The parser
-///     DOES build the `GUARD_CLAUSE`/`ACTION_BLOCK` CST nodes
-///     (`grammar/state.rs::parse_choice_branch`); the AST helper layer just
-///     lacks `ChoiceBranch::guard()`/`actions()` accessors and the lowering
-///     never calls `lower_guard_clause`/`lower_action_block` the way
-///     transition lowering does. CONSEQUENCE — the BROKEN IR breaks BOTH
-///     engines, so there is no correct oracle to byte-match: the shipped
-///     `resolve_target`, fed all-`Else`-branches with an unresolvable
-///     target id, picks the (last) `Else`, then its
-///     `rt.machine.node("High")` misses → its silent `else { return
-///     Ok(vec![target]) }` fallback → the caller's `entry_path`/
-///     `is_leaflike` drop the unknown id → `sim=[]` (empty quiescent
-///     config, NO error). The generated C now byte-MIRRORS exactly that
-///     (FW110-FU-A makes the unresolvable-branch-target path the SAME
-///     silent no-op as `resolve_target`'s `node() else` fallback — NOT a
-///     trap; the FSM-E0100 trap is reserved for the genuine
-///     no-matching-branch-and-no-`[else]` case, `resolve_target`'s separate
-///     `.ok_or_else`). So the byte-diff RED here is a pure RECORD-MODEL
-///     difference around the (mutually-empty) config of a broken-IR step —
-///     the engines agree by construction on the malformed input; it is
-///     correctly KNOWN_DIVERGENT (no behavioural-equivalence proof is
-///     claimed: the input itself is malformed, equivalence on garbage is
-///     not a meaningful claim). It is NOT a process abort (the FW110-FU-A
-///     faithfulness fix); `host_trace_differential` runs it clean.
-///     **RECOMMENDED DEDICATED FOLLOW-UP WAVE (analyzer-side, FW110-FU-B):**
-///     wire `lower_choice`/`lower_junction` to (1) add AST
-///     `ChoiceBranch::guard()`/`actions()` (typed-child accessors,
-///     mirroring `TransitionDecl`), (2) call `lower_guard_clause`/
-///     `lower_action_block` (absent guard ⇒ `GuardExpr::Else`), (3) resolve
-///     the target via `IdMinter::state_target_id` like every transition.
-///     Once landed, the FW110-FU-A codegen is already proven to make this
-///     fixture **BYTE_EQUAL** — the catalogue MUST then move it (the
-///     verify-the-record discipline). NOT done here: it is a different
-///     subsystem (analyzer), out of the codegen-side scope this wave was
-///     chartered for.
+///   • **`stress-choice-guard-payload`** — **RESOLVED (FW110-FU-A +
+///     FW110-FU-A2); MOVED to `BYTE_EQUAL`.** The two-wave fix is now
+///     complete: FW110-FU-A (`de10291`) shipped the `choice`/`junction`
+///     guard-chain *codegen* (the byte-exact mirror of the unforked
+///     `fsm_simulator::resolve_target`); FW110-FU-A2 fixed the GOVERNING
+///     root cause in the SHARED IR producer `fsm-analyzer`
+///     (`lower_choice`/`lower_junction` + new `ChoiceBranch`/`JunctionBranch`
+///     `guard()`/`actions()` AST accessors), so the UNFORKED simulator now
+///     receives correct IR and produces the correct oracle that the merged
+///     codegen byte-matches. `fsm-simulator/src` was byte-untouched — this
+///     is NOT a fork; it is fixing the shared *producer* so the unforked
+///     *consumer* finally sees correct IR. The fixture is byte-identical
+///     end-to-end (all 7 records, all 3 guard arms; quiescent EQUIVALENT at
+///     every prefix). See the `BYTE_EQUAL` catalogue note (FW110-FU-A2
+///     addition) for the full root-cause + no-fork attestation. The prior
+///     `KNOWN_DIVERGENT` rationale here (broken-IR `sim=[]`; analyzer
+///     discards guard/actions and leaves raw-name targets) is the EXACT
+///     defect FW110-FU-A2 fixed — recorded honestly, NOT gamed: the
+///     FW109 catalogue-stale guard FORCED this move once `run_differential`
+///     returned `Ok` (verify-the-record applied reflexively).
 ///
 ///   • **`stress-self-transitions`** — LOCAL (`~>`) transition LCA / entry-
 ///     exit lowering is WRONG when the local transition's target is a
@@ -1238,7 +1234,11 @@ const BEHAVIOURALLY_EQUIVALENT_JUSTIFIED: &[&str] =
 const KNOWN_DIVERGENT: &[&str] = &[
     // `stress-deep-history` RESOLVED by FW110-FU-B → moved to BYTE_EQUAL
     // (deep_history restore implemented; see the BYTE_EQUAL note).
-    "stress-choice-guard-payload",
+    // `stress-choice-guard-payload` RESOLVED by FW110-FU-A (codegen) +
+    // FW110-FU-A2 (the shared analyzer IR producer) → moved to BYTE_EQUAL
+    // (choice/junction guard+action+target lowering correct; the unforked
+    // simulator oracle now byte-matches the merged codegen end-to-end —
+    // see the BYTE_EQUAL note).
     "stress-self-transitions",
     "stress-every-timer",
 ];
@@ -1261,21 +1261,28 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
     // (the FW109 self-consistency requirement). No fixture may appear in
     // two buckets; none may be missing.
     //
-    // Post-FW110-FU-B exact honest distribution (asserted dynamically below
-    // — this comment is the human-readable record, the verify-the-record
-    // discipline applied to the catalogue's own arithmetic):
-    //   BYTE_EQUAL                          = 5  (motor, deferred,
-    //       traffic-light, stress-parallel-cross-exit, stress-deep-history
-    //       — the last MOVED here by FW110-FU-B: `deep_history` restore now
-    //       byte-identical to the unforked oracle)
+    // Post-FW110-FU-A2 exact honest distribution (asserted dynamically
+    // below — this comment is the human-readable record, the
+    // verify-the-record discipline applied to the catalogue's own
+    // arithmetic):
+    //   BYTE_EQUAL                          = 6  (motor, deferred,
+    //       traffic-light, stress-parallel-cross-exit, stress-deep-history,
+    //       stress-choice-guard-payload — the LAST MOVED here by
+    //       FW110-FU-A2: the shared `fsm-analyzer` choice/junction IR
+    //       producer now lowers branch guard/actions + resolves the target
+    //       id, so the UNFORKED simulator oracle byte-matches the merged
+    //       FW110-FU-A codegen end-to-end. `stress-deep-history` was the
+    //       prior FU-B move.)
     //   BEHAVIOURALLY_EQUIVALENT_JUSTIFIED  = 3  (vending-machine,
     //       submachine, stress-completion-chain — record-model differs,
     //       observable behaviour proven identical)
-    //   KNOWN_DIVERGENT                     = 3  (stress-choice-guard-payload,
-    //       stress-self-transitions, stress-every-timer — real shipped-
-    //       codegen defects, each with a recommended dedicated fix-wave)
+    //   KNOWN_DIVERGENT                     = 2  (stress-self-transitions,
+    //       stress-every-timer — real shipped-codegen defects, each with a
+    //       recommended dedicated fix-wave. `stress-choice-guard-payload`
+    //       was REMOVED from here by FW110-FU-A2 — RESOLVED, see above.)
     //   ──────────────────────────────────────────────────────────────────
     //   SUM                                 = 11 == CORPUS.len()
+    //   (6 + 3 + 2 = 11; dynamically enforced — the prose tracks reality)
     {
         let mut all: Vec<&str> = BYTE_EQUAL
             .iter()
