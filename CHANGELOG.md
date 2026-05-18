@@ -7,6 +7,147 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [factory-reliability-ci] — 2026-05-18
+
+> **A quality milestone, NOT a `vX.Y.0` release.** The Factory-Reliability/CI
+> epic (Phase-6.0) is tagged `checkpoint/factory-reliability-ci-2026-05-18`
+> (the proven `checkpoint/<name>` immutable-anchor pattern — LOCAL, no push).
+> It is deliberately **not** a `vX.Y.0` tag: the owner's roadmap reserves
+> **v1.6.0 for the landing-page + doc-honesty pass (post-factory)**, and this
+> epic is the quality milestone that *precedes* it (naming it `v1.6.0` would
+> unilaterally consume the owner-reserved minor). The §11.30/GT-12 cold-quad
+> rigor applies to this checkpoint tag identically to a release tag.
+
+**Theme: the Factory-Reliability/CI proof layer — close ALL testing gaps to
+factory-grade + a push-and-it-runs CI.**
+
+> **Scope (Doc 32, owner-endorsed).** With the pipeline FACTORY-COMPLETE
+> (v1.4) and the UI/DX convenience layer shipped (v1.5), this epic un-parks
+> the **testing half** of Certifiability/OWNER-C: a host **and** on-target
+> generated-C ↔ simulator-oracle byte-differential that drives the shipped,
+> never-forked `fsm_simulator::execute_trace` oracle (the KEYSTONE
+> DRIVE-THE-ORACLE binding tag-gate row — independently re-derived from
+> source by the W6a phase-audit, verdict `KEYSTONE-INTACT`; **no** forked
+> semantics in the W1 trace-hook / the W2 QEMU+target harness / the W5 CI
+> glue; the differential oracle byte-untouched across the whole epic arc).
+> The **MISRA-codegen half stays separately PARKED** (OWNER-3 — explicit
+> owner GO required). The Phase-6.0 **Rust** delta vs v1.5 is **substantial
+> and additive by design** (`git diff --shortstat 2ff8ac3 X -- crates/
+> Cargo.toml Cargo.lock` = 22 files / +8192 / −190 — independently
+> re-derived at the gate-doc commit, stated as exactly that delta, neither
+> under- nor over-stated) with **0 new external dependencies** (the 2
+> Cargo.lock edges are internal `fsm-codegen-c`/`tempfile` dev-deps already
+> in the lock); the differential oracle (`crates/fsm-simulator/src` +
+> `cmd/{test,baseline}.rs`) is byte-untouched.
+
+### Added
+
+- **The R7 generic host-trace differential (W1):** a `#ifdef
+  FSM_TRACE`-gated codegen trace-tap (`crates/fsm-codegen-c/src/emit/
+  trace_hook.rs`) + a host differential (`crates/fsm-simulator/tests/
+  codegen_equivalence_smoke.rs`) that compiles **and RUNS** the generated C
+  and byte-diffs its trace against the shipped `fsm_simulator::execute_trace`
+  `StepRecord` oracle. The trace-hook is a **trace tap, not a second
+  interpreter** — it records what the generated C *itself* did; the keystone
+  is no forked oracle. A default `fsm generate` (no `-DFSM_TRACE`) carries
+  the hook only as preprocessor-stripped text.
+- **The on-target QEMU/`mps2-an385` trace differential (W2):** extends W1's
+  **identical** `FSM_TRACE` C to a cross-compiled `arm-none-eabi-gcc
+  -mcpu=cortex-m3` binary run under `qemu-system-arm -M mps2-an385`
+  semihosting, against the **same** oracle (it does not invent a target
+  oracle). CI-runner-only by design (the toolchains are never on the
+  disk-tight box); the on-target *logic* is host-proven by W1's
+  identical-C/same-oracle differential; the toolchain-free no-fork keystone
+  guards pass locally; the on-target lane honest-skips when the toolchain is
+  absent (an explicit by-design notice, not a gap).
+- **The G7 build-failing live-enum-derived conformance lock (W3):** a `cargo
+  test` (`crates/fsm-cli/tests/conformance_code_coverage_lock.rs`) that
+  **fails the build** unless every live `DiagnosticCode` variant (derived
+  from the compiled `DiagnosticCode::all_codes()`) has an exact-set
+  conformance fixture OR a justified allowlist entry — `73 live codes = 37
+  exact-set conformance fixtures + 36 justified non-fixture allowlist
+  entries` (the lock's own runtime output, the partition dynamically
+  asserted). `tests/conformance/COVERAGE_MAP.md` became a **generated
+  artifact** (byte-derivability asserted read-only; regeneration
+  feature-gated + `#[ignore]`d — the hand-maintained-map drift surface
+  eliminated). The conformance corpus grew **26 → 53** fixtures.
+- **The coverage-ratchet gates (W4):** a `cargo-llvm-cov` Rust-branch gate +
+  a `c8` extension-coverage gate; the floor = `floor(measured−2%)`
+  (measured-then-ratcheted, not a guessed target), `--check-monotonic`
+  rejects a lowered floor (the script enforces, it does not decide), with an
+  explicit no-assertion-free anti-gaming statement in `coverage-floors.toml`.
+- **The ci.yml 4 additive-isolated lanes + the one-command `make ci-local`
+  gate (W5):** the original 2-job `build`(1.75 matrix)+`sca` byte-untouched +
+  4 own-job `needs:`-free lanes appended (`conformance` / `extension-host` /
+  `coverage-rust` / `on-target`). `make ci-local` runs the quad + conformance
+  + the `xvfb-run` Extension-Host JS lane + the `act` Linux-`build`/`sca`
+  dry-run + the new-lanes' workflow-lint, and **exits non-zero on a broken
+  tree** (the honest scope encoded inline: the on-target/coverage matrix is
+  CI-runner-only; the on-target *logic* is host-proven by W1; `act` covers
+  the *Linux* `build`/`sca` lanes only).
+
+### Fixed
+
+- **The FW109/FW110-FU codegen-correctness arc — real shipped codegen bugs
+  the differential surfaced + fixed** (the audit working as designed, NOT a
+  fork): a **timer over-fire** (single-shot `elapsed_ms` decrement → a
+  correct multi-period budget-loop), a composite **exit-set** defect, a
+  **deep_history** restore defect, **choice/junction** lowering (moved to the
+  analyzer), a sibling-targeted **local (~>) transition LCA** defect, and an
+  undeclared `_exit_<Final>`. These **deliberately changed production-C
+  semantics for the better** — a *correctness fix*, not a regression and not
+  a fork (the keystone is *no forked oracle*, not frozen output;
+  independently re-derived from source by the W6a/W6b audits).
+- **`run_differential` doc-comment honesty** (`crates/fsm-simulator/tests/
+  codegen_equivalence_smoke.rs`): a stale doc-comment referencing a
+  `Some(corrupt)` parameter absent from the signature was tidied to describe
+  the actual contract (the corruption never-game proof lives in the dedicated
+  `differential_goes_red_on_a_deliberately_corrupted_oracle` guard, not a
+  parameter). Cosmetic; the signature/body are byte-unchanged and the
+  differential re-ran deterministic-green post-edit.
+
+### Known limitations
+
+- **Carried owner-escalations (re-stated, not resolved):** the **G9** push
+  of the LOCAL `v1.0.0`–`v1.5.0` tags + checkpoints + commits + this
+  milestone tag + the CI matrix / SCA / the **4 NEW lanes**
+  (`conformance`/`extension-host`/`coverage-rust`/`on-target`) **never run on
+  a remote runner** (G9 is now **load-bearing** — the automatic remote
+  pipeline + the on-target/coverage matrix depend on it; the JS lane is a
+  binding *local* gate + `make ci-local` proves local-green, but remote-
+  unrun); the **5-platform binary tail** (blocked-on-G9; no cross toolchains
+  on the box; **not** a ci.yml lane); **Marketplace publish** (publish-*ready*
+  via v1.5 B1, still owner-published — Phase-6.0 added no extension runtime);
+  the top-level **`LICENSE`/`CONTRIBUTING`/`CoC`** gap (owner/legal, carried
+  to v1.6 with D1); the parked **Certifiability / MISRA–CERT-C codegen-mode**
+  arc (OWNER-3 — owner GO required; this epic un-parked only the *testing*
+  half); the **v1.6 D1 landing + the doc-honesty pass that must
+  precede/accompany it** (recorded, *not* scoped into this epic — "publish-
+  ready" = this factory-reliability proof + the v1.6 D1 landing both land);
+  the mechanised **sim≡codegen-equivalence formal proof** (R7 — Phase-6.0
+  delivers the *empirical* host+target differential; the fully-mechanised
+  proof remains the named v1.4-stretch/later deferral, unchanged); **task
+  #17** CI-matrix owner-blocked. The broader README/Doc-07/Doc-14 doc-honesty
+  staleness pass is a **separate already-identified backlog item** (flagged
+  in `GATE_VERIFICATION_FACTORY_RELIABILITY_2026_05_18.md` §6.2, not fixed in
+  this epic; the `docs/ROADMAP.md` "See also" pointer was already reconciled
+  at the v1.5 closeout).
+- **Accepted-tracked-debt (from the W6b pre-tag four-lens, `TAG-CLEAR`):**
+  the 3 pre-existing **devDependency-only** transitive npm vulns
+  (`{esbuild, mocha, serialize-javascript}` — 1 moderate / 2 high; NOT in the
+  shipped extension runtime, not exploitable in our build/CI usage, no
+  non-breaking fix, the epic introduced **zero** of them) — each
+  `accept-with-written-rationale`, tracked for the v1.6 FE-hygiene batch; the
+  `.contains` codegen-c conformance oracle (the #123-class deferred tail,
+  owned by the G7 wave for behavioural conversion — the W1/W2 differential +
+  the W3 lock are the binding behavioural gate in the interim).
+- **G7 / G9** are the same explicitly-tracked posture accepted at v1.0–v1.5
+  (G7 *improved* this epic: a build-failing live-enum lock + corpus 26→53;
+  G9's 4 new lanes are *ready* + locally `make ci-local`-provable, still
+  remote-unrun). Neither is a regression.
+
+See `docs/GATE_VERIFICATION_FACTORY_RELIABILITY_2026_05_18.md` for the full milestone gate, the KEYSTONE DRIVE-THE-ORACLE evidence (the frozen W6a `KEYSTONE-INTACT` + W6b `TAG-CLEAR` audits), the cold-quad + binding-JS-lane posture, the re-derived pinned gate numbers, and the carried owner-escalations.
+
 ## [1.5.0] — 2026-05-17
 
 **Theme: the "Convenience Layer" (UI/DX) — surface the v1.4 verification core in VS Code.**

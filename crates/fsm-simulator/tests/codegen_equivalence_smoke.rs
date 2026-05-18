@@ -804,9 +804,13 @@ fn load_trace(example: &str) -> (Ir, TraceFile, String) {
     (ir, trace, machine)
 }
 
-/// Run the differential for one corpus member. `Some(corrupt)` mutates the
-/// oracle's Nth record to prove the differential genuinely goes RED on a
-/// divergence (acceptance (b)) — it is NOT applied in the green path.
+/// Run the differential for one corpus member: the shipped
+/// `fsm_simulator::execute_trace` oracle projection vs the FSM_TRACE-compiled
+/// generated C, byte-diffed. The green path applies **no** corruption — that
+/// the differential genuinely goes RED on a divergence (acceptance (b)) is
+/// proved by the dedicated never-game guard
+/// `differential_goes_red_on_a_deliberately_corrupted_oracle`, not by a
+/// parameter here (this fn takes only `example`).
 fn run_differential(example: &str) -> Result<(), String> {
     let (ir, trace, machine) = load_trace(example);
     let oracle = simulator_projection(&ir, &trace);
