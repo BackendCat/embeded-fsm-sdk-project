@@ -1,0 +1,7 @@
+language fsm 2.0
+
+machine M {
+    events { E(value : u8) }
+    initial S
+    state S { on E -> S : payload.value = 5 }
+}

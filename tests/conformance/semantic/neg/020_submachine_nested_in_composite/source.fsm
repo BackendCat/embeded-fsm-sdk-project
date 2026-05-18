@@ -1,0 +1,25 @@
+language fsm 2.0
+
+feature submachines
+
+submachine Sub {
+    events { GO DONE_EV }
+    initial SubIdle
+    state SubIdle { on GO -> SubBusy }
+    state SubBusy { on DONE_EV -> SubFinal }
+    final SubFinal
+}
+
+machine Host {
+    events { GO DONE_EV LEAVE }
+    initial Outer
+    state Outer {
+        initial Inner
+        state Inner is Sub {
+            done -> Leftover
+        }
+        state Leftover {
+            on LEAVE -> Outer
+        }
+    }
+}

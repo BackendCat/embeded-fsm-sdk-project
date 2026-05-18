@@ -1,0 +1,8 @@
+language fsm 2.0
+
+machine M {
+    extern foo() : bool
+    extern foo() : bool
+    initial S
+    state S { }
+}

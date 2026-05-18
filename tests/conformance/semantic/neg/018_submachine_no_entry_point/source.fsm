@@ -1,0 +1,14 @@
+language fsm 2.0
+
+feature submachines
+
+submachine Sub {
+    events { GO }
+    state SubA { on GO -> SubA }
+}
+
+machine Host {
+    events { GO }
+    initial Using
+    state Using is Sub { }
+}

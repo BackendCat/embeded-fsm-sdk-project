@@ -10,7 +10,10 @@
           "path": "parser/pos/001_empty_machine.fsm",
           "description": "Minimal valid machine — single state, no events, no context",
           "normative": true,
-          "tags": ["minimal", "smoke"]
+          "tags": [
+            "minimal",
+            "smoke"
+          ]
         },
         {
           "id": "PARSE-POS-002",
@@ -18,7 +21,10 @@
           "path": "parser/pos/002_motor.fsm",
           "description": "Canonical Motor — context, events with payload, timer, guard, action",
           "normative": true,
-          "tags": ["motor", "smoke"]
+          "tags": [
+            "motor",
+            "smoke"
+          ]
         },
         {
           "id": "PARSE-POS-003",
@@ -26,7 +32,9 @@
           "path": "parser/pos/003_full_grammar.fsm",
           "description": "Exercises imports, features, consts, enums, externs, composite, history, timers, action sub-language, stable IDs, doc comments",
           "normative": true,
-          "tags": ["grammar-coverage"]
+          "tags": [
+            "grammar-coverage"
+          ]
         },
         {
           "id": "PARSE-NEG-001",
@@ -34,8 +42,12 @@
           "path": "parser/neg/001_no_initial/",
           "description": "Missing initial declaration triggers FSM-E0107 (per Doc 00 NEG-001 corrected code)",
           "normative": true,
-          "expectedCodes": ["FSM-E0107"],
-          "tags": ["initial"]
+          "expectedCodes": [
+            "FSM-E0107"
+          ],
+          "tags": [
+            "initial"
+          ]
         },
         {
           "id": "PARSE-NEG-002",
@@ -43,8 +55,12 @@
           "path": "parser/neg/002_multiple_initials/",
           "description": "Two initial declarations in one scope triggers FSM-E0108 (per Doc 00 NEG-005 corrected code)",
           "normative": true,
-          "expectedCodes": ["FSM-E0108"],
-          "tags": ["initial"]
+          "expectedCodes": [
+            "FSM-E0108"
+          ],
+          "tags": [
+            "initial"
+          ]
         },
         {
           "id": "PARSE-NEG-003",
@@ -52,8 +68,25 @@
           "path": "parser/neg/003_unknown_context_field/",
           "description": "Guard references undeclared ctx.field triggers FSM-E0104 (per Doc 00 NEG-008 corrected code)",
           "normative": true,
-          "expectedCodes": ["FSM-E0104"],
-          "tags": ["resolution"]
+          "expectedCodes": [
+            "FSM-E0104"
+          ],
+          "tags": [
+            "resolution"
+          ]
+        },
+        {
+          "id": "PARSE-NEG-004",
+          "kind": "negative",
+          "path": "parser/neg/004_missing_arrow/",
+          "description": "Transition with no `->` arrow triggers FSM-E0010 (parser-level 'expected token'); the event is declared so E0010 is the sole code (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0010"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
         }
       ]
     },
@@ -66,7 +99,9 @@
           "path": "validator/pos/001_simple_machine_valid.fsm",
           "description": "Pure-extern guard, action assignment, two-state cycle",
           "normative": true,
-          "tags": ["simple"]
+          "tags": [
+            "simple"
+          ]
         },
         {
           "id": "VAL-POS-002",
@@ -74,7 +109,9 @@
           "path": "validator/pos/002_motor_typed.fsm",
           "description": "Motor with full type-checked context, events, guards, timer, payload",
           "normative": true,
-          "tags": ["motor"]
+          "tags": [
+            "motor"
+          ]
         },
         {
           "id": "VAL-POS-003",
@@ -82,7 +119,9 @@
           "path": "validator/pos/003_parallel_regions.fsm",
           "description": "Parallel composite with two independent regions and a composite-parent transition",
           "normative": true,
-          "tags": ["parallel"]
+          "tags": [
+            "parallel"
+          ]
         },
         {
           "id": "VAL-NEG-001",
@@ -90,8 +129,12 @@
           "path": "validator/neg/001_assignment_type_mismatch/",
           "description": "Negative literal assigned to unsigned field triggers FSM-E0201 (per Doc 00 NEG-010 corrected code)",
           "normative": true,
-          "expectedCodes": ["FSM-E0201"],
-          "tags": ["type"]
+          "expectedCodes": [
+            "FSM-E0201"
+          ],
+          "tags": [
+            "type"
+          ]
         },
         {
           "id": "VAL-NEG-002",
@@ -99,8 +142,12 @@
           "path": "validator/neg/002_after_zero_ms/",
           "description": "Zero-millisecond timer triggers FSM-E0410 (B-13)",
           "normative": true,
-          "expectedCodes": ["FSM-E0410"],
-          "tags": ["timer"]
+          "expectedCodes": [
+            "FSM-E0410"
+          ],
+          "tags": [
+            "timer"
+          ]
         },
         {
           "id": "VAL-NEG-003",
@@ -108,8 +155,77 @@
           "path": "validator/neg/003_history_no_default/",
           "description": "History pseudo-state without `default ->` triggers FSM-E0111 (B-14)",
           "normative": true,
-          "expectedCodes": ["FSM-E0111"],
-          "tags": ["history"]
+          "expectedCodes": [
+            "FSM-E0111"
+          ],
+          "tags": [
+            "history"
+          ]
+        },
+        {
+          "id": "VAL-NEG-004",
+          "kind": "negative",
+          "path": "validator/neg/004_assign_to_payload/",
+          "description": "Assignment to a read-only `payload.` field triggers FSM-E0204 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0204"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "VAL-NEG-005",
+          "kind": "negative",
+          "path": "validator/neg/005_const_overflow_u8/",
+          "description": "Context default `300` overflows `u8` — integer overflow in constant expression, FSM-E0206 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0206"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "VAL-NEG-006",
+          "kind": "negative",
+          "path": "validator/neg/006_negative_default_unsigned/",
+          "description": "Negative default `-1` in an unsigned `u16` field triggers FSM-E0208 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0208"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "VAL-NEG-007",
+          "kind": "negative",
+          "path": "validator/neg/007_timer_exceeds_24h/",
+          "description": "Timer duration > 24h triggers the FSM-W0601 warning (exact-set; compilation still succeeds).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-W0601"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "VAL-NEG-008",
+          "kind": "negative",
+          "path": "validator/neg/008_constant_guard_true/",
+          "description": "Guard literal `[true]` is a constant guard — FSM-W0603 warning (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-W0603"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
         }
       ]
     },
@@ -122,7 +238,9 @@
           "path": "semantic/pos/001_motor_full.fsm",
           "description": "Motor exercising the full state space (also driven by examples/motor/motor.trace)",
           "normative": true,
-          "tags": ["motor"]
+          "tags": [
+            "motor"
+          ]
         },
         {
           "id": "SEM-POS-002",
@@ -130,7 +248,9 @@
           "path": "semantic/pos/002_completion_with_guards.fsm",
           "description": "Completion transition with a guard — allowed per Doc 00 B-07 (NO FSM-E0301)",
           "normative": true,
-          "tags": ["completion"]
+          "tags": [
+            "completion"
+          ]
         },
         {
           "id": "SEM-POS-003",
@@ -138,7 +258,10 @@
           "path": "semantic/pos/003_parallel_completion.fsm",
           "description": "Parallel regions with per-region final states — both must reach `final` before composite completion fires (B-08)",
           "normative": true,
-          "tags": ["parallel", "completion"]
+          "tags": [
+            "parallel",
+            "completion"
+          ]
         },
         {
           "id": "SEM-NEG-001",
@@ -146,8 +269,12 @@
           "path": "semantic/neg/001_undeclared_event/",
           "description": "Transition on undeclared event triggers FSM-E0101",
           "normative": true,
-          "expectedCodes": ["FSM-E0101"],
-          "tags": ["resolution"]
+          "expectedCodes": [
+            "FSM-E0101"
+          ],
+          "tags": [
+            "resolution"
+          ]
         },
         {
           "id": "SEM-NEG-002",
@@ -155,8 +282,12 @@
           "path": "semantic/neg/002_nondeterministic_transitions/",
           "description": "Two transitions on same event with overlapping guards triggers FSM-E0300",
           "normative": true,
-          "expectedCodes": ["FSM-E0300"],
-          "tags": ["determinism"]
+          "expectedCodes": [
+            "FSM-E0300"
+          ],
+          "tags": [
+            "determinism"
+          ]
         },
         {
           "id": "SEM-NEG-003",
@@ -164,8 +295,12 @@
           "path": "semantic/neg/003_parallel_region_no_initial/",
           "description": "Parallel region with no `initial` triggers FSM-E0600",
           "normative": true,
-          "expectedCodes": ["FSM-E0600"],
-          "tags": ["parallel"]
+          "expectedCodes": [
+            "FSM-E0600"
+          ],
+          "tags": [
+            "parallel"
+          ]
         },
         {
           "id": "SEM-NEG-004",
@@ -173,8 +308,286 @@
           "path": "semantic/neg/004_loop_in_action/",
           "description": "A `while` loop in a transition action block triggers FSM-W0200 (warning only; compilation succeeds, code is still generated — Doc 02 §9.2 / Doc 04 §8.7.2 / Doc 11 §18 / Doc 15 §5)",
           "normative": true,
-          "expectedCodes": ["FSM-W0200"],
-          "tags": ["action", "lint"]
+          "expectedCodes": [
+            "FSM-W0200"
+          ],
+          "tags": [
+            "action",
+            "lint"
+          ]
+        },
+        {
+          "id": "SEM-NEG-005",
+          "kind": "negative",
+          "path": "semantic/neg/005_duplicate_machine/",
+          "description": "Two machines named `M` — duplicate machine name, FSM-E0020 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0020"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-006",
+          "kind": "negative",
+          "path": "semantic/neg/006_duplicate_state/",
+          "description": "Two states named `A` — duplicate state name, FSM-E0021 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0021"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-007",
+          "kind": "negative",
+          "path": "semantic/neg/007_duplicate_event/",
+          "description": "`events { START START }` — duplicate event name, FSM-E0022 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0022"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-008",
+          "kind": "negative",
+          "path": "semantic/neg/008_duplicate_context_field/",
+          "description": "Context field `x` declared twice — FSM-E0023 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0023"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-009",
+          "kind": "negative",
+          "path": "semantic/neg/009_duplicate_extern/",
+          "description": "`extern foo` declared twice — FSM-E0024 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0024"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-010",
+          "kind": "negative",
+          "path": "semantic/neg/010_unknown_state_target/",
+          "description": "Transition target `Unknown` is not a declared state — FSM-E0100 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0100"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-011",
+          "kind": "negative",
+          "path": "semantic/neg/011_unknown_extern_call/",
+          "description": "Action calls undeclared extern `missing()` — FSM-E0102 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0102"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-012",
+          "kind": "negative",
+          "path": "semantic/neg/012_unknown_machine_send/",
+          "description": "`send E to Ghost` names an unknown machine — FSM-E0103 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0103"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-013",
+          "kind": "negative",
+          "path": "semantic/neg/013_non_pure_extern_guard/",
+          "description": "Non-pure extern used in a guard — FSM-E0106 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0106"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-014",
+          "kind": "negative",
+          "path": "semantic/neg/014_guard_numeric_literal/",
+          "description": "Guard is a bare numeric literal `[42]` — type mismatch in guard, FSM-E0200 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0200"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-015",
+          "kind": "negative",
+          "path": "semantic/neg/015_invalid_assignment_lhs/",
+          "description": "Bare identifier on assignment LHS (not ctx./payload.) — FSM-E0205 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0205"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-016",
+          "kind": "negative",
+          "path": "semantic/neg/016_defer_conflicts_transition/",
+          "description": "`defer DATA` plus `on DATA -> S` in the same state — deferred event conflicts with explicit transition, FSM-E0310 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0310"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-017",
+          "kind": "negative",
+          "path": "semantic/neg/017_external_self_on_composite/",
+          "description": "External self-transition on a composite state without exit — FSM-E0401 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0401"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-018",
+          "kind": "negative",
+          "path": "semantic/neg/018_submachine_no_entry_point/",
+          "description": "Referenced submachine has neither `initial` nor `entry_point` — FSM-E0500 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0500"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-019",
+          "kind": "negative",
+          "path": "semantic/neg/019_submachine_no_exit_point/",
+          "description": "Referencing state expects completion but the submachine has no `final`/`exit_point` — FSM-E0501 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0501"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-020",
+          "kind": "negative",
+          "path": "semantic/neg/020_submachine_nested_in_composite/",
+          "description": "Submachine reference nested inside a composite state — FSM-E0502 (exact-set; Doc 00 §11.26).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0502"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-021",
+          "kind": "negative",
+          "path": "semantic/neg/021_submachine_without_feature/",
+          "description": "Submachine reference without file-scope `feature submachines` — construct used without required feature flag, FSM-E0610 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0610"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-022",
+          "kind": "negative",
+          "path": "semantic/neg/022_dead_completion_after_else/",
+          "description": "A `done [else]` followed by another guarded `done` — the second is a dead transition, FSM-W0101 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-W0101"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-023",
+          "kind": "negative",
+          "path": "semantic/neg/023_priority_resolved_conflict/",
+          "description": "Two same-event guarded transitions disambiguated only by `priority` — FSM-W0300 (exact-set; warning, not error).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-W0300"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-024",
+          "kind": "negative",
+          "path": "semantic/neg/024_region_with_one_state/",
+          "description": "A parallel `region` containing a single state — FSM-W0600 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-W0600"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
+        },
+        {
+          "id": "SEM-NEG-025",
+          "kind": "negative",
+          "path": "semantic/neg/025_single_region_parallel/",
+          "description": "A parallel state with only one `region` — single-region-parallel hint FSM-H0004 (exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-H0004"
+          ],
+          "tags": [
+            "g7-code-lock"
+          ]
         }
       ]
     },
@@ -187,7 +600,10 @@
           "path": "codegen-c/001_motor/",
           "description": "Motor — verify generated Motor.h carries the expected state/event enums and Motor.c emits init/dispatch/current_state. gcc -Werror clean.",
           "normative": true,
-          "tags": ["motor", "gcc-werror"]
+          "tags": [
+            "motor",
+            "gcc-werror"
+          ]
         },
         {
           "id": "CGEN-002",
@@ -195,7 +611,10 @@
           "path": "codegen-c/002_composite_dispatch/",
           "description": "Composite — verify B-10 parent-table dispatch lands the leaf-to-root walk for hierarchical transitions. gcc -Werror clean.",
           "normative": true,
-          "tags": ["composite", "B-10"]
+          "tags": [
+            "composite",
+            "B-10"
+          ]
         },
         {
           "id": "CGEN-003",
@@ -203,7 +622,10 @@
           "path": "codegen-c/003_parallel_completion/",
           "description": "Parallel completion — verify per-region slots and B-08 all-regions-final helper. gcc -Werror clean.",
           "normative": true,
-          "tags": ["parallel", "B-08"]
+          "tags": [
+            "parallel",
+            "B-08"
+          ]
         },
         {
           "id": "CGEN-004",
@@ -211,7 +633,12 @@
           "path": "codegen-c/004_guard_disambiguated_dispatch/",
           "description": "W7-FU-1 (Doc 08 §4.1/§4.2, Doc 00 §11.26) — guard-disambiguated same-event transitions collapse to ONE case whose body picks the first-enabled candidate in (priority, document-order); the unguarded priority-3 transition is the always-enabled fallback. Regression guard for the duplicate-case (switch) / guard-ignoring first-row select (table, P0-1 silent-data-loss) defect.",
           "normative": true,
-          "tags": ["guard", "transition-selection", "W7-FU-1", "P0-1"]
+          "tags": [
+            "guard",
+            "transition-selection",
+            "W7-FU-1",
+            "P0-1"
+          ]
         }
       ]
     },
@@ -224,7 +651,9 @@
           "path": "formatter/001_canonical_minimal.fsm",
           "description": "Already-canonical minimal machine — `fsm fmt --check` exits 0",
           "normative": true,
-          "tags": ["minimal"]
+          "tags": [
+            "minimal"
+          ]
         },
         {
           "id": "FMT-002",
@@ -232,7 +661,9 @@
           "path": "formatter/002_canonical_motor.fsm",
           "description": "Canonical Motor — `fsm fmt --check` exits 0; idempotent",
           "normative": true,
-          "tags": ["motor"]
+          "tags": [
+            "motor"
+          ]
         },
         {
           "id": "FMT-003",
@@ -240,7 +671,9 @@
           "path": "formatter/003_uncanonical_then_canonical/",
           "description": "Loose whitespace + non-canonical layout normalises to the matching expected.fsm",
           "normative": true,
-          "tags": ["transform"]
+          "tags": [
+            "transform"
+          ]
         }
       ]
     }

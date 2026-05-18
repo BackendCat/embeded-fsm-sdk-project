@@ -1,0 +1,7 @@
+language fsm 2.0
+
+machine M {
+    events { START START }
+    initial S
+    state S { }
+}

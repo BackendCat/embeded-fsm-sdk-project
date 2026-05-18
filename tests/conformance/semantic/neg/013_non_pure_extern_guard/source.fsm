@@ -1,0 +1,8 @@
+language fsm 2.0
+
+machine M {
+    events { E }
+    extern impure() : bool
+    initial S
+    state S { on E [impure()] -> S }
+}

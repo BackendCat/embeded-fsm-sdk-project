@@ -1,0 +1,8 @@
+{
+  "exitCode": 1,
+  "expectedDiagnostics": [
+    {
+      "code": "FSM-E0208"
+    }
+  ]
+}

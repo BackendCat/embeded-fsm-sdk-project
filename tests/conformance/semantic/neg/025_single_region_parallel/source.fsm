@@ -1,0 +1,10 @@
+language fsm 2.0
+
+feature parallel
+
+machine M {
+    initial Working
+    state Working {
+        region A { initial S1 state S1 { } state S2 { } }
+    }
+}

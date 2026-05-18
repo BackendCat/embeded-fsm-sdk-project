@@ -1,0 +1,11 @@
+language fsm 2.0
+
+machine M {
+    events { E }
+    initial Outer
+    state Outer {
+        initial Inner
+        state Inner { }
+        on E -> Outer
+    }
+}

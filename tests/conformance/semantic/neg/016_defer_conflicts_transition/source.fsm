@@ -1,0 +1,10 @@
+language fsm 2.0
+
+machine M {
+    events { DATA }
+    initial S
+    state S {
+        defer DATA
+        on DATA -> S
+    }
+}

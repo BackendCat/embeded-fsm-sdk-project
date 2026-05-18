@@ -47,6 +47,14 @@ serde_json = { workspace = true }
 # newer 0.9 bumps the MSRV. The CLI uses it only to parse fsm.toml.
 toml = "0.8"
 
+[features]
+# Opt-in switch that arms the ONE writer of
+# `tests/conformance/COVERAGE_MAP.md` (the G7 `regenerate_coverage_map`
+# `#[ignore]`d test). Off by default so neither the normal suite nor a
+# stray `--ignored` run can rewrite the generated map unintentionally;
+# the map's byte-derivability is asserted (read-only) without it.
+regen-coverage-map = []
+
 [dev-dependencies]
 # Integration tests spawn the `fsm` binary via assert_cmd; predicates
 # powers the stdout/stderr matching; tempfile gives every test its own

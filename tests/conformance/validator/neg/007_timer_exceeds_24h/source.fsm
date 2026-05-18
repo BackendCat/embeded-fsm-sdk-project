@@ -1,0 +1,8 @@
+language fsm 2.0
+
+feature timers
+
+machine M {
+    initial S
+    state S { after 100000000 ms -> S }
+}

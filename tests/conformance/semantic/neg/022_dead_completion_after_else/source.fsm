@@ -1,0 +1,10 @@
+language fsm 2.0
+
+machine M {
+    context { x : u8 = 0 }
+    initial S
+    state S {
+        done [else] -> S
+        done [ctx.x == 1] -> S
+    }
+}

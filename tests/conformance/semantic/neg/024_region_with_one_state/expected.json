@@ -1,0 +1,8 @@
+{
+  "exitCode": 1,
+  "expectedDiagnostics": [
+    {
+      "code": "FSM-W0600"
+    }
+  ]
+}

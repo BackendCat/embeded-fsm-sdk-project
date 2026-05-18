@@ -1,0 +1,7 @@
+language fsm 2.0
+
+machine M {
+    context { count : u16 = -1 }
+    initial S
+    state S { }
+}
