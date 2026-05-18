@@ -22,6 +22,21 @@ async function main(): Promise<void> {
     // @vscode/test-electron via the `cachePath` option.
     const cachePath = path.join(os.homedir(), ".vscode-test");
 
+    // Phase-6.0-W4 (Doc 32 §W4 deliverable (2)): the EXISTING
+    // `xvfb-run @vscode/test-electron` host is wrapped by `c8` (GT-11 —
+    // the extension's OWN coverage, not a new harness). `c8` sets
+    // `NODE_V8_COVERAGE` to a temp dir in OUR (launcher) process env, but
+    // the extension code (`out/**` ← sourcemap ← `src/**`) actually
+    // executes in the spawned Extension-Host (Electron/Node) process.
+    // V8's `NODE_V8_COVERAGE` is per-process, so we MUST forward it into
+    // the Extension Host via `extensionTestsEnv` (test-electron merges it:
+    // `Object.assign({}, process.env, testRunnerEnv)`), or c8 would see an
+    // empty profile and the gate would be vacuously green. Forward it ONLY
+    // when c8 set it (normal `npm test` runs are unaffected — zero
+    // behavioural change when not under coverage).
+    const v8CovDir = process.env.NODE_V8_COVERAGE;
+    const extensionTestsEnv = v8CovDir ? { NODE_V8_COVERAGE: v8CovDir } : undefined;
+
     await runTests({
       extensionDevelopmentPath,
       extensionTestsPath,
@@ -33,6 +48,9 @@ async function main(): Promise<void> {
       // spawned child processes — the language server included).
       launchArgs: ["--disable-extensions", "--disable-gpu", "--no-sandbox"],
       cachePath,
+      // Forward the c8 V8-coverage sink into the Extension Host so the
+      // extension's own executed code is profiled (Doc 32 §W4 (2)).
+      extensionTestsEnv,
     });
   } catch (err) {
     console.error("Failed to run Extension-Host tests:", err);

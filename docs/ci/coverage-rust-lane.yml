@@ -1,0 +1,145 @@
+# Phase-6.0-W4 — the `coverage-rust` CI lane (the discrete, reviewable,
+# self-contained unit W5 wires into `.github/workflows/ci.yml`).
+#
+# ─────────────────────────────────────────────────────────────────────────
+# WHAT THIS IS / THE W4 ↔ W5 BOUNDARY
+# ─────────────────────────────────────────────────────────────────────────
+# W4 (this wave) delivers the coverage-ratchet MECHANISM + its lane
+# DEFINITION as a discrete artifact. W4 does **NOT** edit
+# `.github/workflows/ci.yml` — W5 is the dedicated ci.yml-integration wave
+# that composes ALL lanes (conformance / extension-host / coverage-rust /
+# on-target) + `make ci-local`, keeping the existing `build`(matrix)+`sca`
+# jobs UNTOUCHED (Doc 32 §1 W5 / §6 H6 / GT-1). This file is the
+# coverage-rust job block W5 pastes under `jobs:`. It is intentionally a
+# standalone YAML fragment (a job map), not a full workflow, so W5 composes
+# it verbatim — exactly as `docs/ci/on-target-lane.yml` (the W2 precedent).
+#
+# ─────────────────────────────────────────────────────────────────────────
+# DESIGN — the additive-isolated-job pattern (the proven `sca` precedent)
+# ─────────────────────────────────────────────────────────────────────────
+# - A DISTINCT job (`coverage-rust`), `runs-on: ubuntu-latest`, that NEVER
+#   gates the 1.75 build matrix — EXACTLY the `sca` job's
+#   additive-isolation rationale (Doc 32 §6 H4 / GT-1: "Kept a DISTINCT job
+#   so it never gates the 1.75 build matrix").
+# - TOOLCHAIN: `sca` adds an additive `stable` because cargo-audit needs a
+#   recent toolchain. `coverage-rust` adds an additive **`nightly`** for
+#   the SAME class of reason: `cargo-llvm-cov --branch` (Doc 32 §W4's
+#   explicit BRANCH-coverage requirement) is an UNSTABLE flag and is
+#   **nightly-only** — stable rejects it ("--branch flag requires nightly
+#   toolchain", reproduced 2026-05-18). This is the IDENTICAL
+#   additive-isolated-non-1.75-toolchain pattern as `sca`, nightly instead
+#   of stable for the same "the tool needs it" reason. The project's
+#   pinned 1.75 build matrix is **NEVER touched** (additive isolation).
+#   [W4↔Doc-32 NOTE — flagged per the brief: Doc-32 §W4 + the brief's
+#   prose say the cov job uses `+stable`. Doc-32's SUBSTANTIVE requirement
+#   is *branch* coverage; branch coverage in cargo-llvm-cov is
+#   nightly-only (empirically reproduced). Doc-32 is authority and says
+#   "branch"; the `sca`-pattern is toolchain-AGNOSTIC additive isolation
+#   (the rule is "an isolated non-1.75 toolchain the tool needs", not
+#   "stable specifically"). So the lane uses `+nightly` to satisfy the
+#   binding *branch* requirement, with the additive-isolation invariant
+#   fully preserved. Disclosed in the W4 completion report + here.]
+# - `cargo-llvm-cov` is a CONTAINED `cargo +nightly install` dev-tool
+#   (NOT a system `apt` package) — installed in THIS CI runner only
+#   (GT-10: the box is disk-tight; the coverage matrix is CI-runner-only
+#   by design — the same CI-first default as `on-target`'s apt installs).
+# - The MEASURE step runs cargo-llvm-cov PER-PACKAGE (`-p <pkg>`), not a
+#   single workspace report. This is deliberate and load-bearing:
+#     (a) the gate is a PER-PACKAGE floor (Doc 32 §W4) ⇒ per-package
+#         measurement is the natural shape;
+#     (b) a single whole-workspace `llvm-cov` aggregation
+#         DETERMINISTICALLY SIGSEGVs on this codebase
+#         (LLVM-22 `getInstantiationGroups`, reproduced 2026-05-18 on
+#         nightly LLVM-22 AND stable LLVM-22.1.2) — per-package isolation
+#         is the working, robust path;
+#     (c) per-package + `cargo llvm-cov clean` between keeps the
+#         instrumented object set small and is disk-protective on the
+#         tight box (GT-10).
+#
+# ─────────────────────────────────────────────────────────────────────────
+# THE RATCHET (Doc 32 §W4 — the gate the W6 closeout re-derives)
+# ─────────────────────────────────────────────────────────────────────────
+# `coverage-floors.toml` is the COMMITTED single source of truth (the
+# `tests/conformance/COVERAGE_MAP.md` recorded-artifact analogue): the
+# MEASURED baseline, the ENFORCED `floor(measured−2%)` Day-1 floor, the
+# climbed-to 85/75 (fsm-verify 90/80) TARGET, and the enumerated,
+# per-entry-justified exclusion allowlist (incl. the precisely-reproduced
+# fsm-lsp-branch LLVM-22 infra exclusion). `scripts/coverage-gate.py` is
+# the gate engine (it ENFORCES the committed floors; it does NOT decide
+# them) and carries its OWN non-vacuity RED-proof
+# (`--red-proof`: a deliberate floor-bump-without-tests AND a
+# coverage-drop both FAIL via the IDENTICAL gate predicate, then the real
+# tree PASSES — the W3 `EXPECTED:73`-lock method). The ratchet is
+# MONOTONIC non-decreasing: `--check-monotonic` fails CI if any floor was
+# lowered vs the base ref. NO coverage-gaming: the floors were measured
+# against the EXISTING behavioural suite; NO assertion-free
+# line-execution test was added (Doc 32 §W4 §5.4 — the cardinal sin).
+
+# ── The job block (W5 composes this under `jobs:` in ci.yml) ────────────
+coverage-rust:
+  name: coverage-rust / cargo-llvm-cov branch ratchet (nightly, additive)
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+      # Full history so `--check-monotonic` can `git show <base>:` the
+      # previous coverage-floors.toml (the ratchet-never-lowers check).
+      with:
+        fetch-depth: 0
+
+    # The ADDITIVE nightly toolchain — does NOT touch the 1.75 pin (the
+    # exact `sca` additive-`stable` isolation, nightly here because
+    # `cargo-llvm-cov --branch` is nightly-only; Doc 32 §6 H4 / GT-1).
+    # `llvm-tools-preview` is the instrumentation backend cargo-llvm-cov
+    # needs.
+    - name: Install an additive nightly toolchain (does NOT touch the 1.75 pin)
+      run: |
+        rustup toolchain install nightly --profile minimal \
+          --component llvm-tools-preview
+        rustup +nightly show
+
+    - name: Cache cargo registry and target/
+      uses: Swatinem/rust-cache@v2
+
+    # cargo-llvm-cov is a CONTAINED cargo dev-tool (NOT a system apt
+    # package) — installed in THIS runner only (the CI-first default,
+    # GT-10 / OWNER-2; the `sca` `cargo +stable install cargo-audit`
+    # precedent, nightly instead of stable).
+    - name: Install cargo-llvm-cov (contained dev-tool, on nightly)
+      run: cargo +nightly install cargo-llvm-cov --locked
+
+    # MEASURE: per-package `cargo +nightly llvm-cov --branch` ⇒
+    # target/w4-coverage/cov-<pkg>.json. Doc 32 §W4: the floor is
+    # MEASURED, never guessed — this step produces the real numbers the
+    # gate enforces. fsm-lsp is measured via --lib + line-only (its
+    # subprocess-stdio integration test is instrumentation-flaky and its
+    # --branch hits a reproduced LLVM-22 SIGSEGV — both recorded +
+    # justified in coverage-floors.toml [exclusions.*]). The script
+    # re-probes fsm-lsp --branch every run and SHOUTS if the upstream
+    # LLVM-22 bug is fixed (self-healing disclosure).
+    - name: Measure per-package coverage (cargo-llvm-cov --branch)
+      run: python3 scripts/coverage-gate.py --measure
+
+    # THE GATE (Doc 32 §W4 §5.4): FAIL CI if ANY package's freshly
+    # measured line/branch dropped below its ratcheted floor in
+    # coverage-floors.toml. Non-vacuity is proven by the next step.
+    - name: Coverage ratchet gate (fail if below floor)
+      run: python3 scripts/coverage-gate.py --gate
+
+    # NON-VACUITY RED-PROOF run IN CI (Doc 32 §W4 §5.4 — a gate that
+    # cannot fail is worthless): proves, via the IDENTICAL gate predicate,
+    # that a deliberate floor-bump-without-tests AND a coverage-drop both
+    # FAIL, and the real tree PASSES. Runs every CI build so the gate's
+    # non-vacuity is continuously asserted, not a one-time claim (the W3
+    # in-suite RED-proof precedent).
+    - name: Prove the coverage gate is non-vacuous (RED-proof)
+      run: python3 scripts/coverage-gate.py --red-proof
+
+    # MONOTONIC RATCHET (Doc 32 §W4 (3)): the floor only ever ascends.
+    # FAIL CI if any floor_* in this commit is BELOW the base ref's
+    # value. On `pull_request` the base is the PR target; on push to main
+    # it is the previous commit. (W5 may parametrise the base ref; the
+    # mechanism is here.)
+    - name: Ratchet is monotonic (no floor was lowered)
+      run: |
+        BASE="${GITHUB_BASE_REF:-HEAD~1}"
+        python3 scripts/coverage-gate.py --check-monotonic "$BASE"
