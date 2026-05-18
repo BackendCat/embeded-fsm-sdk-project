@@ -204,14 +204,43 @@ pub(crate) fn ident_tokens(n: &SyntaxNode) -> Vec<String> {
 }
 
 impl ChoiceBranch {
+    /// Branch target state name (after `->`). `first_ident` walks only this
+    /// node's *direct* tokens; the guard's idents live inside the nested
+    /// `GUARD_CLAUSE` child node, so the first direct ident is the target —
+    /// the same reasoning that makes `TransitionDecl::trigger` skip a
+    /// nested `BRANCH_HINT` ident.
     pub fn target(&self) -> Option<String> {
         first_ident(&self.0)
+    }
+    /// The `[ … ]` guard of this branch (`[else]` lowers to `GuardExpr::Else`
+    /// in `lower_guard_clause`). `grammar/state.rs::parse_choice_branch`
+    /// always wraps the bracket form in a `GUARD_CLAUSE` child; this mirrors
+    /// `TransitionDecl::guard` exactly (typed first child of that kind).
+    pub fn guard(&self) -> Option<crate::ast::GuardClause> {
+        super::child(&self.0)
+    }
+    /// The optional `: action_list` block. Mirrors `TransitionDecl::actions`
+    /// — the typed first `ACTION_BLOCK` child (`None` when the branch has no
+    /// `:` suffix).
+    pub fn actions(&self) -> Option<crate::ast::ActionBlock> {
+        super::child(&self.0)
     }
 }
 
 impl JunctionBranch {
+    /// Branch target state name (after `->`); see `ChoiceBranch::target`.
     pub fn target(&self) -> Option<String> {
         first_ident(&self.0)
+    }
+    /// The `[ … ]` guard of this branch; see `ChoiceBranch::guard`. The
+    /// junction grammar (`parse_choice_branch_inner`) builds the identical
+    /// `GUARD_CLAUSE`/`ACTION_BLOCK` child shape as a choice branch.
+    pub fn guard(&self) -> Option<crate::ast::GuardClause> {
+        super::child(&self.0)
+    }
+    /// The optional `: action_list` block; see `ChoiceBranch::actions`.
+    pub fn actions(&self) -> Option<crate::ast::ActionBlock> {
+        super::child(&self.0)
     }
 }
 
