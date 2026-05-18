@@ -126,6 +126,46 @@ pub fn emit_transition_body(
                 ));
             }
         }
+        // FW109 (Doc 32 §1 W1, the record-model determination; the FW1-FU-2
+        // active-descendant class generalised from Composite to Parallel):
+        // the shipped `fsm_simulator::execute_one_transition`'s `full_exits`
+        // adds **every active descendant** of every exited state. When the
+        // exited state is this Parallel, that is the runtime-active leaf of
+        // EVERY region (the source region's too — it is an active descendant
+        // of the Parallel — AND any **Final** leaf). The prior codegen
+        // recorded only the Parallel itself in the trace exit-set (via the
+        // static chain's `exited_ir`), so vending-machine's `RESET`
+        // (`Operational -> Done`) recorded `ext=Operational` while the
+        // oracle records `ext=Operational,PaymentFinal,SelectionFinal` — a
+        // genuine trace-record-fidelity codegen bug (NOT a projection
+        // artifact; the simulator's exit-set genuinely contains those
+        // active Final leaves). Append, under `#ifdef FSM_TRACE` ONLY (the
+        // production C is byte-unchanged — this is a trace tap), the
+        // runtime-resolved active leaf of every region slot of the exited
+        // Parallel. This is a record of the C's OWN `_active[]` (what it
+        // observed), not a re-derivation of the simulator (the keystone,
+        // Doc 32 §2). The Parallel itself is NOT re-appended here (the
+        // static `exited_ir` already records it).
+        let all_region_leaves = collect_parallel_region_leaves_all(ctx, parallel_idx);
+        if !all_region_leaves.is_empty() {
+            out.push_str(&format!(
+                "{pad}#ifdef FSM_TRACE\n{pad}/* Parallel active-descendant exit-set (Doc 08 §6.1/§6.3, FW109) */\n",
+                pad = pad,
+            ));
+            for leaf_idx in all_region_leaves {
+                let leaf = ctx.index.get(leaf_idx);
+                let slot = ctx.layout.slot(leaf_idx);
+                out.push_str(&format!(
+                    "{pad}if (m->_active[{slot}] == {macro}_STATE_{lname}) fsm_trace_csv_append(m->_trace_ext, sizeof(m->_trace_ext), {lit});\n",
+                    pad = pad,
+                    slot = slot,
+                    macro = ctx.macro_prefix(),
+                    lname = leaf.c_name,
+                    lit = super::trace_hook::c_string_literal(&leaf.ir_id),
+                ));
+            }
+            out.push_str(&format!("{pad}#endif /* FSM_TRACE */\n", pad = pad));
+        }
     }
     // Emit the source-region exit chain.
     // P0-4: when a state owns timers, disarm them on exit so they cannot
@@ -388,21 +428,33 @@ pub fn emit_transition_body(
     // differential cross-checks against the simulator). This is a trace
     // tap, not a re-derivation — `#ifndef FSM_TRACE` strips it entirely so
     // the production C is byte-identical (the keystone, Doc 32 §2).
+    //
+    // FW109 (Doc 32 §1 W1, the record-model determination): the trace
+    // entered/exited SET must mirror the shipped
+    // `fsm_simulator::execute_one_transition`'s `entered_all`/`exited_all`
+    // *exactly* — and the simulator records **Final** states in those sets
+    // (`enter_state_path` pushes every `entry_path` state incl. Final into
+    // `entered_all`; `is_leaflike` puts a Final leaf into `active_states`;
+    // `full_exits`/`exit_set` symmetrically include the active Final leaf —
+    // see interpreter.rs). The prior trace filter `&& != Final` wrongly
+    // dropped Final from the *recorded* set (a genuine record-fidelity
+    // codegen bug of the FW1-FU-2 active-descendant class, not a projection
+    // artifact): vending-machine's `Dispensing -> SelectionFinal` /
+    // `ChangeAvailable -> PaymentFinal` and submachine's `Established ->
+    // s-Connection-Done` are real `entered_states`/`exited_states` the
+    // oracle records and the C must too. The function-emission gate keeps
+    // `&& != Final` (a Final state has no user `_entry_X`/`_exit_X`); ONLY
+    // this trace-record set is corrected to `is_active_at_rest()` (which
+    // already *includes* Final — the simulator's exact record set).
     let entered_ir: Vec<String> = entry_path(t, ctx.index, ctx.parents)
         .into_iter()
-        .filter(|i| {
-            let k = ctx.index.get(*i).kind;
-            k.is_active_at_rest() && k != StateRecordKind::Final
-        })
+        .filter(|i| ctx.index.get(*i).kind.is_active_at_rest())
         .map(|i| ctx.index.get(i).ir_id.clone())
         .collect();
     let exited_ir: Vec<String> = exits
         .iter()
         .copied()
-        .filter(|i| {
-            let k = ctx.index.get(*i).kind;
-            k.is_active_at_rest() && k != StateRecordKind::Final
-        })
+        .filter(|i| ctx.index.get(*i).kind.is_active_at_rest())
         .map(|i| ctx.index.get(i).ir_id.clone())
         .collect();
     out.push_str(&super::trace_hook::emit_trace_record_transition(
@@ -438,6 +490,37 @@ fn collect_parallel_region_leaves_excluding(
         if ctx.layout.slot(idx) == 0 {
             continue;
         }
+        let rec = ctx.index.get(idx);
+        if matches!(
+            rec.kind,
+            StateRecordKind::Simple | StateRecordKind::Final | StateRecordKind::Submachine
+        ) {
+            out.push(idx);
+        }
+    }
+    out
+}
+
+/// Collect every leaf state (simple / final / submachine-ref) in **every**
+/// region of `parallel_idx` — the source region's leaves included, Final
+/// leaves included.
+///
+/// FW109: the *trace-record* candidate set for the Parallel active-
+/// descendant exit-set. The shipped `fsm_simulator`'s `full_exits` records
+/// every active descendant of an exited Parallel — that is the runtime-
+/// active leaf of EVERY region (including the source region's leaf, which
+/// is still an active descendant of the Parallel, AND any Final leaf). This
+/// is the static candidate set; the emitted code's runtime
+/// `m->_active[slot] == STATE_X` guard selects exactly the live ones,
+/// mirroring the simulator's `active_states` membership test. Pure data —
+/// no semantics; the recorded set is read off the C's own `_active[]`.
+fn collect_parallel_region_leaves_all(ctx: &MachineEmitCtx<'_>, parallel_idx: u8) -> Vec<u8> {
+    let parallel_rec = ctx.index.get(parallel_idx);
+    let mut out = Vec::new();
+    for ir_id in states_inside_parallel(ctx.machine, &parallel_rec.ir_id) {
+        let Some(idx) = ctx.index.lookup(&ir_id) else {
+            continue;
+        };
         let rec = ctx.index.get(idx);
         if matches!(
             rec.kind,
