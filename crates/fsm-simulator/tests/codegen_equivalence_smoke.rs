@@ -7,17 +7,27 @@
 //!
 //! ## What it proves (§5.4 behavioural acceptance — NEVER symbol-presence)
 //!
-//! For each of the **5 frozen-trace example FSMs** (GT-7 — `motor`,
-//! `submachine`, `traffic-light`, `vending-machine`, `deferred`; the ones
-//! with both a `.fsm` and a frozen `.trace`):
+//! For the frozen-trace example-FSM **`CORPUS`** (broadened 5 → 12 across
+//! the W1→W1-FU→FW109→FW110-FU-{A,A2,B,C,D,E} reliability arc; the
+//! `CORPUS`/`BYTE_EQUAL`/`BEHAVIOURALLY_EQUIVALENT_JUSTIFIED`/
+//! `KNOWN_DIVERGENT` arrays below are the single source of truth — this
+//! header is **corpus-size-agnostic**, the catalogue-integrity contract,
+//! NOT a frozen "5"; Doc 32 §2):
 //!
-//! - (a) the `FSM_TRACE`-compiled, **run** generated C's emitted trace
-//!   **byte-equals** the shipped `fsm_simulator::execute_trace` `StepRecord`
-//!   oracle, projected through the *same* canonical projection. Several of
-//!   the 5 exercise behaviourally non-trivial paths (motor: a guard + an
-//!   `after` timer; deferred: defer→release→redispatch; submachine: a
-//!   sub-instance + delegation + completion; vending-machine: composite
-//!   completion; traffic-light: a periodic timer chain).
+//! - (a) every `BYTE_EQUAL` member's `FSM_TRACE`-compiled, **run** generated
+//!   C emitted trace **byte-equals** the shipped
+//!   `fsm_simulator::execute_trace` `StepRecord` oracle, projected through
+//!   the *same* canonical projection; every `BEHAVIOURALLY_EQUIVALENT_-
+//!   JUSTIFIED` member's record model legitimately differs but its
+//!   per-prefix quiescent config is proven byte-identical (a separate
+//!   non-vacuous executable proof); `KNOWN_DIVERGENT` is empty (or each
+//!   member precisely RED with a tracked fix-wave). Members exercise
+//!   behaviourally non-trivial paths (motor: a guard + an `after` timer;
+//!   deferred: defer→release→redispatch; submachine: a sub-instance +
+//!   delegation + completion; vending-machine / stress-completion-chain:
+//!   composite/cascading completion; traffic-light / stress-every-timer: a
+//!   periodic timer chain; the `stress-*` set: deep_history, choice/
+//!   junction, sibling-local LCA, parallel cross-exit).
 //! - (b) a deliberately-corrupted oracle (one record's `configAfter`
 //!   mutated in-test) makes the differential go **RED** with a precise
 //!   first-divergence report — the genuine differential signal, not a stub
@@ -54,10 +64,18 @@
 //! / kind keyword ⇒ parse-free, escape-free):
 //!
 //! ```text
-//! STEP kind=<k> clk=<u32> evt=<name|-> tr=<stableId|-> src=<ir|->
-//!      dst=<ir|-> cfgB=<sorted csv> cfgA=<sorted csv> ent=<sorted csv>
+//! STEP kind=<k> evt=<name|-> tr=<stableId|-> src=<ir|-> dst=<ir|->
+//!      cfgB=<sorted csv> cfgA=<sorted csv> ent=<sorted csv>
 //!      ext=<sorted csv>
 //! ```
+//!
+//! (No `clk=` field is projected: the absolute virtual clock is
+//! **non-observable** by any FSM-Lang construct — Doc 08 §13.5 — so
+//! including it would test the simulator's private virtual time, not FSM
+//! behaviour; this matches `project_record` exactly. The clock enters only
+//! *relatively* via the trace's `advance_clock` deltas, which drive timer
+//! expiry whose *effect* is already captured by the transition/config/
+//! entered/exited fingerprint.)
 //!
 //! - `kind`/`evt`/`tr`/`src`/`dst`/`cfgB`/`cfgA`/`ent`/`ext` are a direct
 //!   projection of `StepRecord.{kind, event_received.name,
@@ -91,7 +109,7 @@
 //!     silently dropped.
 //!   The projection is still a strong behavioural fingerprint: a wrong
 //!   transition, wrong target, wrong config, or wrong entered/exited set on
-//!   *any* of the 5 FSMs makes it RED (proven by acceptance (b)).
+//!   *any* `CORPUS` FSM makes it RED (proven by acceptance (b)).
 //!
 //! ## Skip-if-absent (the `gcc_compile.rs` precedent)
 //!
