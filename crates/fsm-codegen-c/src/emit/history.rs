@@ -27,20 +27,40 @@
 //! the runtime-resolved restored child, writes the real leaf into the slot,
 //! and records it in the trace.
 //!
-//! ## v1.0 scope (honest)
+//! ## Scope (honest — updated FW110-FU-B)
 //!
 //! - **Shallow history into a flat (single-leaf) region** — fully correct
 //!   (the recorded direct-child IS the leaf; the restore enters it and
-//!   writes the slot). This is the `traffic-light` fixture.
+//!   writes the slot). This is the `traffic-light` fixture (BYTE_EQUAL).
 //! - **Shallow history into a region whose direct child is itself a
 //!   composite** — the restore enters that direct child and then expands
 //!   *its* initial chain (a fresh deeper config, the UML shallow-history
 //!   semantics: only the direct child is remembered, deeper state is
 //!   re-initialised). Handled.
-//! - **Deep history**, and **history across parallel regions**, remain the
-//!   pre-existing v1.0 limitation (`_history_record_X` snapshots
-//!   `_active[0]` only). Not exercised by any shipped example; recorded,
-//!   not silently widened (the brief's anti-scope-creep discipline).
+//! - **Deep history into a (possibly multi-level) nested *single-region*
+//!   composite** — **now fully correct (FW110-FU-B)**. The recorded slot
+//!   holds the innermost active *leaf* (for a non-parallel nested composite
+//!   the deep leaf already lives in `_active[0]`, so `_history_record_X` is
+//!   unchanged and correct); `restore_deep_leaf_chains` re-enters EVERY
+//!   intermediate composite from the owning composite's region down to that
+//!   remembered leaf and then the leaf, writing its slot. This mirrors the
+//!   shipped `fsm_simulator` `record_history_before_exit`
+//!   (`HistoryKind::Deep` → `find_active_in_subtree`) +
+//!   `resolve_target`(History) → `entry_path`/`expand_initial` EXACTLY (the
+//!   `stress-deep-history` fixture is BYTE_EQUAL to the unforked oracle).
+//!   UML deep history: the full nested configuration is *remembered and
+//!   restored*, not re-initialised (the shallow contrast above).
+//! - **History across parallel regions** remains the pre-existing v1.0
+//!   limitation: `_history_record_X` snapshots `_active[0]` only, so for a
+//!   history-bearing composite whose subtree contains a PARALLEL state the
+//!   other regions' leaves are not captured/restored. This is a genuinely
+//!   separable residual (a multi-slot snapshot + per-region restore-ordering
+//!   problem), NOT exercised by `stress-deep-history` (a single-region
+//!   nested composite) nor any shipped example. Recorded honestly, not
+//!   silently widened (the anti-scope-creep discipline); a dedicated
+//!   follow-up wave is recommended if/when a parallel-region-history fixture
+//!   is added (the W1→W1-FU precedent — see the FW110-FU-B completion
+//!   report's explicit scope decision).
 
 use fsm_ir::StateNode;
 
@@ -77,13 +97,26 @@ pub fn emit_history_helpers(ctx: &MachineEmitCtx<'_>) -> String {
             "    /* Record current leaf for history {hp} (Doc 08 §6.4) */\n",
             hp = hp_rec.dsl_name,
         ));
-        // History recording targets the composite's primary slot. v1.0
-        // does not yet support history across parallel regions; for
-        // non-parallel composites the relevant leaf always lives in
-        // `_active[0]`. For a flat region this leaf IS the shallow-history
-        // direct child (the simulator's `direct_child_of` for a flat region
-        // returns the leaf itself); a nested-composite direct child is the
-        // pre-existing v1.0 limitation documented in the module header.
+        // History recording targets the composite's primary slot. For a
+        // non-parallel composite the relevant active leaf always lives in
+        // `_active[0]` — and this is correct for BOTH shallow and deep:
+        //   • SHALLOW: the simulator records `direct_child_of(ex, leaf)`;
+        //     for a flat region the direct child IS the leaf (== `_active[0]`)
+        //     and `restore_children_chains` re-expands a nested direct child's
+        //     initial (the UML shallow re-init), so the slot need only pin
+        //     the direct child / flat leaf.
+        //   • DEEP (FW110-FU-B): the simulator records
+        //     `find_active_in_subtree` = the innermost active *leaf*; for a
+        //     single-region nested composite that leaf is exactly
+        //     `_active[0]`, and `restore_deep_leaf_chains` re-enters the full
+        //     path down to it (UML deep restore). So the single-`StateId_t`
+        //     slot is sufficient and `_active[0]` is the right thing to
+        //     snapshot here.
+        // History ACROSS PARALLEL REGIONS is the documented limitation
+        // (module header §scope): a parallel subtree's non-primary regions
+        // are not in `_active[0]`, so they are not captured. Not exercised
+        // by `stress-deep-history` (single-region nested); not silently
+        // widened.
         s.push_str(&format!(
             "    m->_history_{name} = m->_active[0];\n",
             name = rec.c_name,
@@ -117,13 +150,43 @@ pub fn emit_history_helpers(ctx: &MachineEmitCtx<'_>) -> String {
                 "    /* default_target missing — analyzer (FSM-E0111) should have rejected */\n",
             );
         }
-        // For each possible remembered direct child of the composite's
-        // region, run that child's entry sequence (the simulator's
-        // `resolve_target` → `entry_path`/`expand_initial`), write the
-        // leaf-most state into the slot, and (gated) record the entered
-        // ids in the step's `ent` set. Exactly one branch fires at runtime
-        // (the recorded child, or the default normalised above).
-        for (child_idx, chain) in restore_children_chains(ctx, rec) {
+        // SHALLOW: for each possible remembered *direct child* of the
+        // composite's region, run that child's entry sequence (the
+        // simulator's `resolve_target` → `entry_path`/`expand_initial`),
+        // write the leaf-most state into the slot, and (gated) record the
+        // entered ids in the step's `ent` set.
+        //
+        // DEEP (FW110-FU-B): the simulator's `record_history_before_exit`
+        // `HistoryKind::Deep` arm snapshots the FULL active descendant set
+        // (`find_active_in_subtree` — for a single-region nested composite
+        // that is exactly the innermost active leaf, since `active_states`
+        // holds only leaf-like states — `is_leaflike`), and `resolve_target`
+        // returns that remembered leaf path. So the recorded slot holds the
+        // *deep leaf* (not a direct child). The match key is therefore the
+        // set of all possible *deep leaves*; the entry chain re-enters every
+        // intermediate composite from the owning composite's region down to
+        // that leaf and then the leaf (the simulator's `entry_path` from the
+        // composite to the remembered leaf — see `restore_deep_leaf_chains`).
+        // The single-`StateId_t` `_history_{name}` slot is sufficient here:
+        // for a non-parallel nested composite the deep leaf already lives in
+        // `_active[0]` at record time, so `record` is unchanged. History
+        // ACROSS PARALLEL REGIONS remains a documented limitation (module
+        // header §scope); the fixture exercises a single-region nested
+        // composite only — the anti-scope-creep discipline.
+        //
+        // Exactly one branch fires at runtime (the recorded leaf, or the
+        // default normalised above — for deep, the default_target is in the
+        // deep-leaf set when it is itself a leaf, exactly like the simulator
+        // returning `default_target` on first entry).
+        let chains = match history_kind_of(ctx, &rec.ir_id) {
+            Some(fsm_ir::HistoryKind::Deep) => restore_deep_leaf_chains(ctx, rec),
+            // Shallow (or, defensively, an absent kind — treat as shallow,
+            // the pre-FW110 behaviour) keeps the byte-identical direct-child
+            // restore (this is the `traffic-light` shallow-history path; it
+            // MUST stay byte-identical — proven in the completion report).
+            _ => restore_children_chains(ctx, rec),
+        };
+        for (child_idx, chain) in chains {
             let child_rec = ctx.index.get(child_idx);
             s.push_str(&format!(
                 "    if (restore == {macro}_STATE_{cname}) {{\n",
@@ -219,6 +282,144 @@ fn restore_children_chains(
             expand_initial_chain(ctx, child_idx, &mut chain);
             out.push((child_idx, chain));
         }
+    }
+    out
+}
+
+/// The `history_kind` of the `history` pseudo declared on the composite
+/// whose IR id is `composite_ir_id`, if any. Reads the SAME `c.history`
+/// `HistoryObject` `find_history_default_idx` reads — no new parse, no
+/// re-derivation; the analyzer already validated it (Doc 09 §4.8).
+fn history_kind_of(ctx: &MachineEmitCtx<'_>, composite_ir_id: &str) -> Option<fsm_ir::HistoryKind> {
+    fn walk_states<'a>(
+        states: &'a [StateNode],
+        composite_id: &str,
+    ) -> Option<&'a fsm_ir::HistoryObject> {
+        for s in states {
+            match s {
+                StateNode::Composite(c) => {
+                    if c.id == composite_id {
+                        return c.history.as_ref();
+                    }
+                    for r in &c.regions {
+                        if let Some(hit) = walk_states(&r.states, composite_id) {
+                            return Some(hit);
+                        }
+                    }
+                }
+                StateNode::Parallel(p) => {
+                    for r in &p.regions {
+                        if let Some(hit) = walk_states(&r.states, composite_id) {
+                            return Some(hit);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    walk_states(&ctx.machine.root.states, composite_ir_id).map(|h| h.history_kind)
+}
+
+/// FW110-FU-B — the DEEP-history restore chains. For every possible
+/// **deep leaf** anywhere in the owning composite's subtree, the entry
+/// chain to run when *that* leaf is the remembered one: every intermediate
+/// composite/parallel ancestor strictly between the owning composite
+/// (EXCLUSIVE — the static `entry_path` in `transition.rs` already enters
+/// it) and the leaf, in root-first order, then the leaf itself.
+///
+/// This mirrors the shipped simulator EXACTLY: `record_history_before_exit`'s
+/// `HistoryKind::Deep` arm stores `find_active_in_subtree` (the active
+/// *leaf-like* descendants — `is_leaflike` is Simple/Final/SubmachineRef);
+/// `resolve_target` returns that remembered leaf path; the transition driver
+/// then runs `entry_path(lca, leaf)` (root-first state-node ancestors down
+/// to the leaf) + `expand_initial(leaf)` (a leaf expands to nothing) and
+/// pushes every entered state into `entered_all`, with the leaf landing in
+/// `active_states` (`is_leaflike`). The chain produced here is precisely
+/// that `entry_path` restricted to the descendants of the owning composite
+/// (its own entry having already been emitted statically). UML deep history:
+/// the FULL nested configuration is remembered and restored (NOT
+/// re-initialised — the shallow contrast).
+///
+/// No initial re-expansion is appended: a deep leaf is leaf-like, so the
+/// simulator's `expand_initial(leaf)` yields nothing; the remembered state
+/// IS the resting leaf. (A composite/parallel can never be a `is_leaflike`
+/// member of `active_states`, hence never a recorded deep-history slot — so
+/// every match key here is a true leaf and the chain ends at it.)
+fn restore_deep_leaf_chains(
+    ctx: &MachineEmitCtx<'_>,
+    composite_rec: &crate::state_index::StateRecord,
+) -> Vec<(u8, Vec<u8>)> {
+    let Some(c) = find_composite(ctx.machine, &composite_rec.ir_id) else {
+        return Vec::new();
+    };
+    // Depth-first walk of the composite's region subtree. `path` is the
+    // stack of intermediate composite/parallel container states (NOT the
+    // owning composite, NOT pseudo-states); at each leaf we emit
+    // `(leaf_idx, [..path.., leaf_idx])`.
+    fn walk(
+        ctx: &MachineEmitCtx<'_>,
+        states: &[StateNode],
+        path: &mut Vec<u8>,
+        out: &mut Vec<(u8, Vec<u8>)>,
+    ) {
+        for st in states {
+            match st {
+                StateNode::Simple(x) => {
+                    if let Some(idx) = ctx.index.lookup(&x.id) {
+                        let mut chain = path.clone();
+                        chain.push(idx);
+                        out.push((idx, chain));
+                    }
+                }
+                StateNode::Final(f) => {
+                    if let Some(idx) = ctx.index.lookup(&f.id) {
+                        let mut chain = path.clone();
+                        chain.push(idx);
+                        out.push((idx, chain));
+                    }
+                }
+                StateNode::Submachine(sm) => {
+                    if let Some(idx) = ctx.index.lookup(&sm.id) {
+                        let mut chain = path.clone();
+                        chain.push(idx);
+                        out.push((idx, chain));
+                    }
+                }
+                StateNode::Composite(cc) => {
+                    if let Some(idx) = ctx.index.lookup(&cc.id) {
+                        path.push(idx);
+                        for r in &cc.regions {
+                            walk(ctx, &r.states, path, out);
+                        }
+                        path.pop();
+                    }
+                }
+                StateNode::Parallel(p) => {
+                    if let Some(idx) = ctx.index.lookup(&p.id) {
+                        path.push(idx);
+                        for r in &p.regions {
+                            walk(ctx, &r.states, path, out);
+                        }
+                        path.pop();
+                    }
+                }
+                // Pseudo-states (initial / the history pseudo itself /
+                // choice / junction / fork / join) are never an active
+                // leaf-like state — never a recorded deep-history slot.
+                _ => {}
+            }
+        }
+    }
+    let mut out: Vec<(u8, Vec<u8>)> = Vec::new();
+    let mut path: Vec<u8> = Vec::new();
+    // A composite has exactly one region in v1.0 (parallel is a distinct
+    // node kind); the recursion above still descends nested parallels for
+    // robustness (their slot/entry handling is the documented limitation —
+    // see the module header §scope; this fixture is single-region nested).
+    if let Some(region) = c.regions.first() {
+        walk(ctx, &region.states, &mut path, &mut out);
     }
     out
 }

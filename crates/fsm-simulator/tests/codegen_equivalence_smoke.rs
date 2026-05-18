@@ -126,6 +126,9 @@ const SEP: char = '\u{1f}';
 ///   • `stress-deep-history`        — `deep_history` restore of a 2-level
 ///                                    nested leaf (shallow_history was
 ///                                    covered; deep is a distinct path).
+///                                    BYTE_EQUAL since FW110-FU-B (the fix
+///                                    landed; was KNOWN_DIVERGENT — see the
+///                                    BYTE_EQUAL catalogue note).
 ///   • `stress-every-timer`         — PERIODIC `every N ms` re-arm +
 ///                                    `every … :` internal (only one-shot
 ///                                    `after` was covered).
@@ -943,11 +946,51 @@ fn run_differential(example: &str) -> Result<(), String> {
 ///                   parallel only AFTER both regions reached Final; this
 ///                   one exits with both regions still in ordinary leaves)
 ///                   — `ext=A3,B2,Running` byte-identical to the oracle.
+///
+/// **FW110-FU-B addition — `stress-deep-history`.** `deep_history` restore
+/// of a 2-LEVEL nested single-region composite (`Work` ⊃ {`WorkA`,
+/// `WorkB` ⊃ {`Deep1`,`Deep2`}}; `deep_history HWork`). The fix made the
+/// generated C byte-identical to the shipped `fsm_simulator::execute_trace`
+/// oracle end-to-end (all 5 records; all 5 trace-prefixes quiescent-equal —
+/// `dump_all_corpus_quiescent` `stress-deep-history` now `OK` at every
+/// prefix incl. prefix 4 `RESUME`, previously `[DIFF] sim=[Deep2]
+/// gen=[Paused]`). Two genuine codegen correctness gains landed (NOT
+/// projection artifacts; the byte-convergence is a real fidelity gain):
+///   1. **Deep-history restore** (`emit/history.rs`): the prior
+///      `_history_restore_X` was hardcoded SHALLOW (matched only the
+///      composite's *direct children*) even for a `deep_history` pseudo, so
+///      a remembered DEEP leaf (`Deep2`, in the slot) matched no branch and
+///      `RESUME` left the machine in `Paused` forever (an EXPLICIT,
+///      documented pre-existing v1.0 limitation the FW110 fixture exercised
+///      for the first time). Now `deep_history` emits a branch per *deep
+///      leaf*, each re-entering the full path from the owning composite's
+///      region down to that leaf — mirroring the simulator's
+///      `record_history_before_exit`(`HistoryKind::Deep`→
+///      `find_active_in_subtree`) + `resolve_target`(History)→`entry_path`/
+///      `expand_initial` EXACTLY. `shallow_history` (`traffic-light`)
+///      restore is UNCHANGED → byte-identical (proven in the completion
+///      report's `#ifndef FSM_TRACE` diff).
+///   2. **Initial-chain-expansion trace fidelity** (`emit/transition.rs`
+///      `emit_enter_chain`): a composite/parallel *transition target*'s
+///      initial-expanded inner states (`WorkA --GO--> WorkB` entering
+///      `WorkB`'s initial leaf `Deep1`) are pushed to the simulator's
+///      `entered_all` (`expand_initial`→`entered_all`) but were NOT recorded
+///      in the C's trace `ent` set — a latent record-fidelity gap (no prior
+///      BYTE_EQUAL fixture had a composite/parallel transition target that
+///      initial-expands; `traffic-light` only reaches its composite via init
+///      / shallow-history restore, both traced separately). Now mirrored,
+///      gated by `#ifdef FSM_TRACE` (production C byte-identical — the
+///      keystone). History across PARALLEL regions stays a documented v1.0
+///      limitation (`emit/history.rs` module-doc §scope) — genuinely
+///      separable, NOT exercised by this single-region fixture; the
+///      anti-scope-creep discipline (a dedicated follow-up wave recommended
+///      if/when a parallel-region-history fixture is added).
 const BYTE_EQUAL: &[&str] = &[
     "motor",
     "deferred",
     "traffic-light",
     "stress-parallel-cross-exit",
+    "stress-deep-history",
 ];
 
 /// Corpus members whose byte-diff (correctly) REDs because the two engines
@@ -1065,26 +1108,21 @@ const BEHAVIOURALLY_EQUIVALENT_JUSTIFIED: &[&str] =
 /// recommended dedicated fix-wave (the W1→W1-FU/W1-FU-2 precedent — a
 /// deep/wide defect gets a scoped follow-up wave, not an inline rewrite).
 ///
-///   • **`stress-deep-history`** — `deep_history` restore is NOT
-///     implemented in codegen-c. PROVEN behavioural divergence: after
-///     `RESUME` (the `deep_history`-target transition) the shipped
-///     simulator restores the remembered deep nested leaf
-///     (quiescent `cfgA=s-DeepHist-Deep2`) while the generated C **does
-///     not even leave `Paused`** (quiescent `cfgA=s-DeepHist-Paused`) —
-///     `dump_all_corpus_quiescent` prefix 4 `[DIFF] sim=[Deep2]
-///     gen=[Paused]`. ROOT CAUSE: an EXPLICIT, pre-existing, *documented*
-///     v1.0 codegen limitation — `crates/fsm-codegen-c/src/emit/history.rs`
-///     module-doc §"v1.0 scope (honest)": *"Deep history, and history
-///     across parallel regions, remain the pre-existing v1.0 limitation
-///     (`_history_record_X` snapshots `_active[0]` only)"*. The
-///     `_history_restore_<C>` helper is hardcoded shallow even when the
-///     pseudo is `deep_history`. NOT a contained fix (it needs a real deep
-///     snapshot/restore of the full nested leaf path) and the codegen
-///     itself invokes the anti-scope-creep discipline. **RECOMMENDED
-///     DEDICATED FIX-WAVE** (see `docs/AUDIT_RELIABILITY_STAGE_GATE_2026_05_18.md`
-///     §Stream-1 for the spec). It was "not exercised by any shipped
-///     example" — FW110's synthesized fixture now exercises it (the audit
-///     surfacing a known-but-untested gap).
+///   • **`stress-deep-history`** — **RESOLVED (FW110-FU-B); MOVED to
+///     `BYTE_EQUAL`.** Was: `deep_history` restore unimplemented in
+///     codegen-c (the `_history_restore_X` helper hardcoded shallow even
+///     for a `deep_history` pseudo — the remembered deep leaf matched no
+///     direct-child branch, so `RESUME` left the machine in `Paused`;
+///     `dump_all_corpus_quiescent` prefix 4 was `[DIFF] sim=[Deep2]
+///     gen=[Paused]`). The FW110-FU-B fix-wave implemented real deep-history
+///     restore for the nested single-region composite the fixture exercises
+///     (mirroring the shipped simulator's `HistoryKind::Deep` snapshot +
+///     `resolve_target` deep path EXACTLY) and closed a latent
+///     initial-chain-expansion trace gap it co-surfaced; the fixture is now
+///     byte-identical to the oracle end-to-end. See the `BYTE_EQUAL`
+///     catalogue note (FW110-FU-B addition) for the full root-cause +
+///     scope-decision record (history across parallel regions remains a
+///     documented, genuinely-separable v1.0 limitation — anti-scope-creep).
 ///
 ///   • **`stress-choice-guard-payload`** — `choice` / `junction`
 ///     pseudostate RESOLUTION is NOT implemented in codegen-c. PROVEN
@@ -1146,7 +1184,8 @@ const BEHAVIOURALLY_EQUIVALENT_JUSTIFIED: &[&str] =
 ///     traffic-light one-shot paths without a full re-derivation.
 ///     **RECOMMENDED DEDICATED FIX-WAVE** (spec in the audit doc).
 const KNOWN_DIVERGENT: &[&str] = &[
-    "stress-deep-history",
+    // `stress-deep-history` RESOLVED by FW110-FU-B → moved to BYTE_EQUAL
+    // (deep_history restore implemented; see the BYTE_EQUAL note).
     "stress-choice-guard-payload",
     "stress-self-transitions",
     "stress-every-timer",
@@ -1169,6 +1208,22 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
     // JUSTIFIED / KNOWN_DIVERGENT) and the counts SUM to the corpus size
     // (the FW109 self-consistency requirement). No fixture may appear in
     // two buckets; none may be missing.
+    //
+    // Post-FW110-FU-B exact honest distribution (asserted dynamically below
+    // — this comment is the human-readable record, the verify-the-record
+    // discipline applied to the catalogue's own arithmetic):
+    //   BYTE_EQUAL                          = 5  (motor, deferred,
+    //       traffic-light, stress-parallel-cross-exit, stress-deep-history
+    //       — the last MOVED here by FW110-FU-B: `deep_history` restore now
+    //       byte-identical to the unforked oracle)
+    //   BEHAVIOURALLY_EQUIVALENT_JUSTIFIED  = 3  (vending-machine,
+    //       submachine, stress-completion-chain — record-model differs,
+    //       observable behaviour proven identical)
+    //   KNOWN_DIVERGENT                     = 3  (stress-choice-guard-payload,
+    //       stress-self-transitions, stress-every-timer — real shipped-
+    //       codegen defects, each with a recommended dedicated fix-wave)
+    //   ──────────────────────────────────────────────────────────────────
+    //   SUM                                 = 11 == CORPUS.len()
     {
         let mut all: Vec<&str> = BYTE_EQUAL
             .iter()

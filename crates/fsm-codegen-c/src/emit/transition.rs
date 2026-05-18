@@ -742,6 +742,29 @@ fn emit_enter_chain(ctx: &MachineEmitCtx<'_>, state_idx: u8, pad: &str, out: &mu
             }
         }
     };
+    // FW110-FU-B: record the initial-chain-entered state in the trace `ent`
+    // set, gated by `#ifdef FSM_TRACE`. The shipped `fsm_simulator` pushes
+    // EVERY `expand_initial` state into `entered_all` (interpreter.rs
+    // `execute_one_transition` step 6 — `run_entry(sid)` then
+    // `entered_all.push(sid)` for each expanded `sid`), so a composite/
+    // parallel transition target's initial-expanded inner states (e.g.
+    // `WorkA --GO--> WorkB` entering `WorkB`'s initial leaf `Deep1`) are
+    // recorded `ent` ids the C must report too. The static
+    // `emit_trace_record_transition` only emits the `entry_path` ids (the
+    // LCA→target chain); these expanded ids are the runtime analogue of the
+    // simulator's `expand_initial` contribution and were a latent
+    // record-fidelity gap (no prior BYTE_EQUAL fixture had a composite/
+    // parallel *transition target* that initial-expands — `traffic-light`
+    // only ever reaches its composite via init / shallow-history restore,
+    // both of which trace separately). `#ifndef FSM_TRACE` strips this
+    // entirely → the production C is byte-identical (the keystone).
+    let trace_ent = |state_idx: u8, out: &mut String| {
+        out.push_str(&format!(
+            "{pad}#ifdef FSM_TRACE\n{pad}fsm_trace_csv_append(m->_trace_ent, sizeof(m->_trace_ent), {lit});\n{pad}#endif\n",
+            pad = pad,
+            lit = super::trace_hook::c_string_literal(&ctx.index.get(state_idx).ir_id),
+        ));
+    };
     match rec.kind {
         StateRecordKind::Simple | StateRecordKind::Final | StateRecordKind::Submachine => {
             let slot = ctx.layout.slot(state_idx);
@@ -752,6 +775,13 @@ fn emit_enter_chain(ctx: &MachineEmitCtx<'_>, state_idx: u8, pad: &str, out: &mu
                 macro = macro_prefix,
                 name = rec.c_name,
             ));
+            // Mirror `expand_initial`→`entered_all`: a leaf reached via the
+            // initial chain IS pushed to the simulator's `entered_all`
+            // (incl. Final — `is_leaflike(Final)` and `enter_state_path`
+            // push it). Record it BEFORE the entry-action emission so the
+            // raw append order is irrelevant (the step emitter sorts the
+            // whole `_trace_ent` union — see trace_hook.rs).
+            trace_ent(state_idx, out);
             if rec.kind != StateRecordKind::Final {
                 // v1.1-W2d: a ref-state reached via an initial-chain
                 // expansion (a `state X is Sub` as a composite's initial)
@@ -778,6 +808,10 @@ fn emit_enter_chain(ctx: &MachineEmitCtx<'_>, state_idx: u8, pad: &str, out: &mu
                 name = rec.c_name,
             ));
             arm_timers(state_idx, out);
+            // The simulator's `expand_initial` pushes a composite reached
+            // via the initial chain into `entered_all` too (it recurses
+            // INTO it, having pushed it). Record it.
+            trace_ent(state_idx, out);
             if let Some(c) = find_composite(ctx.machine, &rec.ir_id) {
                 if let Some(region) = c.regions.first() {
                     if let Some(init_idx) = ctx.index.lookup(&region.initial) {
@@ -797,6 +831,9 @@ fn emit_enter_chain(ctx: &MachineEmitCtx<'_>, state_idx: u8, pad: &str, out: &mu
                 name = rec.c_name,
             ));
             arm_timers(state_idx, out);
+            // As Composite: `expand_initial` pushes the parallel container
+            // into `entered_all` before recursing its regions. Record it.
+            trace_ent(state_idx, out);
             if let Some(p) = find_parallel(ctx.machine, &rec.ir_id) {
                 for region in &p.regions {
                     if let Some(init_idx) = ctx.index.lookup(&region.initial) {
