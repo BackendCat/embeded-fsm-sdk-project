@@ -111,6 +111,182 @@ pub fn timer_event_c(ctx: &MachineEmitCtx<'_>, timer_id: &str) -> Option<String>
         .map(|t| format!("{}_EVENT_{}", ctx.macro_prefix(), t.event_suffix))
 }
 
+/// Whether ≥2 timers can be ARMED in the SAME active configuration at the
+/// same instant — i.e. some state owns ≥2 timers. This is the precise
+/// condition under which a same-instant timer-vs-timer competition (and
+/// hence FW110-FU-D's atomic-capture *and* FW110-FU-E's owner-exited-mid-
+/// instant case) can occur; below it, at most one timer is armed in any
+/// reachable configuration so the ordered-set / static-owner re-derivations
+/// are provably no-ops (the legacy single-timer-per-instant walk + the
+/// active-config dispatch walk are exactly equivalent — every corpus
+/// one-shot-`after` fixture: `motor`'s single timer; `traffic-light`'s four
+/// `after`s in the mutually-exclusive sibling leaves of composite `Auto`,
+/// never co-active).
+///
+/// **The shared GATE for BOTH FW110-FU-D (`emit_advance_clock`) and
+/// FW110-FU-E (`emit_timer_fire_selection`).** Gating both on the SAME
+/// predicate is what keeps every byte-equal one-shot-timer fixture's
+/// production C **byte-identical** (the mandatory no-regression guardrail):
+/// a machine where no state owns ≥2 timers gets the verbatim pre-FW110-FU-D
+/// `advance_clock` *and* the verbatim pre-FW110-FU-E active-config dispatch
+/// walk. Same documented soundness scope as FW110-FU-D: "no state owns ≥2
+/// timers" is sufficient for the corpus but does NOT cover
+/// ancestor↔descendant or parallel-region co-armed timers in *non-corpus*
+/// machines — those keep the legacy walk with the SAME pre-existing
+/// same-instant limitation FW110-FU-D/E only partially close; no corpus
+/// fixture exercises that shape, bracketed exactly as the catalogue
+/// brackets analogous edges and folded into the recommended dedicated
+/// follow-up.
+pub fn timers_can_co_arm(timers: &[TimerEntry]) -> bool {
+    let mut owner_counts: std::collections::BTreeMap<u8, usize> = Default::default();
+    for t in timers {
+        *owner_counts.entry(t.owner_state).or_insert(0) += 1;
+    }
+    owner_counts.values().any(|&c| c >= 2)
+}
+
+/// FW110-FU-E — the timer-fire transition-selection re-derivation.
+///
+/// **Defect this closes.** The shipped, unforked simulator resolves a
+/// **timer-fire** event's transition NOT by walking the active
+/// configuration but **statically, by the timer's `(owner-state,
+/// transition)` binding** — `fsm_simulator::select_transitions`'s
+/// `EventKind::TimerFire` arm does `rt.machine.node(source_state)` (the
+/// *immutable IR* node — `source_state` is the timer's owner set by
+/// `arm_timers_on_entry`), `.transitions.iter().find(|t| t.id ==
+/// transition_id)`, evaluates only the guard, and **returns early** (it
+/// does NOT fall through to the per-leaf active-config walk every other
+/// event uses). `execute_one_transition` then runs that transition with the
+/// normal per-kind semantics (Internal ⇒ actions only, no exit/entry;
+/// External/Local ⇒ exit/action/entry). The generated C, by contrast,
+/// resolved *every* event — timer fires included — only by the leaf-to-root
+/// walk over `_active[]`, so a timer transition was found ONLY while its
+/// owner leaf was active. When a same-instant competing transition exits
+/// the owner *before* the timer event is drained (FW110-FU-D's atomic
+/// `pop_fired_through` capture correctly still *dispatches* the captured
+/// timer event, but into a config where the owner is gone), the C's walk
+/// matched nothing and the timer transition's actions were silently
+/// dropped — `stress-every-timer`: the `every 1000 ms : beat()` Internal
+/// missed its clk=3000 tick (a same-instant `every 3000 -> Cooldown` had
+/// exited `Pulsing` first), so the generated C ran `beat()` **3** times
+/// where the oracle runs it **4** (a real missed-heartbeat-class
+/// side-effect divergence on an embedded target).
+///
+/// **The faithful mirror (shared dispatch path, re-derived for ALL
+/// kinds — NOT a `stress-every-timer` special-case).** A timer-fire event
+/// must select its transition from the timer's STATIC owner-state binding,
+/// exactly as `select_transitions` does, and then execute it through the
+/// **unchanged** per-state machinery (`try_transitions_in_state` for the
+/// switch strategy; `select_for_region` keyed at the owner state for the
+/// table strategy) so every transition kind keeps the simulator's
+/// semantics:
+///
+///  * **Owner active** (every `motor`/`traffic-light` one-shot `after`
+///    fire; `stress-every-timer`'s clk=1000/2000/5000/6000 ticks): the
+///    leaf-to-root walk would have reached the owner state's case and
+///    selected the *same* transition via the *same* `try_transitions_in_state`
+///    body. Resolving it directly at the static owner is therefore
+///    **byte-identical** generated C behaviour (same case, same guard, same
+///    `emit_transition_body`) — the mandatory no-regression invariant for
+///    the byte-equal timer fixtures.
+///  * **Owner NOT active** (only `stress-every-timer`'s clk=3000 `every
+///    1000 : beat()`): the walk found nothing (the dropped-`beat()` bug);
+///    the static binding selects `t-Heartbeat-3` (Internal) and runs
+///    `beat()` with no config change — **exactly the unforked oracle's
+///    record** (`tr=t-Heartbeat-3 src=Pulsing dst=Pulsing
+///    cfgB=Cooldown cfgA=Cooldown ent= ext=`, `beat()`==4).
+///  * **Guarded timer transition**: `try_transitions_in_state` /
+///    `_row_guard_enabled` already emit the guard check, mirroring
+///    `select_transitions`'s `eval_guard` on the timer arm — faithful.
+///  * **Non-timer (`on EVT` / `done`/completion) events**: untouched — the
+///    emitted switch only diverts the per-timer event ids; everything else
+///    still flows through the existing active-config walk + completion
+///    sweep + defer hooks, exactly as `select_transitions` keeps its
+///    active-config walk for non-`TimerFire` events.
+///
+/// A timer is owned by exactly one state and its transition's `source` IS
+/// that owner (`arm_timers_on_entry` binds `transition_id` from the owner
+/// node's own `transitions`), so dispatching at the owner with no ancestor
+/// walk is the precise analogue of the simulator's single-node
+/// `node(source_state)` lookup (no parallel fan-out: a `TimerFire`
+/// selection is at most one transition in the simulator too).
+///
+/// **GATED on [`timers_can_co_arm`]** — the SAME predicate FW110-FU-D's
+/// `emit_advance_clock` gates its ordered-set walk on. Returns `None`
+/// (⇒ caller emits its pre-FW110-FU-E active-config walk **verbatim**, the
+/// mandatory no-regression guardrail) when the machine has **no timers** OR
+/// **no state owns ≥2 timers**. The FW110-FU-E divergence (a timer-fire
+/// dispatched into a config where its owner was exited by a *same-instant
+/// competing transition*) can ONLY occur when ≥2 timers are co-armed in the
+/// same configuration and one's transition exits the other's owner — i.e.
+/// exactly the `timers_can_co_arm` condition. Below it, a timer's owner is
+/// PROVABLY always active when its timer fires (at most one timer armed in
+/// any reachable configuration ⇒ no same-instant timer-vs-timer race), so
+/// the static-owner selection and the active-config leaf-to-root walk are
+/// exactly equivalent — `motor` (1 timer) and `traffic-light` (4 `after`s
+/// in mutually-exclusive sibling leaves, never co-armed) emit
+/// **byte-identical** generated C to pre-FW110-FU-E (verified by the
+/// mandatory `diff -rq` base↔HEAD). Only `stress-every-timer` (`Pulsing`
+/// owns 2 timers ⇒ `timers_can_co_arm` true) gets the static-owner
+/// selection — which IS the fix. When emitted, returns the C
+/// `switch (ev->id) { … }` whose body, per timer event id, runs
+/// `<select_at_owner>` (the timer-fire branch — `select_transitions`'s
+/// `EventKind::TimerFire` early-return); `default:` (a non-timer event)
+/// runs `<non_timer>` (the existing active-config walk, unchanged —
+/// `select_transitions` keeps its walk for non-`TimerFire` events).
+pub fn emit_timer_fire_selection(
+    ctx: &MachineEmitCtx<'_>,
+    select_at_owner: &dyn Fn(&MachineEmitCtx<'_>, /*owner_state_macro*/ &str) -> String,
+    non_timer: &str,
+    indent: &str,
+) -> Option<String> {
+    let timers = collect_timers(ctx);
+    if timers.is_empty() {
+        return None;
+    }
+    // GATE — same condition as FW110-FU-D's `emit_advance_clock`
+    // ordered-set gate. A machine where no state owns ≥2 timers cannot
+    // exhibit the same-instant owner-exited-mid-instant race FW110-FU-E
+    // closes; emitting the static-owner switch there would change its
+    // generated C with ZERO behavioural effect (the owner is always active
+    // when its timer fires), violating the no-regression byte-identity
+    // guardrail. Returning `None` makes the caller emit its verbatim
+    // pre-FW110-FU-E walk ⇒ byte-identical (motor, traffic-light).
+    if !timers_can_co_arm(&timers) {
+        return None;
+    }
+    let macro_prefix = ctx.macro_prefix();
+    let mut s = String::new();
+    s.push_str(&format!("{indent}switch (ev->id) {{\n"));
+    for t in &timers {
+        let owner = ctx.index.get(t.owner_state);
+        let owner_macro = format!("{}_STATE_{}", macro_prefix, owner.c_name);
+        s.push_str(&format!(
+            "{indent}case {macro}_EVENT_{esuf}: {{ /* FW110-FU-E: timer-fire selected by the timer's STATIC (owner,transition) binding — fsm_simulator::select_transitions's EventKind::TimerFire early-return; owner = {dsl} */\n",
+            indent = indent,
+            macro = macro_prefix,
+            esuf = t.event_suffix,
+            dsl = owner.dsl_name,
+        ));
+        s.push_str(&select_at_owner(ctx, &owner_macro));
+        s.push_str(&format!(
+            "{indent}    break;\n{indent}}}\n",
+            indent = indent
+        ));
+    }
+    s.push_str(&format!(
+        "{indent}default: {{ /* not a timer fire — the existing active-config walk (select_transitions keeps its leaf-to-root walk for non-TimerFire events) */\n",
+        indent = indent,
+    ));
+    s.push_str(non_timer);
+    s.push_str(&format!(
+        "{indent}    break;\n{indent}}}\n",
+        indent = indent
+    ));
+    s.push_str(&format!("{indent}}}\n", indent = indent));
+    Some(s)
+}
+
 /// Emit the `Motor_advance_clock` body — the tick function.
 ///
 /// **Semantics: an expiry-walk that *consumes* the elapsed budget, byte-for-
@@ -275,11 +451,7 @@ pub fn emit_advance_clock(ctx: &MachineEmitCtx<'_>) -> String {
     // closes. No corpus fixture exercises that shape; it is bracketed
     // exactly as the catalogue brackets analogous edges and folded into the
     // recommended dedicated follow-up (see the catalogue note).
-    let mut owner_counts: std::collections::BTreeMap<u8, usize> = Default::default();
-    for t in &timers {
-        *owner_counts.entry(t.owner_state).or_insert(0) += 1;
-    }
-    let needs_ordered_set = owner_counts.values().any(|&c| c >= 2);
+    let needs_ordered_set = timers_can_co_arm(&timers);
 
     if needs_ordered_set {
         emit_advance_clock_ordered(ctx, &timers, &mut s);

@@ -408,6 +408,65 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
         String::new()
     };
 
+    // The leaf-to-root active-config walk — `select_transitions`'s
+    // per-region innermost-first walk for NON-`TimerFire` events. Emitted
+    // verbatim (byte-identical to pre-FW110-FU-E) as the `default:` arm of
+    // the timer-fire dispatch switch (and, for a timerless machine, as the
+    // ENTIRE dispatch body — `emit_timer_fire_selection` returns `None`).
+    let region_walk = format!(
+        "    for (int8_t r = (int8_t)initial_active - 1; r >= 0; r--) {{\n\
+         \x20       /* Slot may have been cleared by a sibling-region transition\n\
+         \x20        * (cross-out-of-parallel). */\n\
+         \x20       if ((uint8_t)r >= m->_active_count) continue;\n\
+         \x20       /* Skip slots whose region already fired in this RTC step. */\n\
+         \x20       if (fired_in_region[r]) continue;\n\
+         \x20       {prefix}_StateId_t s = m->_active[r];\n\
+         \x20       while (1) {{\n\
+         \x20           if ({prefix}_try_transitions_in_state(m, s, ev)) {{\n\
+         \x20               fired_any = true;\n\
+         \x20               fired_in_region[r] = true;\n\
+         \x20               break;\n\
+         \x20           }}\n\
+         \x20           if (s == {macro}_STATE_ROOT) break;\n\
+         \x20           s = {prefix}_parent_table[s];\n\
+         \x20       }}\n\
+         \x20   }}\n",
+        prefix = prefix,
+        macro = macro_prefix,
+    );
+
+    // FW110-FU-E: a timer-fire event selects its transition from the
+    // timer's STATIC (owner-state, transition) binding —
+    // `fsm_simulator::select_transitions`'s `EventKind::TimerFire`
+    // early-return — by invoking the owner state's own
+    // `try_transitions_in_state` case directly (no active-config walk, no
+    // ancestor lift: the simulator looks at the single `node(source_state)`
+    // and fires at most that one transition). When the owner is active this
+    // is byte-identical to the walk (same case, same body); when a
+    // same-instant transition already exited the owner it still runs the
+    // timer transition's per-kind body (Internal ⇒ actions only) — the
+    // unforked oracle's record. Non-timer events fall to the `default:`
+    // active-config walk unchanged. GATED on `timers_can_co_arm`: a machine
+    // with no timers OR where no state owns ≥2 timers (motor, traffic-light)
+    // emits `region_walk` verbatim (no switch wrapper) ⇒ byte-identical
+    // generated C — the owner is provably always active when its timer
+    // fires there, so the static-owner selection would be a behaviourally
+    // inert source change (the no-regression guardrail; same gate as
+    // FW110-FU-D's `emit_advance_clock`).
+    let timer_fire_selection = super::timer::emit_timer_fire_selection(
+        ctx,
+        &|_ctx, owner_macro| {
+            format!(
+                "        if ({prefix}_try_transitions_in_state(m, {owner}, ev)) {{ fired_any = true; }}\n",
+                prefix = prefix,
+                owner = owner_macro,
+            )
+        },
+        &region_walk,
+        "    ",
+    )
+    .unwrap_or(region_walk);
+
     format!(
         r#"void {prefix}_dispatch({prefix}_t *m, const {prefix}_Event_t *ev) {{
     /* B-10 + B-11: per-region ancestor walk. For each active leaf in
@@ -431,24 +490,7 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
      * leaves first (slots 1..N are nested below slot 0), so iterate
      * from high to low. */
     uint8_t initial_active = m->_active_count;
-    for (int8_t r = (int8_t)initial_active - 1; r >= 0; r--) {{
-        /* Slot may have been cleared by a sibling-region transition
-         * (cross-out-of-parallel). */
-        if ((uint8_t)r >= m->_active_count) continue;
-        /* Skip slots whose region already fired in this RTC step. */
-        if (fired_in_region[r]) continue;
-        {prefix}_StateId_t s = m->_active[r];
-        while (1) {{
-            if ({prefix}_try_transitions_in_state(m, s, ev)) {{
-                fired_any = true;
-                fired_in_region[r] = true;
-                break;
-            }}
-            if (s == {macro}_STATE_ROOT) break;
-            s = {prefix}_parent_table[s];
-        }}
-    }}
-{delegation}{defer_hold}{trace_emit}    if (fired_any) {{
+{timer_fire_selection}{delegation}{defer_hold}{trace_emit}    if (fired_any) {{
 {release_call}        {prefix}_handle_completion(m);
 {drain_released}    }}
     /* Otherwise: no ancestor handled the event — discard per Doc 08 §3.1. */
@@ -468,6 +510,7 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
                  \x20   bool __delegated_any = false;\n",
             )
         },
+        timer_fire_selection = timer_fire_selection,
         delegation = delegation,
         defer_hold = defer_hold,
         release_call = release_call,

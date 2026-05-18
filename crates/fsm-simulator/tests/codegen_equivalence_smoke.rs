@@ -131,7 +131,12 @@ const SEP: char = '\u{1f}';
 ///                                    BYTE_EQUAL catalogue note).
 ///   • `stress-every-timer`         — PERIODIC `every N ms` re-arm +
 ///                                    `every … :` internal (only one-shot
-///                                    `after` was covered).
+///                                    `after` was covered). BYTE_EQUAL since
+///                                    FW110-FU-D (timer-budget) + FW110-FU-E
+///                                    (timer-fire selected by the timer's
+///                                    static owner-state binding); was
+///                                    KNOWN_DIVERGENT — see the BYTE_EQUAL
+///                                    catalogue note.
 ///   • `stress-self-transitions`    — internal vs external-self vs local
 ///                                    entry/exit-set distinctions.
 ///                                    BYTE_EQUAL since FW110-FU-C (the
@@ -1079,6 +1084,74 @@ fn run_differential(example: &str) -> Result<(), String> {
 /// (the no-fork attestation in the FU-A2 completion report); the byte-diff
 /// itself (`run_differential`) now returns `Ok` for this fixture, which is
 /// why the FW109 catalogue-stale guard FORCED this move (verify-the-record).
+///
+/// **FW110-FU-E addition — `stress-every-timer`.** PERIODIC `every N ms`
+/// timers (`every 1000 ms : beat()` Internal + `every 3000 ms -> Cooldown`
+/// External, both owned by `Pulsing`). **MOVED here from `KNOWN_DIVERGENT`**
+/// — the last divergent fixture; this move makes `KNOWN_DIVERGENT` EMPTY and
+/// closes the STAGE-SOLID gate. It completes the TWO-wave fix the
+/// `KNOWN_DIVERGENT` note chartered (the W1→W1-FU/W1-FU-2 staged-follow-up
+/// precedent):
+///   - **FW110-FU-D (already merged, `ea1829c`)** re-derived the timer
+///     *budget/re-arm* (`emit/timer.rs::emit_advance_clock` →
+///     `emit_advance_clock_ordered`) against `fsm_simulator::TimerSet::
+///     pop_fired_through` + `Interpreter::advance_clock`: atomic
+///     same-instant capture, periodic re-arm-before-drain, live-`Vec`
+///     same-instant order. That correctly lands the clk=3000 *record* (it
+///     captures + dispatches the `every 1000` timer event into the
+///     post-`Cooldown`-exit config) but `_dispatch` could not then resolve
+///     the transition, so the record was `tr=-` and `beat()` still
+///     dropped (beat()==3) — an honestly-kept DEEPER defect.
+///   - **FW110-FU-E (this wave)** re-derived the SHARED
+///     dispatch/transition-selection codegen
+///     (`emit/timer.rs::emit_timer_fire_selection`, wired into the outer
+///     dispatch of BOTH `dispatch_switch` and `dispatch_table`) against
+///     `fsm_simulator::select_transitions`'s `EventKind::TimerFire`
+///     early-return. The shipped, UNFORKED simulator resolves a timer-fire
+///     transition NOT by walking the active configuration but STATICALLY:
+///     `rt.machine.node(source_state)` (the timer's owner, set by
+///     `arm_timers_on_entry`) `.transitions.find(|t| t.id ==
+///     transition_id)`, guard-checked, returned early (no per-leaf walk).
+///     The generated C now does exactly that — a timer-fire event selects
+///     its transition at the timer's STATIC owner state
+///     (`try_transitions_in_state(m, STATE_<owner>, ev)` /
+///     `select_for_region(m, STATE_<owner>, ev)`), bypassing the
+///     active-config leaf-to-root walk that non-timer events still use
+///     (mirroring `select_transitions` keeping its walk for non-`TimerFire`
+///     events). So at clk=3000 the `every 1000 : beat()` Internal runs even
+///     though `Pulsing` was exited the same instant by `every 3000 ->
+///     Cooldown`; `execute_one_transition`'s Internal contract (actions
+///     only, no exit/entry, no config change) is already mirrored by
+///     `emit_transition_body`'s Internal short-circuit, so the C emits the
+///     oracle's exact record `tr=M:Heartbeat:transition:t-Heartbeat-3
+///     src=s-Heartbeat-Pulsing dst=s-Heartbeat-Pulsing cfgB=…Cooldown
+///     cfgA=…Cooldown ent= ext=` and `beat()` runs **4** times (clk=1000,
+///     2000,3000,6000) — byte-identical to the unforked oracle across all
+///     9 records.
+/// **Faithful for ALL transition kinds, byte-identical for every
+/// owner-active timer fire (the no-regression invariant):** when the
+/// timer's owner IS active (every `motor`/`traffic-light` one-shot `after`;
+/// stress-every-timer's clk=1000/2000/5000/6000) the leaf-to-root walk
+/// would have reached the owner state's own case/row and selected the SAME
+/// transition via the SAME `try_transitions_in_state`/`execute_transition`
+/// body — resolving it directly at the static owner is therefore the same
+/// case, same guard, same `emit_transition_body` ⇒ byte-identical generated
+/// C (proven: all 8 prior BYTE_EQUAL fixtures + the 3 JUSTIFIED stay
+/// exactly as before; the mandatory `#ifndef FSM_TRACE` `diff -rq` is
+/// zero-delta for all 11, the only generated-C change being
+/// stress-every-timer's). The guard is still evaluated (mirrors
+/// `select_transitions`'s `eval_guard` on the timer arm); External/Local
+/// timer transitions keep exit/action/entry; non-timer (`on EVT`/`done`)
+/// events are byte-untouched. A timer is owned by exactly one state and its
+/// transition's `source` IS that owner, so dispatching at the owner with no
+/// ancestor walk is the precise analogue of the simulator's single-node
+/// `node(source_state)` lookup (a TimerFire selection is ≤1 transition in
+/// the simulator too — no parallel fan-out). NOT gamed: `fsm-simulator/src`
+/// + `cmd/{test,baseline}.rs` + the projection/comparator fns are
+/// byte-untouched (the no-fork attestation in the FU-E completion report);
+/// `run_differential` now returns `Ok` for this fixture, which is why the
+/// FW109 catalogue-stale guard FORCED this move (verify-the-record applied
+/// reflexively — an honest converged fixture MUST move).
 const BYTE_EQUAL: &[&str] = &[
     "motor",
     "deferred",
@@ -1088,6 +1161,7 @@ const BYTE_EQUAL: &[&str] = &[
     "stress-self-transitions",
     "stress-self-transitions-actions",
     "stress-choice-guard-payload",
+    "stress-every-timer",
 ];
 
 /// Corpus members whose byte-diff (correctly) REDs because the two engines
@@ -1255,24 +1329,57 @@ const BEHAVIOURALLY_EQUIVALENT_JUSTIFIED: &[&str] =
 ///     actions on Box/Inner1/Inner2) is ALSO BYTE_EQUAL — it is the test
 ///     that actually exercises the bug. See the BYTE_EQUAL catalogue note.
 ///
-///   • **`stress-every-timer`** — PERIODIC (`every N ms`) timer fires one
-///     too FEW times across a multi-period `advance_clock`. PROVEN
-///     observable action-count divergence: the shipped simulator invokes
-///     the `every 1000 ms : beat()` internal **4** times (clk=1000,2000,
-///     3000,6000); the generated C invokes it **3** times (it misses the
-///     clk=3000 tick when a competing `every 3000 -> Cooldown` consumes the
-///     same `advance_clock(3500)` step). Quiescent config converges
-///     (states are right) so it is NOT JUSTIFIED-classifiable — the
-///     convergence is VACUOUS w.r.t. the action count (an embedded target
-///     would get one fewer `beat()` side-effect per multi-period advance —
-///     a real missed-heartbeat-class defect). ROOT CAUSE: the periodic-
-///     timer budget/re-arm accounting in
-///     `emit/timer.rs::emit_advance_clock` — the periodic analogue of the
-///     W1-FU one-shot OVER-fire (here an UNDER-fire). Same delicate timer-
-///     budget code that already required the dedicated W1-FU wave; an
-///     inline math change risks regressing the byte-equal motor/
-///     traffic-light one-shot paths without a full re-derivation.
-///     **RECOMMENDED DEDICATED FIX-WAVE** (spec in the audit doc).
+///   • **`stress-every-timer`** — **RESOLVED (FW110-FU-D timer-budget +
+///     FW110-FU-E dispatch/transition-selection); MOVED to `BYTE_EQUAL`.**
+///     Was: the periodic `every 1000 ms : beat()` internal ran **3** times
+///     where the unforked oracle runs it **4** (clk=1000,2000,3000,6000) —
+///     it dropped the clk=3000 tick when a same-instant `every 3000 ->
+///     Cooldown` exited `Pulsing`. This was TWO stacked defects, fixed by
+///     two scoped waves (the W1→W1-FU/W1-FU-2 precedent — a stacked defect
+///     gets staged follow-ups, not one inline rewrite): **(1) FW110-FU-D**
+///     re-derived `emit/timer.rs::emit_advance_clock` against
+///     `fsm_simulator::TimerSet::pop_fired_through` +
+///     `Interpreter::advance_clock` (atomic same-instant capture +
+///     re-arm-before-drain + live-`Vec` order) so the clk=3000 `beat()`
+///     *record* lands in the right place (it correctly *dispatches* the
+///     captured timer event into the post-exit config); **(2) FW110-FU-E**
+///     re-derived the SHARED dispatch/transition-selection codegen
+///     (`emit/timer.rs::emit_timer_fire_selection`, wired into BOTH
+///     `dispatch_switch`/`dispatch_table` outer dispatch) against
+///     `fsm_simulator::select_transitions`'s `EventKind::TimerFire`
+///     early-return: a timer-fire event now selects its transition from the
+///     timer's STATIC `(owner-state, transition)` binding — exactly
+///     `node(source_state).transitions.find(id)` — instead of the
+///     active-config leaf-to-root walk, so the `every 1000 : beat()`
+///     Internal runs at clk=3000 even though `Pulsing` was exited the same
+///     instant (Internal ⇒ actions only, no config change — the oracle's
+///     `tr=t-Heartbeat-3 src=Pulsing dst=Pulsing cfgB=Cooldown
+///     cfgA=Cooldown` record; `beat()`==4). The re-derivation is faithful
+///     for ALL transition kinds (the guard is still evaluated; External
+///     keeps exit/entry; non-timer events keep the active-config walk
+///     unchanged) and byte-identical for every owner-active timer fire
+///     (motor's `after 5000`, traffic-light's four `after`s,
+///     stress-every-timer's clk=1000/2000/5000/6000): resolving at the
+///     static owner when it IS active hits the same case/row + same
+///     `emit_transition_body` as the walk. The FW109 catalogue-stale guard
+///     FORCED this move once `run_differential` returned `Ok` (verify-the-
+///     record applied reflexively — NOT gamed). See the `BYTE_EQUAL`
+///     catalogue note (FW110-FU-E addition) for the full re-derivation +
+///     no-fork attestation + the `#ifndef FSM_TRACE` byte-identity proof.
+///
+/// **This list is now EMPTY** — every FW110-broadened-corpus shipped-codegen
+/// defect the audit surfaced (deep-history restore; sibling-local LCA;
+/// choice/junction lowering; periodic-timer budget; timer-fire
+/// transition-selection) has been root-caused and fixed through a scoped
+/// follow-up wave, and every fixture is either `BYTE_EQUAL` or a proven
+/// `BEHAVIOURALLY_EQUIVALENT_JUSTIFIED` record-model difference. An empty
+/// `KNOWN_DIVERGENT` is the honest end-state of the audit, NOT a gamed one:
+/// it is enforced by the dynamic catalogue-sum assertion + the FW109
+/// catalogue-stale / corrupted-oracle / behavioural-equivalence guards
+/// (which still RED on a real divergence or a gamed projection). Should a
+/// future fixture surface a genuinely-irreducible divergence it MUST be
+/// listed here honestly with a precise root cause + recommended follow-up —
+/// an honest non-empty list is the audit working, never a defect to hide.
 const KNOWN_DIVERGENT: &[&str] = &[
     // `stress-deep-history` RESOLVED by FW110-FU-B → moved to BYTE_EQUAL
     // (deep_history restore implemented; see the BYTE_EQUAL note).
@@ -1284,7 +1391,12 @@ const KNOWN_DIVERGENT: &[&str] = &[
     // (choice/junction guard+action+target lowering correct; the unforked
     // simulator oracle now byte-matches the merged codegen end-to-end —
     // see the BYTE_EQUAL note).
-    "stress-every-timer",
+    // `stress-every-timer` RESOLVED by FW110-FU-D (timer-budget) +
+    // FW110-FU-E (dispatch/transition-selection: timer-fire selected by the
+    // timer's static owner-state binding, mirroring select_transitions's
+    // EventKind::TimerFire early-return) → moved to BYTE_EQUAL (beat()==4;
+    // byte-identical to the unforked oracle end-to-end — see the BYTE_EQUAL
+    // note). The audit's KNOWN_DIVERGENT list is now empty.
 ];
 
 #[test]
@@ -1305,11 +1417,10 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
     // (the FW109 self-consistency requirement). No fixture may appear in
     // two buckets; none may be missing.
     //
-    // Post-FW110-FU-C + FW110-FU-A2 exact honest distribution (asserted
-    // dynamically below — this comment is the human-readable record, the
-    // verify-the-record discipline applied to the catalogue's own
-    // arithmetic):
-    //   BYTE_EQUAL                          = 8  (motor, deferred,
+    // Post-FW110-FU-E exact honest distribution (asserted dynamically below
+    // — this comment is the human-readable record, the verify-the-record
+    // discipline applied to the catalogue's own arithmetic):
+    //   BYTE_EQUAL                          = 9  (motor, deferred,
     //       traffic-light, stress-parallel-cross-exit, stress-deep-history
     //       [MOVED by FW110-FU-B], stress-self-transitions [MOVED by
     //       FW110-FU-C: sibling-local LCA fixed], stress-self-transitions-
@@ -1317,19 +1428,28 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
     //       twin], stress-choice-guard-payload [MOVED by FW110-FU-A codegen
     //       + FW110-FU-A2 analyzer: the shared IR producer now lowers
     //       choice/junction guard+actions+target so the UNFORKED simulator
-    //       oracle byte-matches the merged codegen])
+    //       oracle byte-matches the merged codegen], stress-every-timer
+    //       [MOVED by FW110-FU-D timer-budget + FW110-FU-E dispatch/
+    //       transition-selection: a timer-fire event is now selected from
+    //       the timer's STATIC owner-state binding, mirroring the unforked
+    //       select_transitions's EventKind::TimerFire early-return, so the
+    //       every-1000:beat() Internal runs at clk=3000 even though Pulsing
+    //       was exited the same instant — beat()==4, byte-identical end-to-
+    //       end])
     //   BEHAVIOURALLY_EQUIVALENT_JUSTIFIED  = 3  (vending-machine,
     //       submachine, stress-completion-chain — record-model differs,
     //       observable behaviour proven identical)
-    //   KNOWN_DIVERGENT                     = 1  (stress-every-timer — a
-    //       real shipped-codegen defect: periodic every-N-ms timer
-    //       divergence; the FW110-FU-D timer-budget fix is integrated
-    //       next, and a DEEPER dispatch/transition-selection defect
-    //       (beat()==3 vs the oracle's 4) needs the recommended dedicated
-    //       fix-wave FW110-FU-E. Honestly KEPT here, NOT gamed.)
+    //   KNOWN_DIVERGENT                     = 0  (EMPTY — every FW110-
+    //       broadened-corpus shipped-codegen defect the audit surfaced has
+    //       been root-caused + fixed through a scoped follow-up wave; the
+    //       last one, stress-every-timer, resolved by FW110-FU-D+FU-E. An
+    //       empty list is the honest end-state, enforced by this dynamic
+    //       sum + the FW109 catalogue-stale/corrupted-oracle/behavioural-
+    //       equivalence guards — NOT gamed; a future genuine divergence
+    //       MUST be re-listed here honestly.)
     //   ──────────────────────────────────────────────────────────────────
     //   SUM                                 = 12 == CORPUS.len()
-    //   (8 + 3 + 1 = 12; dynamically enforced — the prose tracks reality)
+    //   (9 + 3 + 0 = 12; dynamically enforced — the prose tracks reality)
     {
         let mut all: Vec<&str> = BYTE_EQUAL
             .iter()
@@ -1415,6 +1535,255 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
             ),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// FW110-FU-E — the instrumented `beat()`-invocation-count acceptance.
+//
+// The byte-diff above proves the FSM_TRACE generated C's *record stream* is
+// byte-identical to the unforked oracle for `stress-every-timer`. This test
+// additionally proves the *observable side effect* — the `every 1000 ms :
+// beat()` Internal action — actually EXECUTES the right number of times in
+// BOTH engines (the missed-heartbeat-class defect FW110-FU-E closes was
+// precisely a dropped `beat()` *call*, not merely a record-shape artifact).
+//
+// It is symmetric and NOT a fork:
+//   • Oracle side: drive the SHIPPED `Interpreter` (the exact seam
+//     `simulator_quiescent_config` already uses — `Interpreter::new`/`init`
+//     + per-command dispatch/`advance_clock`, the surface `cmd/test.rs`
+//     consumes) with a `beat` extern registered to a shared counter. No
+//     `fsm-simulator/src` edit; just snapshotting a call count instead of
+//     `StepRecord`s, exactly as the FW109 helper snapshots `current_states`.
+//   • Generated-C side: emit the production codegen (UNMODIFIED
+//     `CodegenConfig::default()`), compile FSM_TRACE-OFF (this is a
+//     production-runtime behavioural assertion, not a trace one) with a
+//     counting `beat()` body, run the trace, read the count the program
+//     prints. Reuses the same `host_hal_c` + driver-shape the differential
+//     uses; the ONLY change is `beat()` increments+prints instead of
+//     no-op'ing (a contract-satisfaction body, not FSM logic).
+//
+// Both MUST be exactly 4 (clk=1000,2000,3000,6000) — the clk=3000 tick is
+// the one the pre-FW110-FU-E codegen dropped (beat()==3). A divergence here
+// is a genuine behavioural defect, NOT gameable by the projection.
+#[test]
+fn fw110_fu_e_stress_every_timer_beat_invocation_count_is_four() {
+    if !gcc_available() {
+        eprintln!(
+            "[codegen_equivalence_smoke] gcc not on PATH — skipping the FW110-FU-E \
+             instrumented beat()-count proof (gcc_compile.rs skip-if-absent precedent)"
+        );
+        return;
+    }
+    let (ir, trace, machine) = load_trace("stress-every-timer");
+
+    // ---- Oracle side: the shipped Interpreter seam + a counting `beat`. ----
+    use fsm_simulator::{InitOptions, Interpreter};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    let oracle_beats = Arc::new(AtomicU32::new(0));
+    let mut interp = Interpreter::new(&ir).expect("Interpreter::new (the shipped seam)");
+    {
+        let c = Arc::clone(&oracle_beats);
+        interp.externs_mut().register("beat", move |_args| {
+            c.fetch_add(1, Ordering::SeqCst);
+            // `beat()` is a `void` extern; a `Call` statement discards the
+            // returned `Value` (eval/stmt.rs: `let _ = externs.invoke(...)`),
+            // so the variant is irrelevant — only the side-effecting counter
+            // matters. (`Value` has no unit variant; `Bool(false)` is the
+            // conventional discarded placeholder.)
+            fsm_simulator::Value::Bool(false)
+        });
+    }
+    interp
+        .init(InitOptions {
+            machine_name: machine.clone(),
+            initial_context: trace.init.context.clone(),
+            virtual_clock_start_ms: trace.init.virtual_clock_start_ms,
+        })
+        .expect("Interpreter::init (the shipped seam)");
+    for cmd in &trace.steps {
+        match cmd {
+            fsm_simulator::TraceCommand::Dispatch { event, payload } => {
+                interp
+                    .dispatch_with_payload(event, payload.clone())
+                    .expect("dispatch_with_payload (the shipped seam)");
+            }
+            fsm_simulator::TraceCommand::Raise { event, payload } => {
+                interp
+                    .raise_with_payload(event, payload.clone())
+                    .expect("raise_with_payload (the shipped seam)");
+            }
+            fsm_simulator::TraceCommand::AdvanceClock { delta_ms } => {
+                interp
+                    .advance_clock(*delta_ms)
+                    .expect("advance_clock (the shipped seam)");
+            }
+        }
+    }
+    let oracle_count = oracle_beats.load(Ordering::SeqCst);
+    assert_eq!(
+        oracle_count, 4,
+        "the shipped fsm_simulator oracle must invoke `beat()` exactly 4 times \
+         (clk=1000,2000,3000,6000) for stress-every-timer — sanity precondition \
+         for the generated-C assertion"
+    );
+
+    // ---- Generated-C side: production codegen + a counting `beat()`. ----
+    let files = emit(&ir, &CodegenConfig::default()).expect("codegen emit");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    let mut c_sources: Vec<String> = Vec::new();
+    for f in &files.files {
+        fs::write(dir.join(&f.path), &f.content).expect("write generated file");
+        if f.path.ends_with(".c") {
+            c_sources.push(f.path.clone());
+        }
+    }
+    fs::write(dir.join("fsm_hal.c"), host_hal_c()).expect("write hal");
+
+    // The driver replays the trace through the generated public API exactly
+    // like the differential's `driver_main_c`, then prints the beat count.
+    // We reuse `driver_main_c` for the replay shell and append the
+    // user-contract symbol bodies via `user_symbol_definitions`, then
+    // OVERRIDE `beat`: `user_symbol_definitions` emits a no-op `void
+    // beat(void){}`; we instead need a counting body. Cleanest faithful
+    // approach: emit the driver + entry/exit no-ops ourselves and supply a
+    // counting `beat()` (the ONLY non-pure extern in this fixture) — still
+    // mechanical contract-satisfaction, not FSM logic.
+    let prefix = &machine;
+    let macro_prefix = c_macro_prefix(&machine);
+    let mut main_c = String::new();
+    main_c.push_str("#include \"fsm_hal.h\"\n");
+    main_c.push_str(&format!("#include \"{}.h\"\n", prefix));
+    main_c.push_str("#include <stdint.h>\n#include <string.h>\n#include <stdio.h>\n\n");
+    main_c.push_str("void fsm_test_set_clock(uint32_t ms);\n\n");
+    // Counting `beat()` — the fixture's lone non-pure extern. Increments a
+    // file-static counter; the count is printed after the replay.
+    main_c.push_str("static unsigned g_beat_count = 0u;\n");
+    main_c.push_str("void beat(void) { g_beat_count++; }\n");
+    main_c.push_str(&format!(
+        "void {p}_action_beat({p}_t *m, const {p}_Event_t *ev) {{ (void)m; (void)ev; }}\n",
+        p = prefix,
+    ));
+    // entry/exit no-op bodies (parsed from the generated impl headers, the
+    // exact prototype set — identical to `user_symbol_definitions` step 2).
+    for f in &files.files {
+        if !f.path.ends_with("_impl.h") {
+            continue;
+        }
+        for line in f.content.lines() {
+            let l = line.trim();
+            if !l.ends_with(");") || !l.starts_with("void ") {
+                continue;
+            }
+            if l.contains("_entry_") || l.contains("_exit_") {
+                let proto = &l[..l.len() - 1];
+                main_c.push_str(proto);
+                main_c.push_str(" { (void)m; }\n");
+            }
+        }
+    }
+    main_c.push_str("\nint main(void) {\n");
+    main_c.push_str(&format!("    {p}_t inst;\n", p = prefix));
+    main_c.push_str(&format!("    {p}_init(&inst);\n", p = prefix));
+    for cmd in &trace.steps {
+        match cmd {
+            fsm_simulator::TraceCommand::Dispatch { event, payload }
+            | fsm_simulator::TraceCommand::Raise { event, payload } => {
+                let ev_c = format!("{}_EVENT_{}", macro_prefix, c_ident(event));
+                main_c.push_str(&format!(
+                    "    {{ {p}_Event_t e; memset(&e, 0, sizeof e); e.id = {ev};\n",
+                    p = prefix,
+                    ev = ev_c,
+                ));
+                if let Some(map) = payload {
+                    for (field, val) in map {
+                        main_c.push_str(&format!(
+                            "      e.__payload.{ev}.{f} = {v};\n",
+                            ev = event,
+                            f = field,
+                            v = c_value_literal(val),
+                        ));
+                    }
+                }
+                main_c.push_str(&format!("      {p}_dispatch(&inst, &e); }}\n", p = prefix));
+            }
+            fsm_simulator::TraceCommand::AdvanceClock { delta_ms } => {
+                main_c.push_str(&format!(
+                    "    fsm_test_set_clock(fsm_hal_clock_now_ms() + {d}u);\n",
+                    d = delta_ms,
+                ));
+                main_c.push_str(&format!(
+                    "    {p}_advance_clock(&inst, {d}u);\n",
+                    p = prefix,
+                    d = delta_ms,
+                ));
+            }
+        }
+    }
+    main_c.push_str("    printf(\"BEAT_COUNT=%u\\n\", g_beat_count);\n");
+    main_c.push_str("    return 0;\n}\n");
+    fs::write(dir.join("main.c"), &main_c).expect("write main.c");
+
+    let exe = dir.join("fsm_beat_count_bin");
+    // FSM_TRACE deliberately NOT defined: this asserts the PRODUCTION
+    // runtime's observable side effect, not the trace tap.
+    let mut args: Vec<String> = vec![
+        "-std=c99".into(),
+        "-Wall".into(),
+        "-Wextra".into(),
+        "-Wpedantic".into(),
+        "-Werror".into(),
+        "-I.".into(),
+    ];
+    args.extend(c_sources);
+    args.push("main.c".into());
+    args.push("fsm_hal.c".into());
+    args.push("-o".into());
+    args.push(exe.to_string_lossy().into_owned());
+    let compile = Command::new("gcc")
+        .current_dir(dir)
+        .args(&args)
+        .output()
+        .expect("invoke gcc");
+    assert!(
+        compile.status.success() && compile.stderr.is_empty(),
+        "FW110-FU-E beat-count C failed to compile -Werror-clean:\n{}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    let run = Command::new(&exe).output().expect("run beat-count binary");
+    assert!(
+        run.status.success(),
+        "FW110-FU-E beat-count binary exited non-zero: {:?}",
+        run.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let c_count: u32 = stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("BEAT_COUNT="))
+        .and_then(|n| n.trim().parse().ok())
+        .unwrap_or_else(|| panic!("driver did not print BEAT_COUNT=; stdout:\n{stdout}"));
+
+    assert_eq!(
+        c_count, 4,
+        "FW110-FU-E ACCEPTANCE: the production generated C must invoke `beat()` \
+         exactly 4 times for stress-every-timer (clk=1000,2000,3000,6000). Got \
+         {c_count}. A count of 3 is the pre-FW110-FU-E missed-heartbeat defect \
+         (the clk=3000 tick dropped when `every 3000 -> Cooldown` exited \
+         `Pulsing` the same instant)."
+    );
+    assert_eq!(
+        c_count, oracle_count,
+        "FW110-FU-E: the generated C's `beat()` invocation count ({c_count}) must \
+         equal the shipped fsm_simulator oracle's ({oracle_count}) — the \
+         observable side-effect equivalence the dispatch/transition-selection \
+         re-derivation guarantees"
+    );
+    eprintln!(
+        "[fw110-fu-e] stress-every-timer: beat()=={c_count} in BOTH the shipped \
+         fsm_simulator oracle and the production generated C (clk=1000,2000,3000,\
+         6000) — the missed-heartbeat defect is closed (was 3 pre-fix)"
+    );
 }
 
 // ---------------------------------------------------------------------------

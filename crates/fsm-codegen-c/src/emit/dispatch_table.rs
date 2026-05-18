@@ -529,7 +529,12 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
     } else {
         String::new()
     };
-    let collect_loop = if has_subs {
+    // The active-config collect loop — `select_transitions`'s per-region
+    // innermost-first walk for NON-`TimerFire` events. Emitted verbatim
+    // (byte-identical to pre-FW110-FU-E) as the `default:` arm of the
+    // timer-fire dispatch switch (and, for a timerless machine, as the
+    // ENTIRE collect phase — `emit_timer_fire_selection` returns `None`).
+    let region_collect = if has_subs {
         format!(
             "    for (int8_t r = (int8_t)initial_active - 1; r >= 0; r--) {{\n\
              \x20       const {prefix}_TransRow_t *row = {prefix}_select_for_region(m, m->_active[r], ev);\n\
@@ -546,6 +551,44 @@ fn emit_outer_dispatch(ctx: &MachineEmitCtx<'_>) -> String {
             prefix = prefix,
         )
     };
+
+    // FW110-FU-E: a timer-fire event selects its transition from the
+    // timer's STATIC (owner-state, transition) binding —
+    // `fsm_simulator::select_transitions`'s `EventKind::TimerFire`
+    // early-return — by running the table collect keyed at the owner state
+    // (`select_for_region` from the owner finds the timer's row on its
+    // first iteration; ancestor scan never matches the per-timer-unique
+    // event id, so this is the precise analogue of the simulator's single
+    // `node(source_state)` lookup). When the owner is active this is
+    // byte-identical to the region collect (same row, same
+    // `execute_transition`); when a same-instant transition already exited
+    // the owner the row is still selected and executed with its per-kind
+    // semantics (Internal ⇒ actions only) — the unforked oracle's record.
+    // A timer-fire selection is at most one transition (no parallel
+    // fan-out), exactly like the simulator's TimerFire arm; it is NOT
+    // delegated to a submachine (the simulator's TimerFire arm returns
+    // before `try_delegate_to_submachine`), so `__region_selected[]` is
+    // intentionally not set on the timer branch. Non-timer events fall to
+    // the `default:` region collect unchanged. GATED on `timers_can_co_arm`
+    // (same gate as FW110-FU-D's `emit_advance_clock`): a machine with no
+    // timers OR where no state owns ≥2 timers emits `region_collect`
+    // verbatim (no switch wrapper) ⇒ byte-identical C — the owner is
+    // provably always active when its timer fires there (no-regression
+    // guardrail).
+    let collect_loop = super::timer::emit_timer_fire_selection(
+        ctx,
+        &|_ctx, owner_macro| {
+            format!(
+                "        {{ const {prefix}_TransRow_t *row = {prefix}_select_for_region(m, {owner}, ev);\n\
+                 \x20         if (row) selected[selected_count++] = row; }}\n",
+                prefix = prefix,
+                owner = owner_macro,
+            )
+        },
+        &region_collect,
+        "    ",
+    )
+    .unwrap_or(region_collect);
     // The no-row branch: a delegated-and-consumed event must NOT fall into
     // the defer/discard path (W2c treats it as consumed). With submachines,
     // skip the early return when the sub consumed the event; the completion
