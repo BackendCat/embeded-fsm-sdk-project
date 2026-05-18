@@ -1,0 +1,49 @@
+language fsm 2.0
+
+// FW110 stress fixture — CHOICE pseudostate + guards reading context set
+// from event PAYLOAD.
+//
+// No corpus fixture exercises a `choice` pseudostate, and guard-with-
+// payload was a FW1-FU-2-era bug-prone surface. A `choice` resolves at
+// RUNTIME: the guards are evaluated top-to-bottom and the first true
+// branch is taken. The transition INTO the choice copies the event
+// payload into context; the choice then routes on that context. A codegen
+// that mis-orders the guard chain, mis-evaluates a payload-derived guard,
+// or resolves the choice to the wrong target diverges on the quiescent
+// config. Three CLASSIFY values drive all three branches (High / Mid /
+// Low) so every choice arm is covered.
+
+machine Router {
+    context {
+        last: u8 = 0
+    }
+
+    events {
+        CLASSIFY(level: u8)
+        RESET
+    }
+
+    initial Waiting
+
+    state Waiting {
+        on CLASSIFY -> Decide : ctx.last = payload.level
+    }
+
+    choice Decide {
+        [ctx.last >= 10] -> High
+        [ctx.last >= 5]  -> Mid
+        [else]           -> Low
+    }
+
+    state High {
+        on RESET -> Waiting
+    }
+
+    state Mid {
+        on RESET -> Waiting
+    }
+
+    state Low {
+        on RESET -> Waiting
+    }
+}

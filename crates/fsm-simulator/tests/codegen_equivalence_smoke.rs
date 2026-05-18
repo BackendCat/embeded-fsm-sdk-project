@@ -116,13 +116,43 @@ use fsm_simulator::{execute_trace, parse_trace_yaml, StepKind, StepRecord, Trace
 /// between the two engines).
 const SEP: char = '\u{1f}';
 
-/// The MVP corpus = the 5 example FSMs with frozen `.trace` files (GT-7).
+/// The differential corpus. The original GT-7 MVP set = the 5 example FSMs
+/// with frozen `.trace` files (`motor`, `submachine`, `traffic-light`,
+/// `vending-machine`, `deferred`). **FW110** broadens it with 6 synthesized
+/// stress fixtures that deliberately exercise the primitive matrix the
+/// prior FIVE shipped-codegen bugs lived in (timer over-fire;
+/// shallow_history; composite exit-set; parallel exit-set; Final-state
+/// trace filter; completion granularity):
+///   • `stress-deep-history`        — `deep_history` restore of a 2-level
+///                                    nested leaf (shallow_history was
+///                                    covered; deep is a distinct path).
+///   • `stress-every-timer`         — PERIODIC `every N ms` re-arm +
+///                                    `every … :` internal (only one-shot
+///                                    `after` was covered).
+///   • `stress-self-transitions`    — internal vs external-self vs local
+///                                    entry/exit-set distinctions.
+///   • `stress-choice-guard-payload`— `choice` pseudostate routed by a
+///                                    payload-derived context guard.
+///   • `stress-completion-chain`    — a 2-level cascading `done ->`
+///                                    completion through Final states.
+///   • `stress-parallel-cross-exit` — exit a parallel composite mid-flight
+///                                    (both regions in live non-Final
+///                                    leaves at different depths).
+/// Each is wired the SAME way as the original 5 (an `examples/<name>/`
+/// dir with `<name>.fsm` + `<name>.trace`; `load_trace` resolves it) and
+/// is classified below with the FW109 discipline.
 const CORPUS: &[&str] = &[
     "motor",
     "submachine",
     "traffic-light",
     "vending-machine",
     "deferred",
+    "stress-deep-history",
+    "stress-every-timer",
+    "stress-self-transitions",
+    "stress-choice-guard-payload",
+    "stress-completion-chain",
+    "stress-parallel-cross-exit",
 ];
 
 fn gcc_available() -> bool {
@@ -905,7 +935,20 @@ fn run_differential(example: &str) -> Result<(), String> {
 ///                   composite-exit-set fix (`emit/transition.rs` +
 ///                   `emit/history.rs`) — both verified by this
 ///                   differential; see the ground-truth block above.
-const BYTE_EQUAL: &[&str] = &["motor", "deferred", "traffic-light"];
+///   • `stress-parallel-cross-exit` (FW110) — exits a PARALLEL composite
+///                   MID-FLIGHT (both regions in live NON-Final leaves at
+///                   different depths). Byte-equal end-to-end: it validates
+///                   the FW1-FU-2/FW109 parallel active-descendant exit-set
+///                   on a NEW shape (the FW109 vending case exited a
+///                   parallel only AFTER both regions reached Final; this
+///                   one exits with both regions still in ordinary leaves)
+///                   — `ext=A3,B2,Running` byte-identical to the oracle.
+const BYTE_EQUAL: &[&str] = &[
+    "motor",
+    "deferred",
+    "traffic-light",
+    "stress-parallel-cross-exit",
+];
 
 /// Corpus members whose byte-diff (correctly) REDs because the two engines
 /// use STRUCTURALLY DIFFERENT (each internally-valid) RECORD MODELS, but
@@ -982,15 +1025,132 @@ const BYTE_EQUAL: &[&str] = &["motor", "deferred", "traffic-light"];
 /// generated C (a wrong transition / guard / target / sub-state would change
 /// a quiescent config and the proof would RED). NOT a relaxed byte-diff; NOT
 /// a gamed projection; NOT a false BYTE_EQUAL.
-const BEHAVIOURALLY_EQUIVALENT_JUSTIFIED: &[&str] = &["vending-machine", "submachine"];
+///
+/// **FW110 addition — `stress-completion-chain`.** A 2-level cascading
+/// `done ->` completion through Final states (`S1Work->S1Done[final] =>
+/// Stage1 done -> Stage2>S2Work->S2Done[final] => Stage2 done -> Closed`).
+/// The byte-diff REDs for EXACTLY the vending-machine completion record-
+/// model reason: the simulator emits one `completion` record per completed
+/// state with `evt=__completion__:<state_id>` and the full composite-entry
+/// `ent` set (`ent=S2Work,Stage2`); the C's `handle_completion` sweep
+/// emits one combined `evt=__completion__` record with the static-chain
+/// `ent` (`ent=Stage2`). The quiescent configuration after EVERY external
+/// command (Ready / S1Work / S2Work / Closed) is byte-identical sim-vs-C
+/// (proven by [`behavioural_equivalence_proof_for_justified_fixtures`]; a
+/// wrong completion target/order WOULD change a quiescent config — the
+/// proof is NON-vacuous here, the cascade genuinely moves states). It is
+/// the SAME record-model / RTC-granularity class as vending-machine, NOT a
+/// new behavioural bug. **NOTE (brutal honesty):** FW110 *did* find and
+/// fix one genuine codegen bug exposed by this fixture FIRST — the
+/// composite active-descendant exit-set emitter was calling the
+/// never-declared `<M>_exit_<Final>` for a live Final descendant, breaking
+/// the `-Werror` build of the production C (NOT trace-only). That fix
+/// (`emit/transition.rs`, FW110, FSM_TRACE-discipline-preserving — see the
+/// completion report) is what makes this fixture compile+run at all; the
+/// residual byte-diff RED is then the pure completion record-model
+/// difference, classified here.
+const BEHAVIOURALLY_EQUIVALENT_JUSTIFIED: &[&str] =
+    &["vending-machine", "submachine", "stress-completion-chain"];
 
-/// Corpus members the differential REDs on with NO behavioural-equivalence
-/// proof — a genuine, still-unexplained divergence. Empty: every corpus FSM
-/// is either byte-equal or proven behaviourally equivalent (the FW109
-/// determination resolved the last two). A fixture lands here ONLY if it
-/// truly diverges behaviourally and cannot (yet) be fixed — recorded
-/// honestly, never gamed into BYTE_EQUAL or unproven-equivalent.
-const KNOWN_DIVERGENT: &[&str] = &[];
+/// Corpus members the differential REDs on with a GENUINE behavioural
+/// divergence (the quiescent configuration and/or an observable action
+/// effect differs between the shipped simulator and the generated C) and
+/// NO behavioural-equivalence proof — because they are NOT behaviourally
+/// equivalent. A fixture lands here ONLY if it truly diverges behaviourally
+/// and cannot (yet) be fixed in-scope — recorded **honestly**, never gamed
+/// into BYTE_EQUAL or unproven-equivalent (the cardinal sin the
+/// factory-reliability epic guards against). This list being NON-EMPTY is
+/// the audit WORKING: each entry is a real shipped-codegen defect the
+/// FW110 broadened corpus surfaced, with a precise root cause and a
+/// recommended dedicated fix-wave (the W1→W1-FU/W1-FU-2 precedent — a
+/// deep/wide defect gets a scoped follow-up wave, not an inline rewrite).
+///
+///   • **`stress-deep-history`** — `deep_history` restore is NOT
+///     implemented in codegen-c. PROVEN behavioural divergence: after
+///     `RESUME` (the `deep_history`-target transition) the shipped
+///     simulator restores the remembered deep nested leaf
+///     (quiescent `cfgA=s-DeepHist-Deep2`) while the generated C **does
+///     not even leave `Paused`** (quiescent `cfgA=s-DeepHist-Paused`) —
+///     `dump_all_corpus_quiescent` prefix 4 `[DIFF] sim=[Deep2]
+///     gen=[Paused]`. ROOT CAUSE: an EXPLICIT, pre-existing, *documented*
+///     v1.0 codegen limitation — `crates/fsm-codegen-c/src/emit/history.rs`
+///     module-doc §"v1.0 scope (honest)": *"Deep history, and history
+///     across parallel regions, remain the pre-existing v1.0 limitation
+///     (`_history_record_X` snapshots `_active[0]` only)"*. The
+///     `_history_restore_<C>` helper is hardcoded shallow even when the
+///     pseudo is `deep_history`. NOT a contained fix (it needs a real deep
+///     snapshot/restore of the full nested leaf path) and the codegen
+///     itself invokes the anti-scope-creep discipline. **RECOMMENDED
+///     DEDICATED FIX-WAVE** (see `docs/AUDIT_RELIABILITY_STAGE_GATE_2026_05_18.md`
+///     §Stream-1 for the spec). It was "not exercised by any shipped
+///     example" — FW110's synthesized fixture now exercises it (the audit
+///     surfacing a known-but-untested gap).
+///
+///   • **`stress-choice-guard-payload`** — `choice` / `junction`
+///     pseudostate RESOLUTION is NOT implemented in codegen-c. PROVEN
+///     behavioural divergence: on `CLASSIFY` the shipped simulator resolves
+///     the choice through its guard chain to High/Mid/Low; the generated C
+///     sets `_active[0] = <CHOICE pseudostate>` and **rests there
+///     forever** — no guard-chain code is emitted ANYWHERE
+///     (`dump_all_corpus_quiescent` prefixes 1-6 `[DIFF] sim=[] gen=
+///     [s-Router-Decide]`; the machine is permanently stuck in `Decide`).
+///     ROOT CAUSE: `state_index.rs`/`region_layout.rs` INDEX Choice/Junction
+///     as state records + slots, but NO `emit/` site lowers the runtime
+///     guard-chain resolution (`grep Choice crates/fsm-codegen-c/src/emit`
+///     ⇒ zero hits); the shipped `fsm_simulator` `resolve_target`
+///     (`interpreter.rs:1572-1612`) implements it fully. A whole missing
+///     feature lowering (guard-chain + chained-transition + resolved-target
+///     entry + `[else]` + recursive choice→choice). NOT inline-fixable.
+///     **RECOMMENDED DEDICATED FIX-WAVE** (spec in the audit doc).
+///
+///   • **`stress-self-transitions`** — LOCAL (`~>`) transition LCA / entry-
+///     exit lowering is WRONG when the local transition's target is a
+///     SIBLING (not a descendant) of the source. PROVEN production
+///     divergence (NOT a record-model artifact): on `REENTER` (`Inner1 ~>
+///     Inner2`, siblings in composite `Box`) the generated C emits
+///     `<M>_entry_Box(m); <M>_entry_Inner2(m);` and NO `<M>_exit_Inner1(m)`
+///     — it **re-runs the containing composite's ENTRY ACTION** and **skips
+///     the source leaf's EXIT ACTION** (`SelfT.c` `case
+///     SELFT_EVENT_REENTER`). The shipped simulator correctly does
+///     `ext=Inner1, ent=Inner2` and never re-enters `Box`. ROOT CAUSE:
+///     `emit/entry_exit.rs::effective_lca` collapses `Local`→`source`
+///     unconditionally; correct only when the target is within the source
+///     subtree — for a sibling-targeted local transition the LCA must be
+///     the common ancestor and the entry/exit sets must be leaf-symmetric
+///     (the codegen's own comment concedes "v1.0 codegen treats local self
+///     transitions as no-op exit; nested local transitions inherit …").
+///     The quiescent config converges ONLY because this fixture has no
+///     entry/exit *actions* (the convergence is VACUOUS w.r.t. the bug — a
+///     `Box`/`Inner1` with entry/exit actions WOULD observably diverge), so
+///     it is NOT classifiable as JUSTIFIED (the NEVER-GAME razor). A
+///     transition-LCA-algorithm fix touching all transition kinds — NOT a
+///     safe inline change without a full re-derivation. **RECOMMENDED
+///     DEDICATED FIX-WAVE** (spec in the audit doc).
+///
+///   • **`stress-every-timer`** — PERIODIC (`every N ms`) timer fires one
+///     too FEW times across a multi-period `advance_clock`. PROVEN
+///     observable action-count divergence: the shipped simulator invokes
+///     the `every 1000 ms : beat()` internal **4** times (clk=1000,2000,
+///     3000,6000); the generated C invokes it **3** times (it misses the
+///     clk=3000 tick when a competing `every 3000 -> Cooldown` consumes the
+///     same `advance_clock(3500)` step). Quiescent config converges
+///     (states are right) so it is NOT JUSTIFIED-classifiable — the
+///     convergence is VACUOUS w.r.t. the action count (an embedded target
+///     would get one fewer `beat()` side-effect per multi-period advance —
+///     a real missed-heartbeat-class defect). ROOT CAUSE: the periodic-
+///     timer budget/re-arm accounting in
+///     `emit/timer.rs::emit_advance_clock` — the periodic analogue of the
+///     W1-FU one-shot OVER-fire (here an UNDER-fire). Same delicate timer-
+///     budget code that already required the dedicated W1-FU wave; an
+///     inline math change risks regressing the byte-equal motor/
+///     traffic-light one-shot paths without a full re-derivation.
+///     **RECOMMENDED DEDICATED FIX-WAVE** (spec in the audit doc).
+const KNOWN_DIVERGENT: &[&str] = &[
+    "stress-deep-history",
+    "stress-choice-guard-payload",
+    "stress-self-transitions",
+    "stress-every-timer",
+];
 
 #[test]
 fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
@@ -1473,5 +1633,42 @@ fn dump_all_corpus_projections() {
         for (i, l) in g.iter().enumerate() {
             eprintln!("{i}: {}", l.replace(SEP, "|"));
         }
+    }
+}
+
+/// FW110 diagnostic — per-prefix QUIESCENT-config dump (sim vs generated C)
+/// for every corpus member. The record-model-AGNOSTIC observable: a
+/// divergence here is a GENUINE behavioural divergence (not a record-shape
+/// artifact). `#[ignore]`d like `dump_all_corpus_projections`; run with
+/// `… dump_all_corpus_quiescent -- --ignored --nocapture`. Kept as a
+/// keystone-re-derivation aid (the FW110 classification rests on this
+/// quiescent-config comparison, the same observable the FW109
+/// behavioural-equivalence proof uses).
+#[test]
+#[ignore = "diagnostic dump — run explicitly with --ignored --nocapture"]
+fn dump_all_corpus_quiescent() {
+    if !gcc_available() {
+        eprintln!("gcc absent — cannot dump");
+        return;
+    }
+    for ex in CORPUS {
+        let (ir, trace, machine) = load_trace(ex);
+        let n = trace.steps.len();
+        eprintln!("\n========== {ex} (quiescent config per prefix) ==========");
+        let mut all_match = true;
+        for k in 0..=n {
+            let sim = simulator_quiescent_config(&ir, &trace, k);
+            let gen = generated_c_quiescent_config(&ir, &machine, &trace, k);
+            let mark = if sim == gen { "OK " } else { "DIFF" };
+            if sim != gen {
+                all_match = false;
+            }
+            eprintln!("  [{mark}] prefix {k}: sim=[{sim}]  gen=[{gen}]");
+        }
+        eprintln!(
+            "  => {ex}: quiescent {} across all {} prefixes",
+            if all_match { "EQUIVALENT" } else { "DIVERGES" },
+            n + 1
+        );
     }
 }

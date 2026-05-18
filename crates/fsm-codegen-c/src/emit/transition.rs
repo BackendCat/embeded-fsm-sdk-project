@@ -226,6 +226,44 @@ pub fn emit_transition_body(
                     ));
                     continue;
                 }
+                if leaf.kind == StateRecordKind::Final {
+                    // FW110: a **Final** active-descendant leaf has NO
+                    // `_exit_<Final>` handler — the impl-header /
+                    // entry-exit declaration passes deliberately omit
+                    // entry/exit handlers for Final states
+                    // (`impl_header.rs` `rec.kind == StateRecordKind::Final
+                    // ⇒ continue`; `source.rs` guards `_exit_X` with
+                    // `!= Final`). The shipped `fsm_simulator::run_exit`
+                    // likewise runs NO exit action for a Final (it has no
+                    // `exit` block) yet `full_exits`/`exit_set` DO record
+                    // the active Final leaf in `exited_states`. So the
+                    // codegen must mirror BOTH facts: emit the trace `ext`
+                    // record (behavioural parity — the simulator records
+                    // it) but emit NO `<M>_exit_<Final>(m)` call (the
+                    // bug this fixes: the prior emitter called the
+                    // never-declared `<M>_exit_<Final>`, breaking the
+                    // -Werror build of any FSM whose composite has a
+                    // completion/exit edge with a live Final descendant —
+                    // e.g. a `done ->` cascade through Final states).
+                    // Symmetric to the submachine-ref branch above
+                    // (trace-record-but-no-`_exit_X`).
+                    if !emitted_header {
+                        out.push_str(&format!(
+                            "{pad}/* Composite active-descendant exit-set (Doc 08 §6.1, FW1-FU-2; FW110 Final-leaf: trace-only, no _exit_<Final>) */\n",
+                            pad = pad,
+                        ));
+                        emitted_header = true;
+                    }
+                    out.push_str(&format!(
+                        "{pad}#ifdef FSM_TRACE\n{pad}if (m->_active[{slot}] == {macro}_STATE_{lname}) fsm_trace_csv_append(m->_trace_ext, sizeof(m->_trace_ext), {lit});\n{pad}#endif\n",
+                        pad = pad,
+                        slot = slot,
+                        macro = ctx.macro_prefix(),
+                        lname = leaf.c_name,
+                        lit = super::trace_hook::c_string_literal(&leaf.ir_id),
+                    ));
+                    continue;
+                }
                 if !emitted_header {
                     out.push_str(&format!(
                         "{pad}/* Composite active-descendant exit-set (Doc 08 §6.1, FW1-FU-2) */\n",

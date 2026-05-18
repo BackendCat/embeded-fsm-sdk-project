@@ -1,0 +1,14 @@
+{
+  "machineFile": "stress-choice-guard-payload.fsm",
+  "description": "FW110 choice+payload-guard stress: CLASSIFY(12) (ctx.last=12 -> choice Decide routes to High via [ctx.last>=10]), RESET, CLASSIFY(7) (-> Mid via [ctx.last>=5]), RESET, CLASSIFY(2) (-> Low via [else]), RESET. Drives all three choice arms with distinct event payloads; a mis-ordered/mis-evaluated guard chain or wrong choice target diverges on the quiescent config. `expected` intentionally empty — the harness drives the LIVE shipped simulator oracle.",
+  "init": { "machineName": "Router" },
+  "steps": [
+    { "action": "dispatch", "event": "CLASSIFY", "payload": { "level": { "type": "u8", "value": 12 } } },
+    { "action": "dispatch", "event": "RESET" },
+    { "action": "dispatch", "event": "CLASSIFY", "payload": { "level": { "type": "u8", "value": 7 } } },
+    { "action": "dispatch", "event": "RESET" },
+    { "action": "dispatch", "event": "CLASSIFY", "payload": { "level": { "type": "u8", "value": 2 } } },
+    { "action": "dispatch", "event": "RESET" }
+  ],
+  "expected": []
+}

@@ -1,0 +1,55 @@
+language fsm 2.0
+
+// FW110 stress fixture — a CASCADING completion (`done ->`) chain through
+// a NESTED composite + Final states.
+//
+// FW109 found two completion-class codegen bugs (the Final-state trace-
+// record filter; the per-state-completion record granularity). This
+// fixture stresses a multi-level completion CASCADE: Stage1's inner
+// composite reaches its Final, firing Stage1's `done -> Stage2`; Stage2
+// reaches its Final, firing the OUTER `done -> Closed`. Each `done`
+// transition is automatic (no external event) — a codegen that mis-orders
+// the completion sweep, drops a Final-state entered/exited record, or
+// fires a `done` edge at the wrong RTC step diverges on the quiescent
+// configuration after the single STEP that triggers the cascade.
+
+feature hsm
+
+machine Pipeline {
+    events {
+        BEGIN
+        ADVANCE
+    }
+
+    initial Ready
+
+    state Ready {
+        on BEGIN -> Stage1
+    }
+
+    state Stage1 {
+        initial S1Work
+
+        done -> Stage2
+
+        state S1Work {
+            on ADVANCE -> S1Done
+        }
+
+        final S1Done
+    }
+
+    state Stage2 {
+        initial S2Work
+
+        done -> Closed
+
+        state S2Work {
+            on ADVANCE -> S2Done
+        }
+
+        final S2Done
+    }
+
+    state Closed { }
+}

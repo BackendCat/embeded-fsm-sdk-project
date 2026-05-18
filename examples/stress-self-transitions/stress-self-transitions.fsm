@@ -1,0 +1,46 @@
+language fsm 2.0
+
+// FW110 stress fixture — INTERNAL vs EXTERNAL-SELF vs LOCAL transitions
+// on a composite state.
+//
+// These three trigger forms have DISTINCT entry/exit semantics (Doc 08
+// §6.1 / Doc 00 §B-08) and the FW1-FU-2 bug class was precisely a wrong
+// codegen exit-set when a composite is the source:
+//   • internal  `on PING :`            — NO state change, NO entry/exit.
+//   • external self `on CYCLE -> Inner1` (on a SIMPLE leaf) — exits and
+//     re-enters Inner1 (ext == ent == {Inner1}); the language forbids an
+//     external self-transition on a COMPOSITE (FSM-E0401), so the canon
+//     external-self stress is on a leaf.
+//   • local `on REENTER ~> Inner2`     — re-targets within Box without
+//     exiting Box itself (exits the current leaf only).
+// A codegen that conflates any two of these diverges on entered/exited
+// sets and/or the quiescent config.
+
+extern note_ping()
+
+machine SelfT {
+    events {
+        PING
+        CYCLE
+        REENTER
+        NEXT
+    }
+
+    initial Box
+
+    state Box {
+        initial Inner1
+
+        on PING : note_ping()
+
+        state Inner1 {
+            on CYCLE -> Inner1
+            on NEXT -> Inner2
+            on REENTER ~> Inner2
+        }
+
+        state Inner2 {
+            on NEXT -> Inner1
+        }
+    }
+}

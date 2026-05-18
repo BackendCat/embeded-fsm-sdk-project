@@ -1,0 +1,12 @@
+{
+  "machineFile": "stress-parallel-cross-exit.fsm",
+  "description": "FW110 parallel mid-flight cross-exit stress: TICK_A (RegA A1->A2), TICK_B (RegB B1->B2), TICK_A (RegA A2->A3), ABORT (exits the parallel Running while RegA=A3 and RegB=B2, BOTH non-Final, different depths -> Halted). The ABORT exit-set must include every region's live leaf; a static source->LCA-only codegen under-records it. `expected` intentionally empty — the harness drives the LIVE shipped simulator oracle.",
+  "init": { "machineName": "ParEx" },
+  "steps": [
+    { "action": "dispatch", "event": "TICK_A" },
+    { "action": "dispatch", "event": "TICK_B" },
+    { "action": "dispatch", "event": "TICK_A" },
+    { "action": "dispatch", "event": "ABORT" }
+  ],
+  "expected": []
+}

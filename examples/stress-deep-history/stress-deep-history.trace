@@ -1,0 +1,12 @@
+{
+  "machineFile": "stress-deep-history.fsm",
+  "description": "FW110 deep_history stress: drive Work->WorkA, GO into WorkB.Deep1, DESCEND to WorkB.Deep2 (the innermost nested leaf), SUSPEND out to Paused (deep_history HWork must remember Deep2), then RESUME through deep_history. A correct engine restores Work>WorkB>Deep2 (the full nested leaf); a codegen that restores only the direct child default (WorkA) or the composite default diverges on the quiescent config. `expected` intentionally empty — the differential harness clears it and drives the LIVE shipped fsm_simulator::execute_trace as the oracle.",
+  "init": { "machineName": "DeepHist" },
+  "steps": [
+    { "action": "dispatch", "event": "GO" },
+    { "action": "dispatch", "event": "DESCEND" },
+    { "action": "dispatch", "event": "SUSPEND" },
+    { "action": "dispatch", "event": "RESUME" }
+  ],
+  "expected": []
+}

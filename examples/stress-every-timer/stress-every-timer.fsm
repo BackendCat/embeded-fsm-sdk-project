@@ -1,0 +1,42 @@
+language fsm 2.0
+
+// FW110 stress fixture — PERIODIC (`every N ms`) timers.
+//
+// The corpus only covers one-shot `after N ms` (motor, traffic-light).
+// The W1-FU bug class lived in `emit/timer.rs::emit_advance_clock`
+// (elapsed-budget consumption + re-arm). A PERIODIC `every` timer is a
+// DISTINCT re-arm path: it must re-fire once per period as the clock
+// advances, and an `every` *internal* (no transition) must tick its
+// action WITHOUT changing the configuration. This fixture drives a single
+// large advance_clock that should make the `every 1000 ms -> Tick` edge
+// fire deterministically the same number of times in the generated C as
+// in the shipped simulator, and an `every 1000 ms : beat()` internal that
+// must not perturb the config.
+
+feature timers
+
+extern beat()
+
+machine Heartbeat {
+    events {
+        ARM
+        DISARM
+    }
+
+    initial Off
+
+    state Off {
+        on ARM -> Pulsing
+    }
+
+    state Pulsing {
+        every 1000 ms : beat()
+        every 3000 ms -> Cooldown
+        on DISARM -> Off
+    }
+
+    state Cooldown {
+        after 2000 ms -> Pulsing
+        on DISARM -> Off
+    }
+}

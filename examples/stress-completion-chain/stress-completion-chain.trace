@@ -1,0 +1,11 @@
+{
+  "machineFile": "stress-completion-chain.fsm",
+  "description": "FW110 cascading-completion stress: BEGIN (Ready->Stage1>S1Work), ADVANCE (S1Work->S1Done[final] => Stage1 done -> Stage2>S2Work), ADVANCE (S2Work->S2Done[final] => Stage2 done -> Closed). The second ADVANCE triggers a 2-level completion cascade through Final states in ONE RTC step. Exercises the FW109 completion-granularity + Final-record-filter bug class. `expected` intentionally empty — the harness drives the LIVE shipped simulator oracle.",
+  "init": { "machineName": "Pipeline" },
+  "steps": [
+    { "action": "dispatch", "event": "BEGIN" },
+    { "action": "dispatch", "event": "ADVANCE" },
+    { "action": "dispatch", "event": "ADVANCE" }
+  ],
+  "expected": []
+}

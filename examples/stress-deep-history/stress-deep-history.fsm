@@ -1,0 +1,53 @@
+language fsm 2.0
+
+// FW110 stress fixture — deep_history across a 2-LEVEL nested composite.
+//
+// The FW1-FU-2 codegen fix covered `shallow_history` (restore the direct
+// child of the owning composite). `deep_history` is a DIFFERENT, until-now
+// differential-untested restore path: it must restore the FULL remembered
+// nested leaf (the innermost active descendant at the moment the composite
+// was exited), not merely the composite's direct child default. This
+// fixture drives Work into its deep nested leaf `WorkB.Deep2`, leaves via
+// SUSPEND, then RESUME through `deep_history` — a correct engine restores
+// `WorkB.Deep2`; a codegen that restores only the direct child (WorkA) or
+// the default would diverge on the quiescent config.
+
+feature hsm
+feature history
+
+machine DeepHist {
+    events {
+        GO
+        DESCEND
+        SUSPEND
+        RESUME
+    }
+
+    initial Work
+
+    state Work {
+        initial WorkA
+
+        deep_history HWork { initial WorkA }
+
+        on SUSPEND -> Paused
+
+        state WorkA {
+            on GO -> WorkB
+        }
+
+        state WorkB {
+            initial Deep1
+
+            state Deep1 {
+                on DESCEND -> Deep2
+            }
+
+            state Deep2 { }
+        }
+    }
+
+    state Paused {
+        on RESUME -> HWork
+    }
+}

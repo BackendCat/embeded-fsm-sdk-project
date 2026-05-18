@@ -1,0 +1,13 @@
+{
+  "machineFile": "stress-self-transitions.fsm",
+  "description": "FW110 self-transition stress: PING (internal on Box — note_ping(), NO entry/exit, config unchanged), CYCLE (external self on leaf Inner1 — ext==ent=={Inner1}), NEXT (Inner1->Inner2), NEXT (Inner2->Inner1), REENTER (local ~> Inner2 — re-targets within Box without exiting Box). Exercises the internal/external-self/local entry-exit-set distinctions the FW1-FU-2 bug class lived in. `expected` intentionally empty — the harness drives the LIVE shipped simulator oracle.",
+  "init": { "machineName": "SelfT" },
+  "steps": [
+    { "action": "dispatch", "event": "PING" },
+    { "action": "dispatch", "event": "CYCLE" },
+    { "action": "dispatch", "event": "NEXT" },
+    { "action": "dispatch", "event": "NEXT" },
+    { "action": "dispatch", "event": "REENTER" }
+  ],
+  "expected": []
+}

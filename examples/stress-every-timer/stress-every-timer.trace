@@ -1,0 +1,12 @@
+{
+  "machineFile": "stress-every-timer.fsm",
+  "description": "FW110 periodic-timer stress: ARM (Off->Pulsing, arms `every 1000 : beat()` and `every 3000 -> Cooldown`), advance 3500ms (the periodic `every 3000` should fire Pulsing->Cooldown; the `every 1000` internal must tick without changing config), advance 2500ms (Cooldown `after 2000` -> Pulsing), DISARM (->Off). Exercises PERIODIC re-arm + elapsed-budget consumption — a distinct path from the one-shot `after` the W1-FU fix covered. `expected` intentionally empty — the harness drives the LIVE shipped simulator oracle.",
+  "init": { "machineName": "Heartbeat" },
+  "steps": [
+    { "action": "dispatch", "event": "ARM" },
+    { "action": "advance_clock", "deltaMs": 3500 },
+    { "action": "advance_clock", "deltaMs": 2500 },
+    { "action": "dispatch", "event": "DISARM" }
+  ],
+  "expected": []
+}

@@ -1,0 +1,45 @@
+language fsm 2.0
+
+// FW110 stress fixture — exit a PARALLEL composite MID-FLIGHT (both
+// regions in live NON-Final leaves).
+//
+// FW109 fixed the parallel-source active-descendant exit-set, but its
+// trigger (vending `RESET`) fired AFTER both regions had reached their
+// Final pseudo-states. This fixture exits the parallel composite while
+// BOTH regions are in ordinary (non-Final) leaves at DIFFERENT depths —
+// the simulator's `full_exits` must record every region's live leaf; a
+// codegen that only walks the static source->LCA chain (or only handles
+// the all-Final case) under-records the exit-set and diverges on
+// entered/exited or the quiescent config.
+
+feature parallel
+feature hsm
+
+machine ParEx {
+    events {
+        TICK_A
+        TICK_B
+        ABORT
+    }
+
+    initial Running
+
+    state Running {
+        on ABORT -> Halted
+
+        region RegA {
+            initial A1
+            state A1 { on TICK_A -> A2 }
+            state A2 { on TICK_A -> A3 }
+            state A3 { }
+        }
+
+        region RegB {
+            initial B1
+            state B1 { on TICK_B -> B2 }
+            state B2 { }
+        }
+    }
+
+    state Halted { }
+}
