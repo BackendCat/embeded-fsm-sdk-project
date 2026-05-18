@@ -66,3 +66,256 @@ jobs:
 
       - name: cargo audit
         run: cargo audit
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Phase-6.0-W5 — the 4 ADDITIVE-ISOLATED reliability lanes.
+  # ───────────────────────────────────────────────────────────────────────
+  # Everything below this line is the W5 ci.yml integration (Doc 32 §W5
+  # deliverable (1)). The `build`(matrix) + `sca` jobs ABOVE are kept
+  # BYTE-UNTOUCHED (Doc 32 GT-1 / §6 H6 — `git diff` to those two job
+  # blocks is empty; proven in the W5 completion report).
+  #
+  # THE ADDITIVE-ISOLATED-JOB PATTERN (the proven `sca` precedent, Doc 32
+  # §6 H4 / GT-1): each lane is its OWN job under `jobs:`, `needs:`-free,
+  # so it NEVER gates the 1.75 `build` matrix — exactly the `sca` job's
+  # rationale "Kept a DISTINCT job so it never gates the 1.75 build
+  # matrix". Every heavy install (`apt-get qemu/arm-gcc`, `cargo install
+  # cargo-llvm-cov`, `npm ci` + the Electron download) lives ONLY inside
+  # these CI-runner jobs — NEVER on the dev box (Doc 32 GT-10 / OWNER-2:
+  # the box is disk-tight; the on-target/coverage matrix is
+  # CI-runner-only by design). Per-push = a WARM-CACHE FAST NET
+  # (Swatinem/rust-cache); the §11.30 cold-from-source quad is the
+  # TAG-GATE event ONLY (W6 / GT-12) — deliberately NOT added here.
+  #
+  # THE KEYSTONE (Doc 32 §2 — the W6 source-derived phase-audit
+  # re-derives this): this CI glue defines NO step / transition-selection
+  # / guard-eval / deadlock / oracle semantics. The lanes only INVOKE the
+  # W2/W3/W4 mechanisms; the differential oracle stays the shipped
+  # `fsm_simulator::execute_trace` / `StepRecord`. The W6 audit
+  # negative-greps this file (∅ on non-comment lines) — engineered to
+  # pass by construction.
+
+  # ── conformance: the W3 live-enum-derived build-failing lock + corpus ──
+  # Composes the W3 artifact
+  # (`crates/fsm-cli/tests/conformance_code_coverage_lock.rs`) — it is NOT
+  # re-implemented here. The lock derives the target set from the
+  # *compiled live enum* `DiagnosticCode::all_codes()` and asserts every
+  # live code is covered by an exact-set conformance fixture in
+  # `tests/conformance/MANIFEST.json` (the corpus) or a justified
+  # allowlist entry; it is build-failing on a gap (the proven
+  # `EXPECTED:73`-lock class, Doc 32 §W3 / GT-5/GT-8). Its in-suite
+  # RED-proof (`red_proof_lock_fails_when_a_live_code_is_neither…`) runs
+  # in the same binary, so the lock's non-vacuity is asserted every push.
+  # A DISTINCT job on the pinned 1.75 (probe-trap discipline; no extra
+  # toolchain — unlike `sca`/`coverage-rust` it needs none).
+  conformance:
+    name: conformance / G7 live-enum-derived lock + corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the channel; assert from inside the repo
+      # (the probe-trap discipline — a bare `rustc` would read the
+      # box-default stable, a benign artifact, NOT pin drift; Doc 32 GT-2).
+      - name: Install Rust toolchain (the pinned 1.75)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache cargo registry and target/
+        uses: Swatinem/rust-cache@v2
+
+      # The W3 build-failing lock + its in-suite RED-proof + the
+      # COVERAGE_MAP byte-derivable check, all 4 tests in the one binary.
+      - name: G7 conformance-coverage lock (build-failing; corpus exact-set)
+        run: >
+          cargo test -p fsm-cli
+          --test conformance_code_coverage_lock
+          -- --nocapture
+
+  # ── extension-host: the xvfb-run @vscode/test-electron suite + W4 c8 ───
+  # GT-11: `@vscode/test-electron` (the `xvfb-run` Extension-Host harness)
+  # already shipped (v1.5 A1/A2/C2); W4 added the extension's OWN coverage
+  # (`c8`, `.c8rc.json`, the `test:coverage`/`coverage:gate` npm scripts).
+  # This lane COMPOSES those (not re-implemented): it runs the real
+  # headless VS Code Extension-Host suite UNDER `c8` instrumentation
+  # (`xvfb-run` — Electron needs an X server; `runTest.ts` forwards
+  # `NODE_V8_COVERAGE` into the spawned Extension Host so c8 is
+  # non-vacuous) then enforces the W4-measured `.c8rc.json` per-area
+  # ratchet floors (Doc 32 §W4 §5.4 / §W5 (1c)). A DISTINCT job (the
+  # `sca`-isolation precedent); the npm/Electron toolchain is
+  # CI-runner-only (GT-10 — the box is disk-tight; the Electron download
+  # is pinned out-of-tree at `~/.vscode-test` by `runTest.ts`).
+  extension-host:
+    name: extension-host / xvfb @vscode/test-electron + c8 ratchet
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install extension dependencies (clean, lockfile-exact)
+        run: npm ci
+
+      # The Extension Host is a real Electron process — it needs an X
+      # server. `xvfb-run` provides a headless one (the v1.5-shipped
+      # pattern). `test:coverage` = `c8 --config .c8rc.json node
+      # ./out/test/runTest.js`: it builds (`pretest:coverage` → `pretest`)
+      # then runs the real VS Code Extension-Host suite under c8 V8
+      # instrumentation. The `--no-sandbox` Electron arg is set in
+      # `runTest.ts` (Chromium sandbox cannot init as root in CI).
+      - name: Run the Extension-Host suite under c8 (xvfb-run)
+        run: xvfb-run -a npm run test:coverage
+
+      # THE GATE (Doc 32 §W4 §5.4 / §W5 (1c)): enforce the W4-MEASURED
+      # per-area floors in `.c8rc.json` (monotonic non-decreasing,
+      # `floor(measured-2%)`; NO coverage-gaming test was added — the
+      # floors were measured against the EXISTING behavioural suite).
+      # `c8 check-coverage` exits non-zero if any freshly measured area
+      # dropped below its committed floor.
+      - name: c8 coverage ratchet gate (fail if below floor)
+        run: npm run coverage:gate
+
+  # ── coverage-rust: COMPOSED VERBATIM from docs/ci/coverage-rust-lane.yml
+  # The W4 artifact is the single source of truth for this lane's body
+  # (the additive `+nightly` `cargo-llvm-cov --branch` + the committed
+  # `coverage-floors.toml` ratchet enforced by `scripts/coverage-gate.py`,
+  # incl. its in-CI `--red-proof` non-vacuity self-test + the
+  # `--check-monotonic` never-lowers check). W5 composes it under `jobs:`
+  # UNCHANGED (the W2-precedent compose contract stated in that file's
+  # header). Re-derived 2026-05-18 from `docs/ci/coverage-rust-lane.yml`;
+  # the additive-`nightly` isolation NEVER touches the 1.75 pin (the
+  # `sca` additive-`stable` rationale, nightly because
+  # `cargo-llvm-cov --branch` is nightly-only — flagged in the W4 report
+  # + that fragment's header). cargo-llvm-cov is CI-runner-only (GT-10).
+  coverage-rust:
+    name: coverage-rust / cargo-llvm-cov branch ratchet (nightly, additive)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # Full history so `--check-monotonic` can `git show <base>:` the
+        # previous coverage-floors.toml (the ratchet-never-lowers check).
+        with:
+          fetch-depth: 0
+
+      # The ADDITIVE nightly toolchain — does NOT touch the 1.75 pin (the
+      # exact `sca` additive-`stable` isolation, nightly here because
+      # `cargo-llvm-cov --branch` is nightly-only; Doc 32 §6 H4 / GT-1).
+      # `llvm-tools-preview` is the instrumentation backend cargo-llvm-cov
+      # needs.
+      - name: Install an additive nightly toolchain (does NOT touch the 1.75 pin)
+        run: |
+          rustup toolchain install nightly --profile minimal \
+            --component llvm-tools-preview
+          rustup +nightly show
+
+      - name: Cache cargo registry and target/
+        uses: Swatinem/rust-cache@v2
+
+      # cargo-llvm-cov is a CONTAINED cargo dev-tool (NOT a system apt
+      # package) — installed in THIS runner only (the CI-first default,
+      # GT-10 / OWNER-2; the `sca` `cargo +stable install cargo-audit`
+      # precedent, nightly instead of stable).
+      - name: Install cargo-llvm-cov (contained dev-tool, on nightly)
+        run: cargo +nightly install cargo-llvm-cov --locked
+
+      # MEASURE: per-package `cargo +nightly llvm-cov --branch` ⇒
+      # target/w4-coverage/cov-<pkg>.json. Doc 32 §W4: the floor is
+      # MEASURED, never guessed — this step produces the real numbers the
+      # gate enforces. fsm-lsp is measured via --lib + line-only (its
+      # subprocess-stdio integration test is instrumentation-flaky and its
+      # --branch hits a reproduced LLVM-22 SIGSEGV — both recorded +
+      # justified in coverage-floors.toml [exclusions.*]). The script
+      # re-probes fsm-lsp --branch every run and SHOUTS if the upstream
+      # LLVM-22 bug is fixed (self-healing disclosure).
+      - name: Measure per-package coverage (cargo-llvm-cov --branch)
+        run: python3 scripts/coverage-gate.py --measure
+
+      # THE GATE (Doc 32 §W4 §5.4): FAIL CI if ANY package's freshly
+      # measured line/branch dropped below its ratcheted floor in
+      # coverage-floors.toml. Non-vacuity is proven by the next step.
+      - name: Coverage ratchet gate (fail if below floor)
+        run: python3 scripts/coverage-gate.py --gate
+
+      # NON-VACUITY RED-PROOF run IN CI (Doc 32 §W4 §5.4 — a gate that
+      # cannot fail is worthless): proves, via the IDENTICAL gate predicate,
+      # that a deliberate floor-bump-without-tests AND a coverage-drop both
+      # FAIL, and the real tree PASSES. Runs every CI build so the gate's
+      # non-vacuity is continuously asserted, not a one-time claim (the W3
+      # in-suite RED-proof precedent).
+      - name: Prove the coverage gate is non-vacuous (RED-proof)
+        run: python3 scripts/coverage-gate.py --red-proof
+
+      # MONOTONIC RATCHET (Doc 32 §W4 (3)): the floor only ever ascends.
+      # FAIL CI if any floor_* in this commit is BELOW the base ref's
+      # value. On `pull_request` the base is the PR target; on push to main
+      # it is the previous commit.
+      - name: Ratchet is monotonic (no floor was lowered)
+        run: |
+          BASE="${GITHUB_BASE_REF:-HEAD~1}"
+          python3 scripts/coverage-gate.py --check-monotonic "$BASE"
+
+  # ── on-target: COMPOSED VERBATIM from docs/ci/on-target-lane.yml ───────
+  # The W2 artifact is the single source of truth for this lane's body
+  # (the runner `apt-get install qemu-system-arm gcc-arm-none-eabi` + the
+  # W2 `on_target_qemu_differential` test — the HARD QEMU `mps2-an385`
+  # byte-differential vs the shipped `fsm_simulator::execute_trace`
+  # oracle, NOT a second oracle). W5 composes it under `jobs:` UNCHANGED
+  # (the compose contract stated in that file's header). Re-derived
+  # 2026-05-18 from `docs/ci/on-target-lane.yml`. The ARM cross-toolchain
+  # + QEMU are installed ONLY in this CI runner, NEVER on the dev box
+  # (GT-10 / OWNER-2). KEYSTONE: this lane defines no semantics — the W6
+  # audit re-derives that the comparison oracle is `execute_trace`.
+  on-target:
+    name: on-target / QEMU mps2-an385 trace differential
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The ONLY place the ARM cross-toolchain + QEMU are installed — the
+      # CI runner, NEVER the dev box (Doc 32 §W2 deliverable (2) / GT-10 /
+      # OWNER-2). `gcc-arm-none-eabi` = arm-none-eabi-gcc (the cross
+      # compiler/linker); `qemu-system-arm` = the `-M mps2-an385`
+      # Cortex-M3 emulator with semihosting. Both are stock Ubuntu apt
+      # packages (the canonical embedded-CI pattern).
+      - name: Install the ARM cross-toolchain + QEMU (CI-runner-only)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi qemu-system-arm
+
+      # Sanity: both tools resolve (so a packaging change fails here with
+      # a clear message, not an opaque skip — the on-target test would
+      # otherwise silently skip-if-absent and the lane would be a no-op).
+      - name: Verify the on-target toolchain is present
+        run: |
+          arm-none-eabi-gcc --version
+          qemu-system-arm --version
+
+      # rust-toolchain.toml pins the channel + components; assert from
+      # inside the repo (the probe-trap discipline — a bare `rustc` would
+      # read the box-default stable, a benign artifact, NOT pin drift).
+      - name: Install Rust toolchain (the pinned 1.75)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache cargo registry and target/
+        uses: Swatinem/rust-cache@v2
+
+      # The HARD on-target differential. With the toolchain installed the
+      # skip-if-absent gate is NOT taken — this is the real QEMU byte-diff
+      # vs the shipped `fsm_simulator::execute_trace` oracle for every
+      # `BYTE_EQUAL` catalogue member (Doc 32 §W2 §5.4 + §2). `--nocapture`
+      # surfaces the per-fixture BYTE-EQUAL ✓ / precise first-divergence
+      # report in the CI log. The keystone/contract guards run in the same
+      # binary.
+      - name: on-target QEMU mps2-an385 trace differential (HARD in CI)
+        run: >
+          cargo test -p fsm-simulator
+          --test on_target_qemu_differential
+          -- --nocapture

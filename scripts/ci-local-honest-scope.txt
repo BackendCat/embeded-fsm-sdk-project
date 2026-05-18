@@ -1,0 +1,75 @@
+═══════════════════════════════════════════════════════════════════════════
+  make ci-local — HONEST SCOPE  (Doc 32 §W5 + §5 + the H9 anti-mis-sell row;
+  the [[feedback_infra_constraint_escalation]] honest-bottleneck discipline)
+═══════════════════════════════════════════════════════════════════════════
+
+WHAT THIS GATE *DID* RUN LOCALLY (HIGH CONFIDENCE — it actually gates;
+a deliberately-broken tree makes it exit non-zero, proven in the W5
+completion report's non-vacuity RED-proof transcript):
+
+  (a) The per-wave QUAD on the pinned rustc 1.75 (rust-toolchain.toml,
+      asserted via `rustup show active-toolchain` from inside the repo —
+      a bare `rustc`→1.95 is the BENIGN box default, NOT pin drift):
+        cargo fmt --all --check
+        cargo clippy --workspace --all-targets -- -D warnings
+        cargo build --workspace
+        cargo test --workspace
+  (b) CONFORMANCE — the W3 live-enum-derived BUILD-FAILING lock
+      (`conformance_code_coverage_lock`: every live DiagnosticCode has an
+      exact-set conformance fixture in the corpus or a justified
+      allowlist entry) + its in-suite RED-proof + the COVERAGE_MAP
+      byte-derivable check.
+  (c) The xvfb-run @vscode/test-electron EXTENSION-HOST suite UNDER the
+      W4 `c8` instrumentation + the `c8` per-area ratchet gate
+      (`.c8rc.json` measured floors) — the same real headless VS Code
+      Extension-Host the CI `extension-host` lane runs.
+  (d) An `act` DRY-RUN of the LINUX `build` + `sca` ci.yml lanes ONLY
+      (NOT the heavy on-target/coverage matrix) — IF `act` is installed.
+  (e) WORKFLOW-LINT of the W5-added lanes: ci.yml parses, the 4 lanes
+      are structurally valid + additive-isolated + each structurally
+      references its real W2/W3/W4 artifact, AND the frozen `build`+`sca`
+      jobs are byte-identical to the base ref (GT-1).
+
+WHAT THIS GATE DELIBERATELY DID **NOT** RUN LOCALLY — AND WHY (this is
+NOT a gap in the gate; it is the CI-first design, OWNER-2 / GT-10):
+
+  • The `on-target` lane (QEMU `mps2-an385` + arm-none-eabi-gcc) and the
+    `coverage-rust` lane (cargo-llvm-cov --branch, nightly) are
+    CI-RUNNER-ONLY BY DESIGN. arm-none-eabi-gcc / qemu-system-arm /
+    cargo-llvm-cov are NOT installed on this disk-tight box and MUST NOT
+    be (the no-box-installs constraint). Their `apt-get`/`cargo install`
+    lines live in the ci.yml RUNNER jobs and execute in CI, never here.
+    THIS GATE MAKES NO CLAIM TO HAVE RUN on-target OR coverage-rust
+    LOCALLY.
+
+  • The on-target *LOGIC* is nonetheless LOCALLY SMOKE-PROVEN — not by
+    re-running QEMU here, but by W1's HOST generated-C trace differential
+    (`codegen_equivalence_smoke`, part of the (a) quad's `cargo test`):
+    the generated C is byte-equal to the shipped
+    `fsm_simulator::execute_trace` oracle on the host. W2's on-target
+    lane runs that SAME instrumented C on a different substrate (QEMU);
+    the substrate changes, the oracle does NOT (zero cross-toolchain
+    re-implementation by design — the Doc 32 §2 keystone). So the
+    on-target *semantics* is locally exercised; only the *emulated-target
+    execution* is CI-only.
+
+  • The `act` lane: `act` is ABSENT on this box but installable (Docker
+    IS present, so `act` runs once installed). It pulls multi-GB runner
+    images and the box is disk-tight (GT-10), so even when present `act`
+    covers ONLY the Linux `build`/`sca` lanes — never the heavy matrix.
+    If `act` is absent this gate reports lane (d) as
+    `SKIPPED — pending act install` and CONTINUES (an honest skip, the
+    `gcc_compile.rs` skip-notice precedent) — it NEVER silently passes
+    that lane, and it does NOT install `act` to "make it work".
+
+WHAT G9 (THE OWNER'S `git push`) THEREFORE IS:
+
+  A CONFIRMATION / SWITCH, *not a redundant leap and not a blind one*.
+  Everything runnable without a push has been gated locally with high
+  confidence (a..e above). The push additionally exercises the
+  CI-runner-only on-target + coverage matrix on the proper toolchains.
+  This gate materially DE-RISKS G9; it does NOT claim to have already
+  performed the on-target/coverage matrix locally. Over-claiming that it
+  did would be the H9 failure — it is deliberately not made.
+
+═══════════════════════════════════════════════════════════════════════════
