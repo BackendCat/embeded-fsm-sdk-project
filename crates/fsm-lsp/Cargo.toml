@@ -58,6 +58,25 @@ rowan = { workspace = true }
 # epic guards against. `fsm-verify` already `#![forbid(unsafe_code)]`, so
 # this dep edge adds NO new forbid-unsafe crate root (count unchanged).
 fsm-verify = { path = "../fsm-verify" }
+# debug-W1 (Doc 33 §W1 / §2 the KEYSTONE-IN-DEBUG invariant; GT-12 verified
+# this dep was ABSENT before W1) — THE single Rust-layer enabling change of
+# the entire debug-interface epic, exactly the v1.5 W-A2 single-dep-edge
+# shape. The `fsm/simulate*` LSP custom requests call the EXACT same
+# `fsm_simulator::Interpreter` public methods (`new`/`init`/`dispatch`/
+# `dispatch_with_payload`/`advance_clock`/`context`/`current_states_named`/
+# `virtual_clock_ms`/`snapshot`/`restore`) `crates/fsm-cli/src/cmd/test.rs`'s
+# `execute_trace` calls — there is NO transition-selection / guard-eval /
+# completion-synthesis / RTC-step / active-config-computation logic
+# re-implemented in `fsm-lsp`; each handler is pure marshalling around ONE
+# shipped `Interpreter` call, so the `fsm/simulate*` `StepRecord` stream is
+# byte-equal to `fsm test`'s `execute_trace` by construction (editor ≡ CLI ≡
+# CI — the differential oracle). The ONLY `crates/fsm-simulator` behaviour
+# delta of the epic is the additive, non-stepping `Interpreter::
+# set_context_field` helper (it runs no transition/guard/step — it is NOT
+# semantics). A second simulator semantics is the cardinal regression this
+# epic guards against. `fsm-simulator` already `#![forbid(unsafe_code)]`, so
+# this dep edge adds NO new forbid-unsafe crate root (count unchanged).
+fsm-simulator = { path = "../fsm-simulator" }
 
 # LSP framework + async runtime. Sanctioned by Doc 26 §2.1 — `fsm-lsp` is
 # a developer-host tool, never compiled into firmware, so the embedded G2
