@@ -68,10 +68,26 @@ interface SimResp {
   machineName?: string;
 }
 
-/** A captured panel: its outbound `simState` payloads + a way to fire the
- * inbound webview→ext gestures the real `debugWebview.ts` posts. */
+/** One ext→webview message the panel posts (the byte-match subject). */
+interface OutMsg {
+  readonly type?: string;
+  readonly resp?: SimResp;
+  readonly steps?: unknown[];
+  readonly revealCount?: number;
+  readonly bpKind?: string;
+  readonly targetId?: string;
+  readonly index?: number;
+  readonly stamp?: number;
+}
+
+/** A captured panel: its outbound `simState`/`paused`/`rewound` payloads
+ * (W3 added the latter two) + a way to fire the inbound webview→ext
+ * gestures the real `debugWebview.ts` posts. */
 interface CapturedPanel {
   readonly simStates: SimResp[];
+  /** Every ext→webview message in order (the W3 byte-match needs the
+   * `paused`/`rewound` `resp`s, not just `simState`). */
+  readonly outbound: OutMsg[];
   fireInbound(msg: Record<string, unknown>): void;
 }
 
@@ -104,8 +120,16 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
     serverBinary = bins.server;
 
     // R-15 isolation: stage fixtures in an OS temp dir; hard-assert the
-    // upward fsm.toml walk finds none.
+    // upward fsm.toml walk finds none. `clean_w3.fsm` is a SEPARATE copy
+    // of the Gate machine so the §W3 test gets its OWN panel (the
+    // DebugController keys panels by resolved path + REUSES an existing
+    // one — a distinct filename avoids reusing the §W2 test's panel,
+    // which would skip createWebviewPanel and never re-instrument).
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsm-dbgw2-"));
+    fs.copyFileSync(
+      path.join(FIXTURE_SRC, "clean.fsm"),
+      path.join(tmpDir, "clean_w3.fsm"),
+    );
     for (const f of ["clean.fsm"]) {
       fs.copyFileSync(path.join(FIXTURE_SRC, f), path.join(tmpDir, f));
     }
@@ -153,6 +177,7 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
       )(...args);
 
       const simStates: SimResp[] = [];
+      const outbound: OutMsg[] = [];
       const inboundListeners: Array<(m: unknown) => unknown> = [];
 
       // Capture the DebugView's onDidReceiveMessage registration so the
@@ -177,7 +202,10 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
       (
         panel.webview as unknown as { postMessage: (m: unknown) => Thenable<boolean> }
       ).postMessage = (m: unknown): Thenable<boolean> => {
-        const mm = m as { type?: string; resp?: SimResp };
+        const mm = m as OutMsg;
+        if (mm && typeof mm.type === "string") {
+          outbound.push(mm);
+        }
         if (mm && mm.type === "simState" && mm.resp) {
           simStates.push(mm.resp);
         }
@@ -191,6 +219,7 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
 
       captured = {
         simStates,
+        outbound,
         fireInbound: (msg: Record<string, unknown>) => {
           for (const l of inboundListeners) {
             void l(msg);
@@ -409,6 +438,315 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
       "Init active config is EXACTLY the W1 oracle's (panel re-decides nothing)",
     );
     assert.strictEqual(pClk.currentMs, 500, "advanceClock +500 moves the virtual clock to 500");
+  });
+
+  // ════════════════════════════════════════════════════════════════════
+  // THE §W3 GATE — the DBGUX §3.4 worked micro-scenario, end-to-end
+  // (Doc 33 §W3 behavioural acceptance; PD-2: behavioural, NOT symbol-
+  // presence). Set a TRANSITION breakpoint by firing the EXACT
+  // `toggleBreakpoint` gesture the real debugWebview.ts posts on an edge-
+  // glyph click → Init → dispatch(OPEN) → assert the run PAUSES PRE-STEP
+  // (the panel's `paused.resp` restored-state BYTE-EQUALS an INDEPENDENT
+  // W1 `fsm/simulate` snapshot/restore round-trip at that point — the
+  // differential oracle, the W2 E2E technique) → ⏭ Step / ▶ Run reveals
+  // the breaking record → ◀ rewind to #0 → assert diagram+context+clock
+  // BYTE-IDENTICAL vs an INDEPENDENT W1 snapshot/restore round-trip.
+  //
+  // THE KEYSTONE PROVEN, NOT ASSUMED: the breakpoint fires on the
+  // ORACLE'S OWN `StepRecord.transitionTaken.stableId`; the pause/rewind
+  // states are the W1 `restore` op's bytes — a second (even partial)
+  // semantics would DIVERGE from the independent W1 round-trip here.
+  // ════════════════════════════════════════════════════════════════════
+  test("§3.4 E2E: a transition breakpoint pauses PRE-step + rewind, both BYTE-IDENTICAL to an independent W1 snapshot/restore (zero semantics)", async function () {
+    this.timeout(180_000);
+
+    // A SEPARATE fixture file (own resolved path ⇒ own panel — see the
+    // suiteSetup note; avoids reusing the §W2 test's panel).
+    const fixture = path.join(tmpDir, "clean_w3.fsm");
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
+    await vscode.window.showTextDocument(doc);
+    const text = fs.readFileSync(fixture, "utf8");
+    const uri = vscode.Uri.file(fixture).toString();
+
+    // ── (A) Open the REAL panel; wait for the reused-v1.3 render + the
+    // W1 `load` to complete + the transport to enable.
+    webviewMsgs.length = 0;
+    captured = undefined;
+    // Pass the fixture Uri EXPLICITLY (resolveTargetFsm honours arg 0 — a
+    // distinct path ⇒ a fresh panel ⇒ createWebviewPanel re-instruments).
+    await vscode.commands.executeCommand("fsm.openDebug", vscode.Uri.file(fixture));
+    await waitFor(() => captured !== undefined, "the debug panel to be created", 30_000);
+    await waitFor(
+      () => webviewMsgs.some((m) => m.type === "renderedDiagram"),
+      "the debug webview to render the (reused v1.3) diagram",
+      90_000,
+    );
+    await waitFor(
+      () =>
+        webviewMsgs.some((m) => m.type === "transportApplied" && m.enabled === true),
+      "the W1 `load` to complete + the transport to enable",
+      60_000,
+    );
+
+    // The panel must have published the edge-id → IR-stableId map (the
+    // PURE structural IR read the transition-breakpoint predicate target
+    // comes from — NOT the diagram edge id). Re-derive the Gate edge's
+    // stableId from THAT map (the ground truth the panel itself uses; we
+    // do NOT hard-code the id scheme — that would be a brittle guess).
+    const tidMsg = (requireCaptured().outbound.find(
+      (m) => m.type === "transitionIds",
+    ) ?? undefined) as { map?: Record<string, string> } | undefined;
+    assert.ok(
+      tidMsg && tidMsg.map,
+      "the panel must publish the edge-id → transition-stableId map (W3)",
+    );
+    const stableIds = Object.values(tidMsg.map as Record<string, string>);
+    assert.strictEqual(
+      stableIds.length,
+      2,
+      `Gate has exactly 2 transitions (got ${JSON.stringify(tidMsg.map)})`,
+    );
+    // The Closed→Open transition is the one whose source is the Closed
+    // state — re-derive it from the W1 oracle's OWN dispatch StepRecord
+    // (below) rather than guessing which map entry it is.
+
+    // ── (B) The INDEPENDENT W1 differential oracle: the SAME bundled
+    // server, its OWN session — replicate init → snapshot(pre-dispatch)
+    // → dispatch(OPEN) → restore(pre-dispatch). The `restore` state_block
+    // IS the byte-truth the panel's pause/rewind must equal.
+    const oracleClient = new LanguageClient(
+      "fsm-dbgw3-oracle",
+      "debug-W3 fsm/simulate differential oracle",
+      { run: { command: serverBinary }, debug: { command: serverBinary } },
+      { documentSelector: [{ language: "fsm-lang" }] },
+    );
+    await oracleClient.start();
+    let oPreStepState: SimResp;
+    let oTransStableId: string;
+    let oRewindState: SimResp;
+    try {
+      const oid = "oracle-w3::" + fixture;
+      const oLoad = await w1(oracleClient, {
+        op: "load",
+        instanceId: oid,
+        text,
+        uri,
+        machineName: "Gate",
+      });
+      assert.ok(!oLoad.error, `W1 oracle load: ${oLoad.error ?? ""}`);
+      const oInit = await w1(oracleClient, { op: "init", instanceId: oid });
+      assert.ok(!oInit.error, `W1 oracle init: ${oInit.error ?? ""}`);
+      // Snapshot the PRE-dispatch state (ring index 0) — this IS the
+      // pause-pre-step / rewind-to-#0 truth.
+      const oSnap = (await w1(oracleClient, {
+        op: "snapshot",
+        instanceId: oid,
+      })) as SimResp & { snapshotIndex?: number };
+      assert.strictEqual(
+        oSnap.snapshotIndex,
+        0,
+        "first W1 snapshot must be ring index 0",
+      );
+      const oDisp = await w1(oracleClient, {
+        op: "dispatch",
+        instanceId: oid,
+        event: { name: "OPEN" },
+      });
+      assert.ok(!oDisp.error, `W1 oracle dispatch: ${oDisp.error ?? ""}`);
+      // The breakpoint target = the oracle's OWN reported transition
+      // stableId for the OPEN step (re-derived from source-of-truth, not
+      // guessed). This is EXACTLY the value the W3 predicate compares.
+      const oSteps = (oDisp.steps ?? []) as Array<{
+        transitionTaken?: { stableId?: string };
+      }>;
+      const transStep = oSteps.find((s) => s.transitionTaken?.stableId);
+      assert.ok(
+        transStep && transStep.transitionTaken?.stableId,
+        "the W1 oracle's dispatch(OPEN) must report a transitionTaken.stableId",
+      );
+      oTransStableId = transStep!.transitionTaken!.stableId!;
+      // It must be one of the panel's published edge stableIds (the map
+      // the webview uses to arm the predicate — same ground truth).
+      assert.ok(
+        stableIds.includes(oTransStableId),
+        `the oracle's transition stableId (${oTransStableId}) must be in ` +
+          `the panel's edge map (${JSON.stringify(stableIds)})`,
+      );
+      // Restore the pre-dispatch snapshot — the pause-pre-step truth.
+      oPreStepState = await w1(oracleClient, {
+        op: "restore",
+        instanceId: oid,
+        snapshotIndex: 0,
+      });
+      assert.ok(!oPreStepState.error, `W1 oracle restore: ${oPreStepState.error ?? ""}`);
+      // A SECOND independent snapshot/restore round-trip for the rewind
+      // assertion (re-derived independently — not reusing the first).
+      const oSnap2 = (await w1(oracleClient, {
+        op: "snapshot",
+        instanceId: oid,
+      })) as SimResp & { snapshotIndex?: number };
+      assert.ok(
+        typeof oSnap2.snapshotIndex === "number",
+        "second W1 snapshot must return an index",
+      );
+      oRewindState = await w1(oracleClient, {
+        op: "restore",
+        instanceId: oid,
+        snapshotIndex: oSnap2.snapshotIndex!,
+      });
+      assert.ok(!oRewindState.error, `W1 oracle restore #2: ${oRewindState.error ?? ""}`);
+    } finally {
+      await oracleClient.stop();
+    }
+
+    // ── (C) Drive the panel's REAL keystone handler. Fire the EXACT
+    // gestures the real debugWebview.ts posts: arm the TRANSITION
+    // breakpoint (the oracle's own stableId), Init, dispatch(OPEN).
+    const cap = requireCaptured();
+    cap.simStates.length = 0;
+    cap.outbound.length = 0;
+
+    cap.fireInbound({
+      type: "toggleBreakpoint",
+      bpKind: "transition",
+      targetId: oTransStableId,
+    });
+    await waitFor(
+      () => cap.outbound.some((m) => m.type === "breakpoints"),
+      "the panel to register the armed transition breakpoint",
+      15_000,
+    );
+
+    cap.fireInbound({ type: "init" });
+    await waitFor(
+      () => cap.outbound.some((m) => m.type === "simState"),
+      "the panel's Init simState",
+      30_000,
+    );
+
+    // dispatch(OPEN) — the OPEN step matches the armed transition
+    // breakpoint ⇒ the panel MUST emit a `paused` (pre-step), NOT a
+    // plain `simState`.
+    cap.outbound.length = 0;
+    cap.fireInbound({ type: "dispatch", event: "OPEN" });
+    await waitFor(
+      () => cap.outbound.some((m) => m.type === "paused"),
+      "the panel to PAUSE at the transition breakpoint (pre-step)",
+      30_000,
+    );
+    const pausedMsg = cap.outbound.find((m) => m.type === "paused");
+    assert.ok(pausedMsg, "the panel must emit a `paused` message at the breakpoint");
+    assert.strictEqual(
+      pausedMsg!.bpKind,
+      "transition",
+      "the paused breakpoint kind must be `transition`",
+    );
+    assert.strictEqual(
+      pausedMsg!.targetId,
+      oTransStableId,
+      "the paused breakpoint target must be the oracle's own transition stableId",
+    );
+
+    // ── THE §W3 KEYSTONE ASSERTION #1: the panel PAUSED PRE-STEP. Its
+    // `paused.resp` (the W1 `restore` of the pre-dispatch snapshot) is
+    // BYTE-IDENTICAL to the INDEPENDENT W1 snapshot/restore round-trip's
+    // pre-step state_block. The machine is exactly the SOURCE state
+    // (Closed) — "stopped at the breakpoint, not past it". A second
+    // semantics — even partial — would diverge here.
+    const pausedResp = pausedMsg!.resp as SimResp;
+    assert.deepStrictEqual(
+      pausedResp.configuration,
+      oPreStepState.configuration,
+      "PAUSE-PRE-STEP: the panel's restored active-config must BYTE-EQUAL " +
+        "the independent W1 snapshot/restore (the machine is pre-step)",
+    );
+    assert.deepStrictEqual(
+      pausedResp.context,
+      oPreStepState.context,
+      "PAUSE-PRE-STEP: the panel's restored context must BYTE-EQUAL the W1 oracle",
+    );
+    assert.deepStrictEqual(
+      pausedResp.currentMs,
+      oPreStepState.currentMs,
+      "PAUSE-PRE-STEP: the panel's restored clock must BYTE-EQUAL the W1 oracle",
+    );
+    // Structural truth: the paused machine is the Closed (source) state —
+    // re-derived from the oracle (not hard-coded), the transition has NOT
+    // been taken (the keystone "stopped before the step").
+    const pausedCfg = pausedResp.configuration?.activeStates ?? [];
+    assert.strictEqual(pausedCfg.length, 1, "Gate has one active leaf when paused");
+    assert.ok(
+      pausedCfg[0].endsWith("Closed"),
+      `PAUSED machine must still be in the Closed (source) state, NOT past ` +
+        `the breakpoint (got ${JSON.stringify(pausedCfg)})`,
+    );
+
+    // ── (D) ▶ Run resumes: reveal the breaking record (the §3.1 cursor
+    // over the oracle's already-computed vector — NOT a re-implemented
+    // RTC step). After resume the panel renders the FULL dispatch
+    // response; the active config is now Open (the oracle's transition).
+    cap.outbound.length = 0;
+    cap.fireInbound({ type: "run" });
+    await waitFor(
+      () => cap.outbound.some((m) => m.type === "simState"),
+      "the panel to reveal the breaking step after ▶ Run",
+      30_000,
+    );
+    const afterRun = [...cap.outbound].reverse().find((m) => m.type === "simState");
+    assert.ok(afterRun && afterRun.resp, "▶ Run must render the post-step simState");
+    const afterRunCfg = (afterRun!.resp as SimResp).configuration?.activeStates ?? [];
+    assert.ok(
+      afterRunCfg[0]?.endsWith("Open"),
+      `after ▶ Run the breaking transition is revealed → active leaf is ` +
+        `Open (got ${JSON.stringify(afterRunCfg)})`,
+    );
+
+    // ── (E) ◀ rewind to #0 — the W1 `restore` op (time-travel). The
+    // panel's `rewound.resp` must be BYTE-IDENTICAL to the INDEPENDENT
+    // W1 snapshot/restore round-trip (a new inject would branch here).
+    cap.outbound.length = 0;
+    cap.fireInbound({ type: "rewind", index: 0 });
+    await waitFor(
+      () => cap.outbound.some((m) => m.type === "rewound"),
+      "the panel to rewind to timeline #0 via the W1 restore op",
+      30_000,
+    );
+    const rewoundMsg = cap.outbound.find((m) => m.type === "rewound");
+    assert.ok(rewoundMsg && rewoundMsg.resp, "the panel must emit a `rewound` message");
+    const rewoundResp = rewoundMsg!.resp as SimResp;
+
+    // ── THE §W3 KEYSTONE ASSERTION #2: rewind state BYTE-IDENTICAL to an
+    // INDEPENDENT W1 snapshot/restore round-trip (diagram+context+clock).
+    assert.deepStrictEqual(
+      rewoundResp.configuration,
+      oRewindState.configuration,
+      "REWIND: the panel's restored active-config must BYTE-EQUAL the " +
+        "independent W1 snapshot/restore round-trip",
+    );
+    assert.deepStrictEqual(
+      rewoundResp.context,
+      oRewindState.context,
+      "REWIND: the panel's restored context must BYTE-EQUAL the W1 oracle",
+    );
+    assert.deepStrictEqual(
+      rewoundResp.currentMs,
+      oRewindState.currentMs,
+      "REWIND: the panel's restored clock must BYTE-EQUAL the W1 oracle",
+    );
+    // Structural truth: rewinding to #0 lands back in the Closed state
+    // (the init config) — the oracle's restore, not a panel recompute.
+    const rewoundCfg = rewoundResp.configuration?.activeStates ?? [];
+    assert.ok(
+      rewoundCfg[0]?.endsWith("Closed"),
+      `rewind to #0 must restore the Closed (initial) state (got ` +
+        `${JSON.stringify(rewoundCfg)})`,
+    );
+    assert.deepStrictEqual(
+      rewoundCfg,
+      pausedCfg,
+      "rewind-to-#0 and the pre-step pause are the SAME oracle state " +
+        "(both the pre-dispatch snapshot — byte-consistent)",
+    );
   });
 
   // THE HONEST-STALE CASE (the cardinal-sin bar, DBGUX §2.3): a parse-error
