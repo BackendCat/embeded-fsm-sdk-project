@@ -152,6 +152,10 @@ type ExtToDebugWebview =
   | { type: "rewound"; resp: SimResponse; index: number; stamp: number }
   // W3: the armed-breakpoint set (paint glyph states ◌/◍/▣).
   | { type: "breakpoints"; armed: Breakpoint[] }
+  // W4: the capture verdict. `ok:true` + `path` ONLY after the file was
+  // written AND confirmed on disk (DBGUX §6 no-premature-success); else
+  // an honest error message verbatim, never a fake ✓.
+  | { type: "captured"; ok: boolean; path?: string; message?: string }
   | { type: "simError"; message: string };
 
 // Use the SAME window-cached singleton accessor the v1.3 module exports
@@ -340,9 +344,7 @@ function paintGlyphs(): void {
       (b) => (b.kind === "enter" || b.kind === "exit") && b.targetId === id,
     );
     const hit =
-      !!hitBp &&
-      (hitBp.kind === "enter" || hitBp.kind === "exit") &&
-      hitBp.targetId === id;
+      !!hitBp && (hitBp.kind === "enter" || hitBp.kind === "exit") && hitBp.targetId === id;
     glyph.textContent = hit ? GLYPH_HIT : armed ? GLYPH_ARMED : GLYPH_NONE;
     (glyph as SVGElement).classList.toggle("armed", armed && !hit);
     (glyph as SVGElement).classList.toggle("hit", hit);
@@ -355,7 +357,8 @@ function paintGlyphs(): void {
     if (!glyph) {
       continue;
     }
-    const armed = !!stableId && armedBps.some((b) => b.kind === "transition" && b.targetId === stableId);
+    const armed =
+      !!stableId && armedBps.some((b) => b.kind === "transition" && b.targetId === stableId);
     const hit = !!hitBp && hitBp.kind === "transition" && !!stableId && hitBp.targetId === stableId;
     glyph.textContent = hit ? GLYPH_HIT : armed ? GLYPH_ARMED : GLYPH_NONE;
     (glyph as SVGElement).classList.toggle("armed", armed && !hit);
@@ -454,9 +457,7 @@ function renderContext(ctx: Record<string, SimValue>): void {
       const prev = lastContext[k];
       const changed = prev !== undefined && JSON.stringify(prev) !== JSON.stringify(v);
       const delta =
-        changed && prev
-          ? `<span class="delta">▲ was ${escapeHtml(String(prev.value))}</span>`
-          : "";
+        changed && prev ? `<span class="delta">▲ was ${escapeHtml(String(prev.value))}</span>` : "";
       return (
         `<tr><td>${escapeHtml(k)}</td>` +
         `<td>${escapeHtml(v.type)}</td>` +
@@ -660,6 +661,10 @@ function refreshButtons(): void {
   (byId("btnRun") as HTMLButtonElement).disabled = !pausedAtBp;
   (byId("btnStep") as HTMLButtonElement).disabled = !pausedAtBp;
   (byId("btnPause") as HTMLButtonElement).disabled = true;
+  // W4: capture is available once a coherent replayable session exists
+  // (initialised, transport up, NOT mid-pause — the extension records the
+  // committed commands; a paused-not-resumed call is not yet replayable).
+  (byId("btnCapture") as HTMLButtonElement).disabled = !liveOk;
 }
 
 /** Highlight the active configuration. Prefers the LAST REVEALED
@@ -753,6 +758,18 @@ function wireControls(): void {
   // detached breakpoint manager).
   byId("btnClearBps").addEventListener("click", () => {
     vscode.postMessage({ type: "clearBreakpoints" });
+  });
+  // W4: capture the session → a .trace.json fixture. The EXTENSION sends
+  // the issued commands + the oracle's own steps to the W1 `capture` op
+  // (one write_trace_yaml call), writes the file, and posts the verdict
+  // ONLY after the file exists (DBGUX §6 — no premature success). This
+  // script just requests it; it computes nothing.
+  byId("btnCapture").addEventListener("click", () => {
+    const m = byId("captureMsg");
+    m.style.display = "block";
+    m.className = "";
+    m.textContent = "capturing…";
+    vscode.postMessage({ type: "capture" });
   });
   // The payload form is revealed inline the moment an event is picked
   // (proximity / reveal-adjacent-to-trigger — DBGUX §2.2).
@@ -932,13 +949,34 @@ window.addEventListener("message", (ev: MessageEvent<ExtToDebugWebview>) => {
     renderTimers();
     byId("clock").textContent = `⏱ virtual clock: ${resp.currentMs ?? "—"} ms`;
     byId("status").classList.remove("paused");
-    setStatus(
-      `↺ rewound to #${msg.index} — a new inject branches from here`,
-      false,
-    );
+    setStatus(`↺ rewound to #${msg.index} — a new inject branches from here`, false);
     refreshButtons();
     paintGlyphs();
     vscode.postMessage({ type: "rewoundApplied", index: msg.index, stamp: msg.stamp });
+  } else if (msg.type === "captured") {
+    // ── W4 capture verdict. A DURABLE, in-place line (NOT a toast). The
+    // ✓ is shown ONLY because the extension already confirmed the file
+    // exists on disk (DBGUX §6 — the copyIr refuse-to-fake bar; this
+    // script NEVER fabricates the ✓, it renders the extension's verdict).
+    const m = byId("captureMsg");
+    m.style.display = "block";
+    if (msg.ok) {
+      m.className = "ok";
+      m.textContent = `✓ captured → ${msg.path ?? "(file written)"} — fsm test replays it byte-identical (recorded from the oracle)`;
+    } else {
+      // Honest failure verbatim — never a ✓ the file does not back.
+      m.className = "err";
+      m.textContent = `✗ capture failed: ${msg.message ?? "unknown error"}`;
+    }
+    // Test-observability ack (NOT acceptance on its own — the §W4 gate is
+    // `fsm test <captured.trace.json>` replaying GREEN + the file-exists-
+    // before-✓ assertion; this lets the ExtHost E2E await the
+    // deterministic capture-complete point, the v1.3 ack pattern).
+    vscode.postMessage({
+      type: "capturedApplied",
+      ok: msg.ok,
+      path: msg.path,
+    });
   } else if (msg.type === "simError") {
     // Honest: the StepError / invalid reason VERBATIM, a DURABLE status
     // indicator (not a toast) — never a fabricated clean end-of-run

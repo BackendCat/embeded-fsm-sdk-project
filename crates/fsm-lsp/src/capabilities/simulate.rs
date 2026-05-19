@@ -23,6 +23,15 @@
 //!  - `snapshot`    → [`Interpreter::snapshot`]            (one call)
 //!  - `restore`     → [`Interpreter::restore`]             (one call)
 //!  - `load`        → [`Interpreter::new`] + per-session bookkeeping
+//!  - `capture`     → [`fsm_simulator::write_trace_yaml`] (ONE call) +
+//!                     pure JSON marshalling of the client-supplied
+//!                     init/commands/expected into a [`TraceFile`]. It runs
+//!                     NO `Interpreter`, decides NO semantics, and adds NO
+//!                     `fsm-simulator` surface — the `TraceCommand`s are the
+//!                     ones the panel issued and `expected` is the oracle's
+//!                     OWN `Vec<StepRecord>` (recorded-from-the-oracle, so
+//!                     `fsm test`'s `execute_trace` replays byte-identical
+//!                     BY CONSTRUCTION — the same shipped serializer/oracle)
 //!  - `listInstances` → a read of the instance map (pure plumbing)
 //!  - `unload`      → a remove from the instance map (pure plumbing)
 //!
@@ -105,7 +114,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use fsm_simulator::{InitOptions, Interpreter, InterpreterSnapshot, StepError, Value as SimValue};
+use fsm_simulator::{
+    write_trace_yaml, InitOptions, InitTrace, Interpreter, InterpreterSnapshot, StepError,
+    StepRecord, TraceCommand, TraceFile, Value as SimValue,
+};
 use serde_json::{json, Map, Value};
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::Url;
@@ -521,6 +533,131 @@ pub async fn run_simulate(sessions: &SimSessions, params: &Value) -> Result<Valu
             }
         }
 
+        // ── capture: assemble a TraceFile from the panel's recorded ───────
+        // commands + the oracle's OWN StepRecords, serialise via the SHIPPED
+        // `write_trace_yaml` — Doc 33 §W4 / DBGUX §3 (the capture row + the
+        // byte-identity-by-construction argument).
+        //
+        // KEYSTONE-PURE, BY CONSTRUCTION: this arm runs NO `Interpreter`,
+        // touches NO session, and decides NO FSM semantics. It is one
+        // `write_trace_yaml` call (GT-8 — the EXACT shipped serializer
+        // `fsm test` round-trips) plus JSON (de)serialisation of fields the
+        // *panel* supplies:
+        //   - `init`     → the `InitTrace` (the panel's Init params — the
+        //                  interpreter's OWN serde form; default if absent)
+        //   - `steps`    → the `Vec<TraceCommand>` the panel ISSUED
+        //                  (init/dispatch/advanceClock — Doc 13's
+        //                  `TraceCommand` serde shape, byte-equal to what a
+        //                  W1 `dispatch`/`advanceClock` op carried)
+        //   - `expected` → the oracle's OWN `Vec<StepRecord>` (the verbatim
+        //                  `steps` the W1 ops returned — RECORDED FROM THE
+        //                  ORACLE, never guessed). Embedding it is THE
+        //                  byte-identity property: `fsm test`'s
+        //                  `execute_trace` (the SAME shipped oracle, same IR,
+        //                  same `TraceCommand`s) reproduces the SAME `actual`
+        //                  ⇒ `actual == expected` ⇒ `matches_expected`
+        //                  (`cmd/test.rs:224` — verified) ⇒ GREEN by
+        //                  construction. This INVERTS the DBGUX "F6"
+        //                  friction (the test is recorded-from-the-oracle).
+        //   - `machineFile`/`description` → optional provenance pointers
+        //                  (`TraceFile`'s own optional fields).
+        // No second semantics anywhere: this is plumbing over the shipped
+        // serializer. The post-W4 source-derived keystone audit negative-
+        // greps this arm and expects ∅ (no transition-selection / guard-
+        // eval / completion-synthesis / RTC-step / active-config compute).
+        //
+        // The result is `write_trace_yaml`'s string VERBATIM (the SHIPPED
+        // serde_json pretty form — the module-doc'd v1.0 `.trace.json`
+        // shape `parse_trace_yaml`/`collect_traces` accept; see the report's
+        // re-derived-schema note on the `.trace.json` vs DBGUX-prose
+        // `.trace.yaml` filename — the SHIPPED `collect_traces` globs
+        // `.trace`/`.trace.json`, so the panel writes `*.trace.json` for
+        // `fsm test` to discover it; the *content* is `write_trace_yaml`'s
+        // exact bytes). Malformed client input → an honest invalid-params
+        // (never a fabricated trace — the cardinal-sin bar at the boundary).
+        "capture" => {
+            // `init`: the interpreter's OWN `InitTrace` serde form (so the
+            // captured trace's init === the session's init by construction).
+            // Absent ⇒ `InitTrace::default()` (the trace runner's documented
+            // default: first machine, empty context, clock 0 — `trace.rs`).
+            let init: InitTrace = match params.get("init") {
+                Some(v) if !v.is_null() => serde_json::from_value(v.clone()).map_err(|e| {
+                    InvalidParams(format!("fsm/simulate capture: `init` shape: {e}"))
+                })?,
+                _ => InitTrace::default(),
+            };
+            // `steps`: the `Vec<TraceCommand>` the panel ISSUED. Its serde
+            // form is Doc 13's `TraceCommand` (byte-equal to what a W1
+            // dispatch/advanceClock op carried — re-derived from
+            // `trace.rs:226`). Required + non-empty: a trace with no
+            // commands cannot replay a session (honest reason, never a
+            // fabricated empty capture).
+            let steps_v = params.get("steps").ok_or_else(|| {
+                InvalidParams(
+                    "fsm/simulate capture: missing `steps` (the issued TraceCommands)".into(),
+                )
+            })?;
+            let steps: Vec<TraceCommand> = serde_json::from_value(steps_v.clone())
+                .map_err(|e| InvalidParams(format!("fsm/simulate capture: `steps` shape: {e}")))?;
+            // `expected`: the oracle's OWN `Vec<StepRecord>` (the verbatim
+            // `steps` the W1 ops returned). REQUIRED + non-empty — without
+            // it `fsm test` reports `EmptyExpected` (a hard fail by default,
+            // `cmd/test.rs:229`/`:88`), NOT a pass: a capture that cannot be
+            // verified is not a capture (the no-fake bar). This is the
+            // recorded-from-the-oracle payload — the byte-identity anchor.
+            let expected_v = params.get("expected").ok_or_else(|| {
+                InvalidParams(
+                    "fsm/simulate capture: missing `expected` (the oracle's own \
+                     StepRecords — a capture without them cannot be verified by \
+                     `fsm test`; that is the recorded-from-the-oracle property)"
+                        .into(),
+                )
+            })?;
+            let expected: Vec<StepRecord> =
+                serde_json::from_value(expected_v.clone()).map_err(|e| {
+                    InvalidParams(format!("fsm/simulate capture: `expected` shape: {e}"))
+                })?;
+            if expected.is_empty() {
+                return Err(InvalidParams(
+                    "fsm/simulate capture: `expected` is empty — `fsm test` would \
+                     report nothing-to-verify (not a pass). Run/reveal at least \
+                     one step before capturing."
+                        .into(),
+                ));
+            }
+            let machine_file = params
+                .get("machineFile")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let description = params
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let trace = TraceFile {
+                machine_file,
+                description,
+                init,
+                steps,
+                expected,
+            };
+            // THE one shipped call (GT-8 — the EXACT serializer `fsm test`
+            // round-trips through the SAME `execute_trace`). No reshaping.
+            match write_trace_yaml(&trace) {
+                Ok(yaml) => {
+                    let mut m = Map::new();
+                    m.insert("trace".into(), json!(yaml));
+                    Ok(ok(m))
+                }
+                Err(e) => {
+                    // Surface the serializer's OWN error verbatim — never a
+                    // fabricated "captured" (the cardinal-sin bar).
+                    let mut m = Map::new();
+                    m.insert("error".into(), json!(format!("capture serialise: {e}")));
+                    Ok(ok(m))
+                }
+            }
+        }
+
         // ── listInstances: a read of the session map (pure plumbing) ──────
         // Doc 13 §4 `sim/listInstances`.
         "listInstances" => {
@@ -550,7 +687,7 @@ pub async fn run_simulate(sessions: &SimSessions, params: &Value) -> Result<Valu
         other => Err(InvalidParams(format!(
             "fsm/simulate: unknown op `{other}` (expected one of: load, init, \
              dispatch, advanceClock, getContext, setContext, snapshot, \
-             restore, listInstances, unload)"
+             restore, capture, listInstances, unload)"
         ))),
     }
 }
