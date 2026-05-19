@@ -149,6 +149,12 @@
         "title": "Verify Live (via Language Server)",
         "icon": "$(shield)",
         "category": "FSM Studio"
+      },
+      {
+        "command": "fsm.openDebug",
+        "title": "Debug (Interactive Simulation)",
+        "icon": "$(debug-alt)",
+        "category": "FSM Studio"
       }
     ],
     "keybindings": [
@@ -162,6 +168,12 @@
         "command": "fsm.openDiagram",
         "key": "ctrl+shift+d",
         "mac": "cmd+shift+d",
+        "when": "editorLangId == fsm-lang"
+      },
+      {
+        "command": "fsm.openDebug",
+        "key": "ctrl+shift+f5",
+        "mac": "cmd+shift+f5",
         "when": "editorLangId == fsm-lang"
       }
     ],
@@ -195,11 +207,21 @@
           "command": "fsm.openDiagram",
           "when": "editorLangId == fsm-lang",
           "group": "navigation"
+        },
+        {
+          "command": "fsm.openDebug",
+          "when": "editorLangId == fsm-lang",
+          "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "command": "fsm.openDiagram",
+          "when": "editorLangId == fsm-lang",
+          "group": "fsm@1"
+        },
+        {
+          "command": "fsm.openDebug",
           "when": "editorLangId == fsm-lang",
           "group": "fsm@1"
         },
@@ -246,6 +268,11 @@
           "group": "fsm"
         },
         {
+          "command": "fsm.openDebug",
+          "when": "resourceExtname == .fsm",
+          "group": "fsm"
+        },
+        {
           "command": "fsm.generateC99",
           "when": "resourceExtname == .fsm",
           "group": "fsm"
@@ -264,6 +291,10 @@
       "commandPalette": [
         {
           "command": "fsm.openDiagram",
+          "when": "editorLangId == fsm-lang"
+        },
+        {
+          "command": "fsm.openDebug",
           "when": "editorLangId == fsm-lang"
         },
         {

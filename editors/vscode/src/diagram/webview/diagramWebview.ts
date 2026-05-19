@@ -65,6 +65,20 @@ interface DiagramModel {
   regions: GraphRegion[];
 }
 
+// Re-export the wire-shape interfaces + the pure `renderModel` renderer so
+// the debug-W2 webview can REUSE this exact v1.3 ELK/SVG renderer VERBATIM
+// rather than reimplement it (Doc 33 §W2 reuse ledger; the keystone:
+// "additive overlay over that exact model — no second diagram"). These are
+// ADDITIVE named exports only (erased at IIFE-bundle runtime — zero v1.3
+// behaviour effect); the v1.3 standalone path below is byte-unchanged.
+// esbuild bundles each entrypoint SEPARATELY, so v1.3's own
+// `dist/webview/diagramWebview.js` is untouched — the debug bundle inlines
+// its own copy of THIS source. (`showBanner` is intentionally NOT consumed
+// by the debug webview — it is hard-coded to `#banner`; the debug surface
+// uses `#debugBanner`. It is exported for symmetry / future reuse only.)
+export type { DiagramModel, GraphNode, GraphEdge, GraphRegion, IrSourceLocation };
+export { renderModel, showBanner };
+
 type ExtToWebview = { type: "render"; model: DiagramModel } | { type: "staleBanner"; text: string };
 
 interface VsCodeApi {
@@ -72,7 +86,30 @@ interface VsCodeApi {
 }
 declare function acquireVsCodeApi(): VsCodeApi;
 
-const vscode = acquireVsCodeApi();
+/**
+ * Acquire the Webview→extension API as a window-cached SINGLETON.
+ *
+ * `acquireVsCodeApi()` may be called **at most once per webview** (a hard
+ * VS Code constraint — a second call throws). On the v1.3 standalone path
+ * this is the FIRST and ONLY acquirer, so the cache is populated on the
+ * first call and behaviour is byte-identical to the previous bare
+ * `acquireVsCodeApi()` (the SUBAGENT pre/post-identity bar — the v1.3
+ * diagram.test.ts stays green). The reason it must be a singleton: the
+ * debug-W2 webview (Doc 33 §W2) bundles its OWN inlined copy of THIS
+ * module to reuse `renderModel` VERBATIM **and** itself needs the API —
+ * two `acquireVsCodeApi()` calls in one webview would throw. Caching on
+ * `window` makes both the inlined v1.3 copy and the debug script share the
+ * ONE handle (the canonical multi-script-webview idiom). Exported so the
+ * debug webview uses the SAME accessor. */
+export function getVsCodeApi(): VsCodeApi {
+  const w = window as unknown as { __fsmVsCodeApi?: VsCodeApi };
+  if (!w.__fsmVsCodeApi) {
+    w.__fsmVsCodeApi = acquireVsCodeApi();
+  }
+  return w.__fsmVsCodeApi;
+}
+
+const vscode = getVsCodeApi();
 const elk = new ELK();
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -236,7 +273,21 @@ function showBanner(text: string): void {
 
 let everRendered = false;
 
-window.addEventListener("message", (ev: MessageEvent<ExtToWebview>) => {
+// STANDALONE-DIAGRAM GUARD (behaviour-preserving): the v1.3 read-only
+// diagram HTML (`diagramPanel.ts`) ships BOTH `#svg` AND `#banner`, so this
+// guard is ALWAYS true on the v1.3 path — its message-listener / `ready`
+// post is byte-identical to before (the v1.3 diagram.test.ts proves it
+// stays green — the SUBAGENT refactor pre/post-identity bar). The debug-W2
+// webview imports this module to reuse `renderModel` VERBATIM but drives
+// the diagram via its OWN message listener; its HTML deliberately uses
+// `#debugBanner` (NOT `#banner`) so this guard is FALSE there, suppressing
+// the inlined v1.3 copy's auto-bootstrap (a second listener / a second
+// `ready` would race the debug panel). `#svg` is shared (renderModel needs
+// it); `#banner` is the discriminator. Gating the side-effects on the
+// exact v1.3 DOM contract keeps v1.3 byte-identical while making the
+// renderer cleanly reusable with NO fork.
+if (document.getElementById("svg") && document.getElementById("banner")) {
+  window.addEventListener("message", (ev: MessageEvent<ExtToWebview>) => {
   const msg = ev.data;
   if (msg.type === "render") {
     // A fresh valid render — clear any stale banner (Doc 05 §1.5.9: the
@@ -285,7 +336,8 @@ window.addEventListener("message", (ev: MessageEvent<ExtToWebview>) => {
       hasLastValidRender: everRendered,
     });
   }
-});
+  });
 
-// Signal readiness so the extension's first render is not raced.
-vscode.postMessage({ type: "ready" });
+  // Signal readiness so the extension's first render is not raced.
+  vscode.postMessage({ type: "ready" });
+}

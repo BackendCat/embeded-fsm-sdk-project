@@ -1,16 +1,23 @@
-// V4 — strict typecheck for the diagram Webview script (Doc 28 §3-V4).
+// Strict typecheck for the BROWSER-context Webview scripts (Doc 28 §3-V4
+// the v1.3 diagram webview; Doc 33 §W2 the debug webview).
 //
-// WHY a SEPARATE tsconfig (not the main one): `src/diagram/webview/
-// diagramWebview.ts` runs in a BROWSER context (the VS Code Webview), not
-// Node — it uses `document`/`window`/`SVGElement`, which require the `DOM`
-// lib. The main `tsconfig.json` is a NODE program (`lib: ["ES2022"]`,
-// emits Node `.js` to `out/` for the Extension-Host test) and the Webview
-// is bundled SEPARATELY by esbuild for the browser (`platform: "browser"`
-// → `dist/webview/`), so it is correctly EXCLUDED from the Node program.
-// This config keeps the Webview FULLY type-checked (Zero-Legacy — no
+// WHY a SEPARATE tsconfig (not the main one): the webview scripts run in a
+// BROWSER context (the VS Code Webview), not Node — they use
+// `document`/`window`/`SVGElement`, which require the `DOM` lib. The main
+// `tsconfig.json` is a NODE program (`lib: ["ES2022"]`, emits Node `.js`
+// to `out/` for the Extension-Host test) and the webviews are bundled
+// SEPARATELY by esbuild for the browser (`platform: "browser"` →
+// `dist/webview/`), so they are correctly EXCLUDED from the Node program.
+// This config keeps every webview FULLY type-checked (Zero-Legacy — no
 // untyped code) under the same strict flags + the `DOM` lib it genuinely
 // targets. `noEmit` — esbuild owns the actual bundling; this is a
 // type-safety gate only, wired into `npm run typecheck` / `pretest`.
+//
+// Doc 33 §W2: the debug webview (`src/debug/webview/debugWebview.ts`)
+// IMPORTS the v1.3 `src/diagram/webview/diagramWebview.ts` to REUSE its
+// `renderModel` VERBATIM — so BOTH webview trees are typechecked here as
+// one DOM program (no `rootDir` pin: it would forbid the cross-tree
+// import; `noEmit` makes `rootDir` irrelevant anyway).
 
 {
   "compilerOptions": {
@@ -18,7 +25,6 @@
     "moduleResolution": "Bundler",
     "target": "ES2020",
     "lib": ["ES2020", "DOM"],
-    "rootDir": "src/diagram/webview",
     "noEmit": true,
     "sourceMap": false,
     "strict": true,
@@ -30,5 +36,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/diagram/webview/**/*.ts"]
+  "include": ["src/diagram/webview/**/*.ts", "src/debug/webview/**/*.ts"]
 }
