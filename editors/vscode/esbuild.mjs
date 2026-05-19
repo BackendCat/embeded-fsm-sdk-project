@@ -50,15 +50,40 @@ const webviewOptions = {
   logLevel: "info",
 };
 
+// The debug-W2 Webview (Doc 33 §W2) — a SEPARATE browser IIFE entrypoint.
+// It `import`s the v1.3 `diagramWebview.ts` to REUSE its ELK/SVG
+// `renderModel` VERBATIM (the Doc 33 §W2 reuse ledger). Because esbuild
+// bundles per-entrypoint, v1.3's own `diagramWebview.js` above is
+// byte-UNTOUCHED; this bundle inlines its OWN copy of the SAME source (no
+// fork). `elkjs` is bundled the same way (CSP `default-src 'none'`, no
+// remote resource). Output: `dist/webview/debugWebview.js` — the exact
+// path `debug/debugPanel.ts` references via `localResourceRoots` +
+// `asWebviewUri`.
+const debugWebviewOptions = {
+  entryPoints: ["src/debug/webview/debugWebview.ts"],
+  bundle: true,
+  outfile: "dist/webview/debugWebview.js",
+  format: "iife",
+  platform: "browser",
+  target: "es2020",
+  sourcemap: true,
+  minify: false,
+  logLevel: "info",
+};
+
 if (watch) {
   const ctxExt = await esbuild.context(extensionOptions);
   const ctxWv = await esbuild.context(webviewOptions);
+  const ctxDbg = await esbuild.context(debugWebviewOptions);
   await ctxExt.watch();
   await ctxWv.watch();
-  console.log("esbuild: watching extension + webview…");
+  await ctxDbg.watch();
+  console.log("esbuild: watching extension + webview + debug-webview…");
 } else {
   await esbuild.build(extensionOptions);
   console.log("esbuild: bundled dist/extension.js");
   await esbuild.build(webviewOptions);
   console.log("esbuild: bundled dist/webview/diagramWebview.js");
+  await esbuild.build(debugWebviewOptions);
+  console.log("esbuild: bundled dist/webview/debugWebview.js");
 }

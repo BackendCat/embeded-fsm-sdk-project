@@ -53,6 +53,7 @@ import {
 import { registerCommands } from "./commands";
 import { registerVerify } from "./commands/verify";
 import { registerOpenDiagram } from "./diagram";
+import { registerOpenDebug } from "./debug";
 import { FsmExplorerHandle, registerFsmExplorer } from "./tree";
 import { FsmErrorHandler } from "./crashRecovery";
 import { readInlayHintSettings } from "./inlayConfig";
@@ -171,6 +172,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<FsmExt
   // registration only and does NOT touch V1's (unaltered) client-spawn /
   // `serverOptions` / `positionEncoding` (MV4-2 / M-1 lineage).
   registerOpenDiagram(context, {
+    getClient: () => client,
+    outputChannel,
+    restartServer,
+    extensionPath: context.extensionPath,
+  });
+
+  // Debug-W2: register the interactive debug WebviewPanel (Doc 33 §W2).
+  // Done HERE — before the no-binary early-return — so `fsm.openDebug` is
+  // a registered command even with no server: the panel then shows the
+  // HONEST stale state + transport-disabled-with-reason (it never blanks
+  // or fakes a session — the v1.3 cardinal-sin bar, extended to the
+  // transport, DBGUX §2.3). Its semantic oracle is the W1 `fsm/simulate`
+  // LSP custom request over the running client (the v1.5 W-A2 boundary,
+  // read via `getClient`); the statechart is the v1.3 diagram REUSED
+  // VERBATIM. An additive call site identical in shape to V4's
+  // `registerOpenDiagram` — it adds ONE command registration only and
+  // does NOT touch V1's (unaltered) client-spawn / `serverOptions` /
+  // `positionEncoding` (the MV4-2 / M-1 lineage).
+  registerOpenDebug(context, {
     getClient: () => client,
     outputChannel,
     restartServer,
