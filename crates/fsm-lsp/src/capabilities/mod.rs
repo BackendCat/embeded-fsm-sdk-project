@@ -76,6 +76,29 @@
 //! non-default priority / timer durations / substate count, each gated by
 //! its Doc 22 §8 toggle); positions go through the same one `LineIndex`.
 //! Neither is advertised-but-stubbed — both genuinely work.
+//!
+//! debug-W1 adds [`simulate`] (the **custom** `fsm/simulate` request — NOT
+//! a standard LSP method, registered via `LspService::build().custom_method`
+//! the SAME way W-A2 registers `fsm/verify`, Doc 33 §W1 / §2). It is the
+//! interactive-simulation backing and it is a *pure marshalling frontend*
+//! of the shipped `fsm_simulator::Interpreter`: every `op` handler is, by
+//! construction, **exactly one** shipped `Interpreter` call
+//! (`init`/`dispatch_with_payload`/`advance_clock`/`context`/`snapshot`/
+//! `restore` — plus `Interpreter::new` for `load`, the read-only accessors
+//! for `getContext`, and the SINGLE sanctioned non-stepping additive
+//! `Interpreter::set_context_field` helper for `setContext`) plus JSON
+//! (de)serialisation; per-instance session bookkeeping is pure plumbing
+//! (zero semantics). It re-implements **NO** transition-selection /
+//! guard-eval / completion-synthesis / RTC-step / active-config-computation
+//! logic — the `fsm/simulate*` `StepRecord` stream is byte-equal to
+//! `fsm test`'s `execute_trace` on the same `TraceCommand`s **by
+//! construction** (the same single oracle — the differential-oracle proof
+//! the §5.4 acceptance + the post-W1 keystone audit re-run). A second
+//! simulator semantics is the cardinal regression the KEYSTONE-IN-DEBUG
+//! invariant (Doc 33 §2) forbids. The session is stateful by design (an
+//! `Interpreter` carries the live runtime across calls — author → step →
+//! inspect → rewind); a `StepError` is surfaced **verbatim** (never a
+//! fabricated clean end-of-run — DBGUX §6).
 
 pub mod code_action;
 pub mod complete;
@@ -89,4 +112,5 @@ pub mod references;
 pub mod rename;
 pub mod resolve;
 pub mod semantic_tokens;
+pub mod simulate;
 pub mod verify;

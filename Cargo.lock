@@ -509,6 +509,7 @@ dependencies = [
  "fsm-diagnostics",
  "fsm-ir",
  "fsm-parser",
+ "fsm-simulator",
  "fsm-verify",
  "futures",
  "rowan",

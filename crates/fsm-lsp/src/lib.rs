@@ -166,15 +166,21 @@ pub async fn run_stdio() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     // `build(..).custom_method(..).finish()` registers the v1.5 W-A2
-    // `fsm/verify` CUSTOM request (Doc 31 §1 W-A2 / §2) alongside the
+    // `fsm/verify` CUSTOM request (Doc 31 §1 W-A2 / §2) and the debug-W1
+    // `fsm/simulate` CUSTOM request (Doc 33 §W1 / §2) alongside the
     // standard LSP methods. This is the canonical tower-lsp custom-method
     // registration; the in-process §5.4 acceptance harness builds the
-    // service the SAME way, so the test exercises the EXACT request the
-    // shipped server serves. `fsm/verify` is the only verification-bearing
-    // capability and is a pure frontend of `fsm-verify` (the keystone-in-UI
-    // invariant — no second verifier; see `capabilities::verify`).
+    // service the SAME way, so the test exercises the EXACT requests the
+    // shipped server serves. `fsm/verify` is a pure frontend of
+    // `fsm-verify` (the keystone-in-UI invariant — no second verifier; see
+    // `capabilities::verify`); `fsm/simulate` is a pure marshalling
+    // frontend of the shipped `fsm_simulator::Interpreter` (the
+    // KEYSTONE-IN-DEBUG invariant — every op is exactly one shipped
+    // `Interpreter` call, no second simulator semantics; see
+    // `capabilities::simulate`).
     let (service, socket) = LspService::build(Backend::new)
         .custom_method("fsm/verify", Backend::verify_request)
+        .custom_method("fsm/simulate", Backend::simulate_request)
         .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

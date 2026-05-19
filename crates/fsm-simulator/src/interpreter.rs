@@ -401,6 +401,31 @@ impl Interpreter {
             .ok_or(StepError::NotInitialized)
     }
 
+    /// Force-set a single context field **without running any step** — the
+    /// debug-interface `sim/setContext` backing (DBGUX §3.3; the SINGLE
+    /// sanctioned additive `crates/fsm-simulator` delta of the debug epic).
+    ///
+    /// This is **not** a transition, a guard evaluation, an RTC step, or a
+    /// completion synthesis: it is the *same nature* as
+    /// [`InitOptions::initial_context`], which already pokes the live context
+    /// map at `init` (the `rt.context.insert` in [`Interpreter::init`]) —
+    /// here a single key is overwritten *after* init for interactive
+    /// test-setup. It therefore emits **zero** [`StepRecord`] (the return
+    /// type carries no record by construction) and the active configuration,
+    /// timer set, defer buffer, history and virtual clock are untouched. The
+    /// KEYSTONE-IN-DEBUG invariant (Doc 33 §2) is preserved: no second
+    /// transition/guard/step semantics — a guarded raw field write that runs
+    /// *nothing* sets state, it does not implement semantics.
+    ///
+    /// Errors with [`StepError::NotInitialized`] if [`Interpreter::init`] has
+    /// not run (same guard as [`Interpreter::context`] — no live runtime, no
+    /// context to write).
+    pub fn set_context_field(&mut self, name: &str, value: Value) -> Result<(), StepError> {
+        let rt = self.runtime.as_mut().ok_or(StepError::NotInitialized)?;
+        rt.context.insert(name.to_owned(), value);
+        Ok(())
+    }
+
     pub fn virtual_clock_ms(&self) -> u64 {
         self.runtime
             .as_ref()

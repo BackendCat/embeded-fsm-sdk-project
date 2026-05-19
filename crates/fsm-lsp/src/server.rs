@@ -121,6 +121,15 @@ pub struct Backend {
     /// `inlay_hint` reads it, all on the same `&self`. Defaults to the
     /// Doc 22 §8 documented defaults until `initialize` sets it.
     inlay_cfg: Arc<Mutex<InlayHintConfig>>,
+    /// The debug-W1 interactive-simulation session registry (Doc 33 §W1):
+    /// `instanceId → SimSession` ({ live `Interpreter`, captured snapshot
+    /// ring }). Behind a `Mutex` like `docs`/`debounce`/`inlay_cfg` — the
+    /// `fsm/simulate` custom request mutates a session across calls (a
+    /// simulation is stateful *by design* — author → step → inspect →
+    /// rewind). Holds **no** FSM semantics: the `Interpreter` owns 100% of
+    /// the behaviour; this map is pure session plumbing (Doc 33 §2 — the
+    /// KEYSTONE-IN-DEBUG invariant).
+    sims: crate::capabilities::simulate::SimSessions,
 }
 
 impl Backend {
@@ -135,6 +144,8 @@ impl Backend {
             debounce: Arc::new(Mutex::new(HashMap::new())),
             // Doc 22 §8 documented defaults until the client sends config.
             inlay_cfg: Arc::new(Mutex::new(InlayHintConfig::default())),
+            // Empty until the client opens a debug session (debug-W1).
+            sims: crate::capabilities::simulate::new_sessions(),
         }
     }
 
@@ -236,6 +247,41 @@ impl Backend {
                 err.message = format!("fsm/verify worker join error: {e}").into();
                 err
             })
+    }
+
+    /// `fsm/simulate` — the debug-W1 **custom** LSP request (Doc 33 §W1 /
+    /// §2; registered via `LspService::build().custom_method` the SAME way
+    /// W-A2 registers `fsm/verify`, NOT a standard LSP method). The
+    /// KEYSTONE-IN-DEBUG capability: it is a *pure marshalling frontend* of
+    /// the shipped `fsm_simulator::Interpreter` — each `op` is exactly ONE
+    /// shipped `Interpreter` call + (de)serialisation, over a long-lived
+    /// per-instance session ({ `Interpreter`, snapshot ring }) held on
+    /// `Backend::sims`. It re-implements NO transition-selection /
+    /// guard-eval / completion-synthesis / RTC-step / active-config-compute
+    /// logic; that all lives in `fsm-simulator`, exactly as it does for
+    /// `fsm test`'s `execute_trace` (Doc 33 §2 — a second simulator
+    /// semantics is the cardinal regression). The `fsm/simulate*`
+    /// `StepRecord` stream is byte-equal to `execute_trace`'s on the same
+    /// `TraceCommand`s **by construction** (the same single oracle — the
+    /// differential oracle).
+    ///
+    /// A simulation session is stateful **by design** (author → step →
+    /// inspect → rewind), unlike the stateless `fsm/verify`. The op is run
+    /// inline (it `.await`s only the session `Mutex`; the `Interpreter`
+    /// call is synchronous + bounded — the same model `execute_trace` uses,
+    /// a disclosed judgment call documented in `capabilities::simulate`'s
+    /// module note). A malformed request (missing `op`/`instanceId`/a
+    /// required field) is an honest JSON-RPC invalid-params; a `StepError`
+    /// (completion-loop, queue-overflow, not-initialised, …) is surfaced
+    /// **verbatim** in the response, never a fabricated clean end-of-run
+    /// (the "inconclusive ≠ done" honest state — DBGUX §6).
+    pub async fn simulate_request(
+        &self,
+        params: serde_json::Value,
+    ) -> RpcResult<serde_json::Value> {
+        crate::capabilities::simulate::run_simulate(&self.sims, &params)
+            .await
+            .map_err(|e| RpcError::invalid_params(e.0))
     }
 }
 
