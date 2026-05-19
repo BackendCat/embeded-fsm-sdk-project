@@ -39,6 +39,7 @@
 // upward `fsm.toml` walk finds none (the diagram.test.ts pattern, reused).
 
 import * as assert from "assert";
+import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -106,6 +107,10 @@ async function waitFor(predicate: () => boolean, what: string, timeoutMs = 30_00
 
 suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance", () => {
   let serverBinary: string;
+  /** The real `fsm` CLI — the §W4 byte-identity gate runs
+   * `fsm test <captured.trace.json>` through it (the SAME `execute_trace`
+   * the capture round-trips, GT-8). */
+  let cliBinary: string;
   let extensionPath: string;
   let tmpDir: string;
   /** Inbound (webview→ext) messages from any captured panel. */
@@ -118,6 +123,7 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
 
     const bins = resolveRealBinaries();
     serverBinary = bins.server;
+    cliBinary = bins.cli;
 
     // R-15 isolation: stage fixtures in an OS temp dir; hard-assert the
     // upward fsm.toml walk finds none. `clean_w3.fsm` is a SEPARATE copy
@@ -126,13 +132,17 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
     // one — a distinct filename avoids reusing the §W2 test's panel,
     // which would skip createWebviewPanel and never re-instrument).
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsm-dbgw2-"));
-    fs.copyFileSync(
-      path.join(FIXTURE_SRC, "clean.fsm"),
-      path.join(tmpDir, "clean_w3.fsm"),
-    );
+    fs.copyFileSync(path.join(FIXTURE_SRC, "clean.fsm"), path.join(tmpDir, "clean_w3.fsm"));
     for (const f of ["clean.fsm"]) {
       fs.copyFileSync(path.join(FIXTURE_SRC, f), path.join(tmpDir, f));
     }
+    // §W4: a DEDICATED capture subdir holding ONLY its own `.fsm` (own
+    // resolved path ⇒ own panel) so `fsm test <captureDir>` discovers
+    // EXACTLY the one captured `.trace.json` + its source — no other
+    // fixtures in scope (the shipped `collect_traces` walks the dir).
+    const w4Dir = path.join(tmpDir, "w4capture");
+    fs.mkdirSync(w4Dir, { recursive: true });
+    fs.copyFileSync(path.join(FIXTURE_SRC, "clean.fsm"), path.join(w4Dir, "clean_w4.fsm"));
     let dir = tmpDir;
     for (;;) {
       assert.ok(
@@ -199,18 +209,17 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
       // Record outbound `simState` (the VERBATIM W1 response the panel
       // renders — the byte-match subject) + the diagnostic stream.
       const realPost = panel.webview.postMessage.bind(panel.webview);
-      (
-        panel.webview as unknown as { postMessage: (m: unknown) => Thenable<boolean> }
-      ).postMessage = (m: unknown): Thenable<boolean> => {
-        const mm = m as OutMsg;
-        if (mm && typeof mm.type === "string") {
-          outbound.push(mm);
-        }
-        if (mm && mm.type === "simState" && mm.resp) {
-          simStates.push(mm.resp);
-        }
-        return realPost(m);
-      };
+      (panel.webview as unknown as { postMessage: (m: unknown) => Thenable<boolean> }).postMessage =
+        (m: unknown): Thenable<boolean> => {
+          const mm = m as OutMsg;
+          if (mm && typeof mm.type === "string") {
+            outbound.push(mm);
+          }
+          if (mm && mm.type === "simState" && mm.resp) {
+            simStates.push(mm.resp);
+          }
+          return realPost(m);
+        };
 
       // The webview→ext stream the diagram/transport acks flow on.
       panel.webview.onDidReceiveMessage((mm: Record<string, unknown>) => {
@@ -302,10 +311,7 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
     // post-load `transportApplied{enabled:true}` ack (avoids racing the
     // refresh()→load round-trip; the v1.3 race-free ack discipline).
     await waitFor(
-      () =>
-        webviewMsgs.some(
-          (m) => m.type === "transportApplied" && m.enabled === true,
-        ),
+      () => webviewMsgs.some((m) => m.type === "transportApplied" && m.enabled === true),
       "the W1 `load` to complete + the transport to enable",
       60_000,
     );
@@ -482,8 +488,7 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
       90_000,
     );
     await waitFor(
-      () =>
-        webviewMsgs.some((m) => m.type === "transportApplied" && m.enabled === true),
+      () => webviewMsgs.some((m) => m.type === "transportApplied" && m.enabled === true),
       "the W1 `load` to complete + the transport to enable",
       60_000,
     );
@@ -493,9 +498,8 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
     // comes from — NOT the diagram edge id). Re-derive the Gate edge's
     // stableId from THAT map (the ground truth the panel itself uses; we
     // do NOT hard-code the id scheme — that would be a brittle guess).
-    const tidMsg = (requireCaptured().outbound.find(
-      (m) => m.type === "transitionIds",
-    ) ?? undefined) as { map?: Record<string, string> } | undefined;
+    const tidMsg = (requireCaptured().outbound.find((m) => m.type === "transitionIds") ??
+      undefined) as { map?: Record<string, string> } | undefined;
     assert.ok(
       tidMsg && tidMsg.map,
       "the panel must publish the edge-id → transition-stableId map (W3)",
@@ -542,11 +546,7 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
         op: "snapshot",
         instanceId: oid,
       })) as SimResp & { snapshotIndex?: number };
-      assert.strictEqual(
-        oSnap.snapshotIndex,
-        0,
-        "first W1 snapshot must be ring index 0",
-      );
+      assert.strictEqual(oSnap.snapshotIndex, 0, "first W1 snapshot must be ring index 0");
       const oDisp = await w1(oracleClient, {
         op: "dispatch",
         instanceId: oid,
@@ -749,6 +749,239 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
     );
   });
 
+  // ════════════════════════════════════════════════════════════════════
+  // THE §W4 GATE — capture→`.trace.json`, byte-identical BY CONSTRUCTION
+  // (Doc 33 §W4 behavioural acceptance; PD-2: behavioural, NOT symbol-
+  // presence). Drive a REAL session via the panel (Init + inject(+payload)
+  // + advanceClock by firing the EXACT webview→ext gestures the real
+  // debugWebview.ts posts) → fire the EXACT `capture` gesture → assert:
+  //
+  //  (i)  THE BYTE-IDENTITY PROOF, END-TO-END: run the REAL `fsm` CLI
+  //       `fsm test <the captured .trace.json>` and assert it EXITS 0 +
+  //       reports `pass` (NOT `skip`/`fail`). The capture embeds the
+  //       oracle's OWN StepRecords as `expected`; `fsm test`'s
+  //       `execute_trace` (the SAME shipped oracle, same IR, same
+  //       `TraceCommand`s) reproduces `actual == expected` ⇒ Verified ⇒
+  //       GREEN BY CONSTRUCTION. This INVERTS the DBGUX "F6" friction —
+  //       the test is recorded-from-the-oracle, not guessed.
+  //  (ii) NO PREMATURE SUCCESS (DBGUX §6): "captured ✓" (`captured{ok:
+  //       true}`) is emitted ONLY after the file exists on disk — asserted
+  //       in the Extension-Host host (the file IS present + non-empty when
+  //       the ok-verdict is observed), the copyIr refuse-to-fake bar.
+  //  (iii)A write-failure path → an HONEST `captured{ok:false}` error,
+  //       NEVER a fake ✓ (a read-only target dir; the cardinal-sin bar).
+  //
+  // The full merged ExtHost suite (v1.3 + §W2 + §W3) stays green (this is
+  // an ADDITIVE test file; the runner globs suite/**/*.test.js).
+  // ════════════════════════════════════════════════════════════════════
+  test("§W4 E2E: capture→.trace.json replays GREEN via `fsm test` (byte-identical by construction) + no premature ✓", async function () {
+    this.timeout(180_000);
+
+    const w4Dir = path.join(tmpDir, "w4capture");
+    const fixture = path.join(w4Dir, "clean_w4.fsm");
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
+    await vscode.window.showTextDocument(doc);
+
+    // ── (A) Open the REAL panel; wait for the reused-v1.3 render + the W1
+    // `load` to complete + the transport to enable (the §W2 discipline).
+    webviewMsgs.length = 0;
+    captured = undefined;
+    await vscode.commands.executeCommand("fsm.openDebug", vscode.Uri.file(fixture));
+    await waitFor(() => captured !== undefined, "the debug panel to be created", 30_000);
+    await waitFor(
+      () => webviewMsgs.some((m) => m.type === "renderedDiagram"),
+      "the debug webview to render the (reused v1.3) diagram",
+      90_000,
+    );
+    await waitFor(
+      () => webviewMsgs.some((m) => m.type === "transportApplied" && m.enabled === true),
+      "the W1 `load` to complete + the transport to enable",
+      60_000,
+    );
+
+    // ── (B) Drive the panel's REAL keystone handler: Init → dispatch(OPEN)
+    // → advanceClock → dispatch(CLOSE) by firing the EXACT webview→ext
+    // gestures the real debugWebview.ts posts on click (the §W2 technique).
+    const cap = requireCaptured();
+    cap.simStates.length = 0;
+    cap.outbound.length = 0;
+
+    cap.fireInbound({ type: "init" });
+    await waitFor(() => cap.simStates.length >= 1, "the panel's Init simState", 30_000);
+    cap.fireInbound({ type: "dispatch", event: "OPEN" });
+    await waitFor(() => cap.simStates.length >= 2, "the panel's dispatch(OPEN) simState", 30_000);
+    cap.fireInbound({ type: "advanceClock", deltaMs: 250 });
+    await waitFor(() => cap.simStates.length >= 3, "the panel's advanceClock simState", 30_000);
+    cap.fireInbound({ type: "dispatch", event: "CLOSE" });
+    await waitFor(() => cap.simStates.length >= 4, "the panel's dispatch(CLOSE) simState", 30_000);
+
+    // ── (C) Fire the EXACT `capture` gesture the real debugWebview.ts
+    // posts on the capture-button click. The panel sends the issued
+    // TraceCommands + the oracle's OWN StepRecords to the W1 `capture`
+    // op (ONE write_trace_yaml call) + writes the `.trace.json`.
+    cap.outbound.length = 0;
+    cap.fireInbound({ type: "capture" });
+    await waitFor(
+      () => cap.outbound.some((m) => m.type === "captured"),
+      "the panel to emit a `captured` verdict",
+      30_000,
+    );
+    const capturedMsg = cap.outbound.find((m) => m.type === "captured") as
+      | { type: string; ok?: boolean; path?: string; message?: string }
+      | undefined;
+    assert.ok(capturedMsg, "the panel must emit a `captured` message");
+    assert.strictEqual(
+      capturedMsg!.ok,
+      true,
+      `capture must succeed (got: ${capturedMsg!.message ?? "no message"})`,
+    );
+    const tracePath = capturedMsg!.path;
+    assert.ok(
+      typeof tracePath === "string" && tracePath.length > 0,
+      "the `captured{ok:true}` verdict must carry the written file path",
+    );
+
+    // ── (ii) NO PREMATURE SUCCESS: the file IS on disk + non-empty AT THE
+    // MOMENT the ok-verdict was observed (DBGUX §6 — the copyIr bar; the
+    // panel confirmed `fs.stat` before posting ok, this re-asserts it).
+    assert.ok(
+      fs.existsSync(tracePath!),
+      "captured ✓ was posted but the .trace.json does NOT exist — the " +
+        "no-premature-success bar (DBGUX §6) is violated",
+    );
+    const traceRaw = fs.readFileSync(tracePath!, "utf8");
+    assert.ok(traceRaw.length > 0, "the captured .trace.json must be non-empty (no fake ✓)");
+    // It is the SHIPPED write_trace_yaml form (serde_json pretty) carrying
+    // the oracle's OWN steps as `expected` — the recorded-from-the-oracle
+    // payload. Structurally assert the byte-identity anchor is present.
+    const parsed = JSON.parse(traceRaw) as {
+      init?: { machineName?: string };
+      steps?: unknown[];
+      expected?: unknown[];
+    };
+    assert.ok(
+      Array.isArray(parsed.steps) && parsed.steps.length >= 3,
+      "the captured trace must carry the issued TraceCommands " +
+        `(OPEN/advanceClock/CLOSE — got ${JSON.stringify(parsed.steps)})`,
+    );
+    assert.ok(
+      Array.isArray(parsed.expected) && parsed.expected.length > 0,
+      "the captured trace MUST carry the oracle's own StepRecords as " +
+        "`expected` — that is the byte-identity-by-construction anchor " +
+        "(without it `fsm test` reports nothing-to-verify, NOT a pass)",
+    );
+    assert.strictEqual(
+      parsed.init?.machineName,
+      "Gate",
+      "the captured init must pin the debugged machine (byte-faithful " +
+        "to THIS session's machine, robust for multi-machine files)",
+    );
+
+    // ── (i) THE §W4 KEYSTONE ASSERTION — BYTE-IDENTICAL BY CONSTRUCTION:
+    // run the REAL `fsm` CLI `fsm test <captureDir>`. It discovers EXACTLY
+    // the one captured `.trace.json` (the dedicated subdir), re-runs it
+    // via the SAME `execute_trace`, and MUST report `pass` + exit 0 — the
+    // replay's StepRecord stream byte-equals the captured `expected`
+    // because it IS the same shipped oracle on the same inputs. A second
+    // (even partial) semantics anywhere in the capture path would diverge
+    // here (the v1.4-keystone / v1.5-KEYSTONE-IN-UI guard, end-to-end).
+    let testOut = "";
+    let testCode = 0;
+    try {
+      testOut = execFileSync(cliBinary, ["test", w4Dir], {
+        cwd: w4Dir,
+        encoding: "utf8",
+        timeout: 60_000,
+      });
+    } catch (e) {
+      const ex = e as { status?: number; stdout?: string; stderr?: string };
+      testCode = typeof ex.status === "number" ? ex.status : 1;
+      testOut = `${ex.stdout ?? ""}${ex.stderr ?? ""}`;
+    }
+    assert.strictEqual(
+      testCode,
+      0,
+      `\`fsm test\` MUST exit 0 on the captured trace (byte-identical by ` +
+        `construction). Output:\n${testOut}`,
+    );
+    assert.ok(
+      /\bpass:/.test(testOut) && /1 passed/.test(testOut),
+      `\`fsm test\` must report the captured trace as \`pass\` (Verified — ` +
+        `recorded-from-the-oracle replays byte-identical), NOT skip/fail. ` +
+        `Output:\n${testOut}`,
+    );
+    assert.ok(
+      !/\bskip:/.test(testOut),
+      `the captured trace must NOT be skipped — that would mean an empty ` +
+        `\`expected\` (no byte-identity proof). Output:\n${testOut}`,
+    );
+
+    // ── (iii) THE NO-FAKE-✓ FAILURE PATH: a capture whose target file
+    // cannot be written must yield an HONEST `captured{ok:false}` error,
+    // NEVER a fake ✓. Force it by making the target dir read-only, then
+    // re-capturing (a fresh panel on a separate fixture in that dir).
+    const roDir = path.join(tmpDir, "w4ro");
+    fs.mkdirSync(roDir, { recursive: true });
+    const roFixture = path.join(roDir, "clean_w4ro.fsm");
+    fs.copyFileSync(path.join(FIXTURE_SRC, "clean.fsm"), roFixture);
+
+    webviewMsgs.length = 0;
+    captured = undefined;
+    await vscode.commands.executeCommand("fsm.openDebug", vscode.Uri.file(roFixture));
+    await waitFor(() => captured !== undefined, "the read-only panel to be created", 30_000);
+    await waitFor(
+      () => webviewMsgs.some((m) => m.type === "transportApplied" && m.enabled === true),
+      "the W1 `load` to complete (read-only fixture)",
+      60_000,
+    );
+    const roCap = requireCaptured();
+    roCap.simStates.length = 0;
+    roCap.outbound.length = 0;
+    roCap.fireInbound({ type: "init" });
+    await waitFor(() => roCap.simStates.length >= 1, "the read-only panel's Init", 30_000);
+    roCap.fireInbound({ type: "dispatch", event: "OPEN" });
+    await waitFor(() => roCap.simStates.length >= 2, "the read-only panel's dispatch", 30_000);
+
+    // Make the dir read-only AFTER load (load reads the .fsm; the write
+    // is what must fail) and clear any pre-existing target.
+    const roTarget = path.join(roDir, "clean_w4ro.trace.json");
+    if (fs.existsSync(roTarget)) {
+      fs.rmSync(roTarget, { force: true });
+    }
+    fs.chmodSync(roDir, 0o500); // r-x: writes denied
+    try {
+      roCap.outbound.length = 0;
+      roCap.fireInbound({ type: "capture" });
+      await waitFor(
+        () => roCap.outbound.some((m) => m.type === "captured"),
+        "the read-only panel to emit a `captured` verdict",
+        30_000,
+      );
+      const roMsg = roCap.outbound.find((m) => m.type === "captured") as
+        | { type: string; ok?: boolean; message?: string }
+        | undefined;
+      assert.ok(roMsg, "the panel must emit a `captured` verdict even on write failure");
+      assert.strictEqual(
+        roMsg!.ok,
+        false,
+        "a capture whose file cannot be written MUST be an honest failure " +
+          "(NEVER a fake ✓ — the copyIr refuse-to-fake / DBGUX §6 bar)",
+      );
+      assert.ok(
+        typeof roMsg!.message === "string" && roMsg!.message!.length > 0,
+        "the honest failure must carry a verbatim reason",
+      );
+      assert.ok(
+        !fs.existsSync(roTarget),
+        "no .trace.json must exist when the capture honestly failed " +
+          "(no fake artifact behind a non-existent ✓)",
+      );
+    } finally {
+      // Restore writability so suiteTeardown can clean up.
+      fs.chmodSync(roDir, 0o700);
+    }
+  });
+
   // THE HONEST-STALE CASE (the cardinal-sin bar, DBGUX §2.3): a parse-error
   // fixture renders the v1.3 stale-banner VERBATIM + transport disabled
   // with the reason inline — never blank, never a faked session. Driven
@@ -793,14 +1026,12 @@ suite("FSM Studio debug-W2 — Extension-Host debug-panel behavioural acceptance
     const staleAck = webviewMsgs.find((m) => m.type === "staleShown");
     assert.ok(
       staleAck,
-      "the debug webview must post a `staleShown` ack on a parse error " +
-        "(NOT silently blank)",
+      "the debug webview must post a `staleShown` ack on a parse error " + "(NOT silently blank)",
     );
     assert.strictEqual(
       staleAck.hasLastValidRender,
       false,
-      "first-open-on-parse-error has no last-valid render (honest empty, " +
-        "NOT a faked session)",
+      "first-open-on-parse-error has no last-valid render (honest empty, " + "NOT a faked session)",
     );
 
     for (const d of ctxSubs) {

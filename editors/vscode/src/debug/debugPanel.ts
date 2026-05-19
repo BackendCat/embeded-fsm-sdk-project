@@ -112,6 +112,13 @@ type DebugWebviewToExt =
   // Rewind to timeline row #N — the W1 `restore` op against the snapshot
   // ring (the client only indexes the ring; the oracle restores).
   | { readonly type: "rewind"; readonly index: number }
+  // W4 — capture the session → a `.trace.json` fixture. The panel sends
+  // the `TraceCommand`s it ISSUED + the oracle's OWN StepRecords to the W1
+  // `capture` op (ONE `write_trace_yaml` call), then writes the returned
+  // bytes to disk. "captured ✓" is posted ONLY after the file exists
+  // (DBGUX §6 — the copyIr refuse-to-fake / no-"Сохранено"-before-confirm
+  // bar). This carries NO semantics — the commands/steps are verbatim.
+  | { readonly type: "capture" }
   // Test-observability acks (NOT acceptance on their own — the §W2/§W3
   // gate is the panel-vs-oracle byte-match below; these let the ExtHost
   // E2E await a deterministic point, the v1.3 `rendered`/`staleShown` ack
@@ -126,6 +133,15 @@ type DebugWebviewToExt =
       readonly stamp: number;
     }
   | { readonly type: "rewoundApplied"; readonly index: number; readonly stamp: number }
+  // W4 test-observability ack (NOT acceptance on its own — the §W4 gate is
+  // `fsm test <captured.trace.json>` replaying GREEN + the file-exists-
+  // before-✓ assertion; this lets the ExtHost E2E await the deterministic
+  // capture-complete point, the v1.3 ack pattern).
+  | {
+      readonly type: "capturedApplied";
+      readonly ok: boolean;
+      readonly path?: string;
+    }
   | { readonly type: "staleShown"; readonly hasLastValidRender: boolean };
 
 /** The three keystone-clean breakpoint kinds (DBGUX §3.2). Each is a
@@ -257,6 +273,17 @@ type ExtToDebugWebview =
   // W3: sync the armed-breakpoint set so the webview paints the glyph
   // states (◌ none / ◍ armed / ▣ hit). Pure presentation.
   | { readonly type: "breakpoints"; readonly armed: Breakpoint[] }
+  // W4: the capture verdict — a DURABLE, in-place confirmation (NOT a
+  // toast). `ok:true` + `path` is posted ONLY after `write_trace_yaml`
+  // returned AND the file exists on disk (DBGUX §6 — no premature
+  // success); `ok:false` + `message` is the HONEST failure (a write/serde
+  // error verbatim, NEVER a fake ✓ — the copyIr cardinal-sin bar).
+  | {
+      readonly type: "captured";
+      readonly ok: boolean;
+      readonly path?: string;
+      readonly message?: string;
+    }
   | { readonly type: "simError"; readonly message: string };
 
 /** Pull the declared event names out of the IR JSON for the injector's
@@ -399,8 +426,51 @@ class DebugView {
         readonly postCallSnapIndex: number;
         /** The breakpoint that fired (for the glyph hit-state). */
         readonly bp: Breakpoint;
+        /** W4: the `TraceCommand` the panel ISSUED for this paused call
+         * (Doc 13 serde shape). Recorded into the capture ONLY when the
+         * reveal fully resumes (the call then joins the replayable
+         * session); discarded if the author rewinds away first. */
+        readonly traceCommand: Record<string, unknown>;
       }
     | undefined;
+
+  // ── W4 capture-recording state (Doc 33 §W4). PURE plumbing — NOT
+  // semantics: these accumulate the `TraceCommand`s the panel ISSUED and
+  // the oracle's OWN StepRecords (verbatim, off the W1 responses) so the
+  // W4 `capture` op can assemble a TraceFile + `write_trace_yaml` it. The
+  // panel decides NOTHING about FSM behaviour — it records what it sent
+  // and what the oracle returned. Kept byte-faithful to the *replayable*
+  // session: a fresh `init` RESETS them; a rewind TRUNCATES the future
+  // (a capture must replay deterministically via `execute_trace`). ──────
+
+  /** The `InitTrace` for the *current* run — exactly the params the panel
+   * passed to the W1 `init` op (the interpreter's OWN serde shape, so the
+   * captured trace's init === the session's init by construction). The
+   * merged panel inits with no context/clock override, so this is the
+   * documented default (first machine, empty context, clock 0); a future
+   * Init-with-context UI would record it here verbatim. */
+  private capturedInit: Record<string, unknown> = {};
+
+  /** The `TraceCommand`s the panel ISSUED, in order — Doc 13's
+   * `TraceCommand` serde shape (`{action:"dispatch",event,payload?}` /
+   * `{action:"advance_clock",deltaMs}`), byte-equal to what the W1
+   * dispatch/advanceClock ops carried. Appended on each REVEALED stepping-
+   * call; truncated on rewind (a capture replays only the kept prefix). */
+  private capturedCommands: Array<Record<string, unknown>> = [];
+
+  /** The oracle's OWN `StepRecord`s for the kept commands, concatenated in
+   * order (verbatim off each W1 response's `steps` — the panel synthesises
+   * none of them). This becomes the captured trace's `expected` block: the
+   * recorded-from-the-oracle payload that makes `fsm test`'s `execute_trace`
+   * replay byte-identical BY CONSTRUCTION (same shipped oracle, same IR,
+   * same commands ⇒ same `actual` == this `expected`). Reset on init,
+   * truncated on rewind in lock-step with `capturedCommands`. */
+  private capturedSteps: SimResponse["steps"] = [];
+
+  /** Per-command running step-count, so a rewind can truncate
+   * `capturedSteps` to exactly the prefix produced by the kept commands
+   * (the byte-faithful-to-the-replayable-session invariant). */
+  private capturedStepCountByCommand: number[] = [];
 
   constructor(
     readonly fsmPath: string,
@@ -486,6 +556,9 @@ class DebugView {
       case "rewind":
         await this.doRewind(m.index);
         break;
+      case "capture":
+        await this.doCapture();
+        break;
       default:
         // Acks (renderedDiagram/stateApplied/staleShown/pausedApplied/
         // rewoundApplied) are observed by the ExtHost test via the panel
@@ -499,9 +572,7 @@ class DebugView {
    * decides NO FSM semantics (the keystone; the oracle still produces
    * every step, this only filters its output — DBGUX §3.2). */
   private toggleBreakpoint(kind: BpKind, targetId: string): void {
-    const i = this.breakpoints.findIndex(
-      (b) => b.kind === kind && b.targetId === targetId,
-    );
+    const i = this.breakpoints.findIndex((b) => b.kind === kind && b.targetId === targetId);
     if (i >= 0) {
       this.breakpoints.splice(i, 1);
     } else {
@@ -706,6 +777,49 @@ class DebugView {
     }
   }
 
+  /** W4: record a stepping-call that has been COMMITTED to the replayable
+   * timeline — its `TraceCommand` (the panel's OWN issued command, Doc 13
+   * serde shape) + the oracle's OWN `StepRecord`s for it (verbatim off the
+   * W1 response). PURE plumbing: it stores what the panel sent and what the
+   * oracle returned — it decides NOTHING. Called only when a call's steps
+   * become part of the deterministically-replayable session (the no-bp
+   * full reveal, or after a paused reveal fully resumes) so the captured
+   * trace replays byte-identical via `execute_trace`. */
+  private recordCommittedCall(
+    traceCommand: Record<string, unknown>,
+    steps: SimResponse["steps"],
+  ): void {
+    this.capturedCommands.push(traceCommand);
+    const s = steps ?? [];
+    this.capturedSteps = [...(this.capturedSteps ?? []), ...s];
+    this.capturedStepCountByCommand.push(s.length);
+  }
+
+  /** W4: truncate the capture recording to the first `commandCount`
+   * issued commands (a rewind discards the future — the captured trace
+   * must replay only the kept prefix, byte-faithful to the live session
+   * the author rewound to). `capturedSteps` keeps the Init prefix + the
+   * StepRecords of exactly the kept commands. */
+  private truncateCaptureTo(commandCount: number): void {
+    if (commandCount >= this.capturedCommands.length) {
+      return;
+    }
+    // StepRecords to keep = Init prefix + the kept commands' steps.
+    const keptCmdSteps = this.capturedStepCountByCommand
+      .slice(0, commandCount)
+      .reduce((a, b) => a + b, 0);
+    const droppedCmdSteps = this.capturedStepCountByCommand
+      .slice(commandCount)
+      .reduce((a, b) => a + b, 0);
+    const all = this.capturedSteps ?? [];
+    // The Init prefix length = total − all command steps (it was seeded in
+    // doInit before any command was recorded; rebuild precisely).
+    const initPrefixLen = all.length - (keptCmdSteps + droppedCmdSteps);
+    this.capturedSteps = all.slice(0, initPrefixLen + keptCmdSteps);
+    this.capturedCommands = this.capturedCommands.slice(0, commandCount);
+    this.capturedStepCountByCommand = this.capturedStepCountByCommand.slice(0, commandCount);
+  }
+
   private async doInit(): Promise<void> {
     let resp: SimResponse;
     try {
@@ -735,6 +849,25 @@ class DebugView {
     this.paused = undefined;
     this.snapIndexByRow = [];
     this.revealedRows = (resp.steps ?? []).length;
+    // ── W4: a fresh run resets the capture recording. The `InitTrace`
+    // mirrors the params the panel passed to the W1 `init` op. The merged
+    // panel inits with no context/clock override, so context/clock are the
+    // documented defaults (a future Init-with-context UI records them here
+    // verbatim). It DOES pin `machineName` to the debugged machine: the W1
+    // `init` op resolves the session's stored machine (set at `load` from
+    // the rendered machine), but `execute_trace` with `init.machineName ==
+    // None` falls back to `ir.machines.first()` — which differs for a
+    // MULTI-machine file. Pinning the name keeps the captured trace
+    // byte-faithful to THIS session's machine for any file (the trace's
+    // OWN `init` field — pure provenance, zero semantics). The Init's own
+    // StepRecords are NOT a `TraceCommand` (init is the trace's `init`
+    // block, not a `step`) — `execute_trace` re-runs `init` from the
+    // `InitTrace` and PREPENDS those records itself, so `expected` must
+    // include them too (it is the FULL StepRecord stream — see doCapture).
+    this.capturedInit = this.machineName ? { machineName: this.machineName } : {};
+    this.capturedCommands = [];
+    this.capturedSteps = [...(resp.steps ?? [])];
+    this.capturedStepCountByCommand = [];
     // Init's records are revealed wholesale (the §3.4 flow arms the
     // breakpoint AFTER init; matching the init record is still honoured
     // by the predicate if armed — but pausing on init is a degenerate
@@ -757,7 +890,15 @@ class DebugView {
    * the reveal. NO transition selection / guard eval / active-config
    * computation happens here (the W4 audit expects ∅).
    */
-  private async runSteppingCall(op: "dispatch" | "advanceClock", params: Record<string, unknown>): Promise<void> {
+  private async runSteppingCall(
+    op: "dispatch" | "advanceClock",
+    params: Record<string, unknown>,
+    // W4: the SAME stimulus expressed as a Doc 13 `TraceCommand` (the
+    // capture shape — `{action,...}`; the W1 op `params` use a different
+    // serde shape). Recorded VERBATIM when the call commits — the panel
+    // decides nothing, it stores what it sent.
+    traceCommand: Record<string, unknown>,
+  ): Promise<void> {
     if (!this.initialized) {
       this.post({
         type: "simError",
@@ -831,6 +972,9 @@ class DebugView {
     if (breakAt < 0 || !firedBp) {
       this.revealedRows += steps.length;
       await this.recordRewindAnchor();
+      // W4: the call is fully revealed ⇒ part of the replayable session.
+      // Record the issued command + the oracle's OWN steps (verbatim).
+      this.recordCommittedCall(traceCommand, steps);
       this.applyResponse(resp);
       return;
     }
@@ -848,6 +992,10 @@ class DebugView {
           "revealing the step fully; breakpoint not honoured this run.",
       );
       this.revealedRows += steps.length;
+      // W4: a degraded full reveal is STILL part of the replayable
+      // session — record it (the capture stays byte-faithful regardless
+      // of whether a breakpoint paused; the steps are the oracle's own).
+      this.recordCommittedCall(traceCommand, steps);
       this.applyResponse(resp);
       return;
     }
@@ -877,6 +1025,7 @@ class DebugView {
       preCallSnapIndex,
       postCallSnapIndex,
       bp: firedBp,
+      traceCommand,
     };
     // Reveal the steps BEFORE the breaking one; hold the breaking step
     // (and any after) for ⏭ Step / ▶ Run.
@@ -990,9 +1139,7 @@ class DebugView {
         // (same oracle state, by construction).
         resp = p.fullResp;
       } else {
-        this.deps.outputChannel.appendLine(
-          `[fsm] debug: W3 resume restore returned: ${fwd.error}`,
-        );
+        this.deps.outputChannel.appendLine(`[fsm] debug: W3 resume restore returned: ${fwd.error}`);
       }
     } catch (e) {
       this.deps.outputChannel.appendLine(
@@ -1004,6 +1151,11 @@ class DebugView {
     // (paused) call — it is NOT a new call (the webview keeps the same
     // active-call rows, now fully revealed).
     this.revealedRows += Math.max(0, steps.length - p.revealCount);
+    // W4: the paused call has now FULLY resumed ⇒ it joins the replayable
+    // session. Record the issued command + the oracle's OWN full step
+    // vector (verbatim — `p.fullResp.steps`; the buffered remainder is the
+    // oracle's, never synthesised). Done BEFORE clearing `p`.
+    this.recordCommittedCall(p.traceCommand, steps);
     this.paused = undefined;
     this.snapIndexByRow[this.revealedRows] = p.postCallSnapIndex;
     this.applyResponse(resp, undefined, false);
@@ -1072,6 +1224,25 @@ class DebugView {
     // (the debugger-correct time-travel semantics).
     this.paused = undefined;
     this.revealedRows = Math.min(this.revealedRows, bestBoundary);
+    // W4: a rewind discards the future ⇒ the captured trace must replay
+    // only the kept command prefix (byte-faithful to the session the
+    // author rewound to). The snapshot ring is per-stepping-call, so the
+    // kept-row boundary is exactly a command boundary: keep the largest k
+    // commands whose cumulative StepRecords (after the Init prefix) fit in
+    // the kept rows. (Pure bookkeeping — zero semantics.)
+    const totalCmdSteps = this.capturedStepCountByCommand.reduce((a, b) => a + b, 0);
+    const initPrefixLen = (this.capturedSteps ?? []).length - totalCmdSteps;
+    let acc = initPrefixLen;
+    let keepCommands = 0;
+    for (const c of this.capturedStepCountByCommand) {
+      if (acc + c <= bestBoundary) {
+        acc += c;
+        keepCommands += 1;
+      } else {
+        break;
+      }
+    }
+    this.truncateCaptureTo(keepCommands);
     for (const key of Object.keys(this.snapIndexByRow)) {
       if (Number(key) > bestBoundary) {
         delete this.snapIndexByRow[Number(key)];
@@ -1090,19 +1261,176 @@ class DebugView {
     // restore-pre-step). Which transition (if any) fires, whether the
     // event is discarded, what timers chain — ALL the W1 oracle's
     // answers; the breakpoint only FILTERS them (the keystone).
-    await this.runSteppingCall("dispatch", {
-      event:
-        payload && Object.keys(payload).length > 0
-          ? { name: event, payload }
-          : { name: event },
-    });
+    const hasPayload = payload && Object.keys(payload).length > 0;
+    await this.runSteppingCall(
+      "dispatch",
+      { event: hasPayload ? { name: event, payload } : { name: event } },
+      // W4: the SAME stimulus as a Doc 13 `TraceCommand::Dispatch` —
+      // `#[serde(tag="action", rename_all="snake_case")]` ⇒ `action:
+      // "dispatch"`; `event` is the bare name; `payload` is the trace
+      // `Value` map VERBATIM (the same shape the W1 dispatch op carried,
+      // re-derived from `trace.rs:226`). Recorded as-issued; not computed.
+      hasPayload ? { action: "dispatch", event, payload } : { action: "dispatch", event },
+    );
   }
 
   private async doAdvanceClock(deltaMs: number): Promise<void> {
     // panel verb → the W3 stepping core. Which timers fired is the W1
     // oracle's answer (read off `resp.steps`); we compute nothing — the
     // breakpoint predicate only filters the oracle's own steps.
-    await this.runSteppingCall("advanceClock", { deltaMs });
+    await this.runSteppingCall(
+      "advanceClock",
+      { deltaMs },
+      // W4: the SAME stimulus as a Doc 13 `TraceCommand::AdvanceClock` —
+      // `action:"advance_clock"` (snake_case tag) + `deltaMs`
+      // (`#[serde(rename="deltaMs")]`, re-derived from `trace.rs:232`).
+      { action: "advance_clock", deltaMs },
+    );
+  }
+
+  /**
+   * W4 — CAPTURE the session → a `.trace.json` fixture (Doc 33 §W4 / DBGUX
+   * §3 the capture row). THE KEYSTONE, in code: the panel sends the
+   * `TraceCommand`s it ISSUED + the oracle's OWN `StepRecord`s (verbatim,
+   * recorded off the W1 responses) to the W1 `capture` op, which is ONE
+   * `write_trace_yaml` call (GT-8 — the EXACT shipped serializer
+   * `fsm test` round-trips through the SAME `execute_trace`). The panel
+   * decides NO semantics — it transmits what it sent and what the oracle
+   * returned, then writes the serializer's bytes to disk.
+   *
+   * BYTE-IDENTICAL BY CONSTRUCTION: `expected` IS the oracle's own step
+   * stream, so `fsm test`'s `execute_trace` (same shipped oracle, same
+   * IR, same `TraceCommand`s) reproduces the SAME `actual == expected` ⇒
+   * GREEN. This INVERTS the DBGUX "F6" friction (the test is recorded-
+   * from-the-oracle, never guessed).
+   *
+   * NO PREMATURE SUCCESS (DBGUX §6 — the copyIr refuse-to-fake / no-
+   * "Сохранено"-before-confirm bar): "captured ✓" is posted ONLY after
+   * `write_trace_yaml` returned AND the file is confirmed to exist on
+   * disk. A serialise/write failure is an HONEST error verbatim — NEVER a
+   * fake ✓.
+   *
+   * Filename: `<basename>.trace.json` next to the `.fsm`. RE-DERIVED FROM
+   * SHIPPED SOURCE (a flagged schema note): DBGUX/Doc-33 prose says
+   * ".trace.yaml", but the SHIPPED `write_trace_yaml` emits JSON
+   * (`serde_json::to_string_pretty`, `trace.rs:274`) and the SHIPPED
+   * `cmd/test.rs::collect_traces` (`:159`) discovers ONLY `*.trace` /
+   * `*.trace.json` — a `.trace.yaml` would be SILENTLY SKIPPED (a vacuous
+   * empty `fsm test` run, NOT a real byte-identity proof). So the panel
+   * writes `*.trace.json` (the shipped runner's contract); the *content*
+   * is `write_trace_yaml`'s exact bytes. Disclosed in the report.
+   */
+  private async doCapture(): Promise<void> {
+    if (!this.initialized) {
+      this.post({
+        type: "captured",
+        ok: false,
+        message:
+          "press Init and inject at least one event before capturing — " +
+          "an empty session has nothing to record.",
+      });
+      return;
+    }
+    const steps = this.capturedCommands;
+    const expected = this.capturedSteps ?? [];
+    if (steps.length === 0 || expected.length === 0) {
+      // Honest: a capture with no issued commands / no oracle steps cannot
+      // be verified by `fsm test` (it would report nothing-to-verify, NOT
+      // a pass). Never a fabricated empty capture (the cardinal-sin bar).
+      this.post({
+        type: "captured",
+        ok: false,
+        message:
+          "nothing to capture yet — inject an event (and let it reveal) " +
+          "so the trace has at least one step to verify.",
+      });
+      return;
+    }
+
+    // (1) The ONE shipped call, via the W1 `capture` op: assemble the
+    // TraceFile from the panel's OWN issued commands + the oracle's OWN
+    // StepRecords and `write_trace_yaml` it. The panel synthesises none of
+    // this — `init`/`steps`/`expected` are verbatim.
+    let resp: SimResponse & { trace?: string };
+    try {
+      resp = (await simulate(this.deps.getClient(), {
+        op: "capture",
+        instanceId: this.instanceId(),
+        init: this.capturedInit,
+        steps,
+        expected,
+        machineFile: path.basename(this.fsmPath),
+        description: `Captured from the FSM Studio debug session for ${path.basename(
+          this.fsmPath,
+        )} (recorded-from-the-oracle — replays byte-identical via fsm test).`,
+      })) as SimResponse & { trace?: string };
+    } catch (e) {
+      this.post({
+        type: "captured",
+        ok: false,
+        message: e instanceof SimTransportError ? e.message : String(e),
+      });
+      return;
+    }
+    if (resp.error || typeof resp.trace !== "string") {
+      // The serializer's OWN error verbatim — never a fake ✓.
+      this.post({
+        type: "captured",
+        ok: false,
+        message: resp.error ?? "the capture op returned no trace bytes (cannot confirm a capture).",
+      });
+      return;
+    }
+
+    // (2) Write the serializer's bytes to `<basename>.trace.json` next to
+    // the `.fsm` (the shipped `collect_traces` contract — see the doc
+    // comment's re-derived-schema note). Use the workspace FS API.
+    const target = vscode.Uri.file(
+      path.join(
+        path.dirname(this.fsmPath),
+        `${path.basename(this.fsmPath, path.extname(this.fsmPath))}.trace.json`,
+      ),
+    );
+    try {
+      await vscode.workspace.fs.writeFile(target, Buffer.from(resp.trace, "utf8"));
+    } catch (e) {
+      // An HONEST write failure — never a fake ✓ (the cardinal-sin bar).
+      this.post({
+        type: "captured",
+        ok: false,
+        message: `could not write the trace file: ${e instanceof Error ? e.message : String(e)}`,
+      });
+      return;
+    }
+
+    // (3) NO PREMATURE SUCCESS: confirm the file actually exists on disk
+    // BEFORE posting "captured ✓" (DBGUX §6 — the copyIr refuse-to-fake
+    // bar; a ✓ the file does not back is exactly the forbidden lie).
+    try {
+      const st = await vscode.workspace.fs.stat(target);
+      if (st.size <= 0) {
+        throw new Error("the written trace file is empty");
+      }
+    } catch (e) {
+      this.post({
+        type: "captured",
+        ok: false,
+        message: `the trace file was not confirmed on disk: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      });
+      return;
+    }
+
+    // The file exists AND is non-empty AND was produced by the shipped
+    // `write_trace_yaml` over the oracle's OWN steps ⇒ an HONEST ✓.
+    this.deps.outputChannel.appendLine(
+      `[fsm] debug: captured → ${target.fsPath} ` +
+        `(${steps.length} command(s), ${expected.length} oracle StepRecord(s); ` +
+        "recorded-from-the-oracle — `fsm test` replays it byte-identical " +
+        "via the same execute_trace).",
+    );
+    this.post({ type: "captured", ok: true, path: target.fsPath });
   }
 
   /** Reveal a clicked node's declaration (the v1.3 click→source contract,
@@ -1201,9 +1529,7 @@ export class DebugController {
   private html(webview: vscode.Webview): string {
     const nonce = makeNonce();
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.file(
-        path.join(this.context.extensionPath, "dist", "webview", "debugWebview.js"),
-      ),
+      vscode.Uri.file(path.join(this.context.extensionPath, "dist", "webview", "debugWebview.js")),
     );
     const csp =
       `default-src 'none'; ` +
@@ -1314,6 +1640,23 @@ export class DebugController {
     color:var(--vscode-button-foreground);
     background:var(--vscode-button-background);
     border:none;padding:3px 10px;border-radius:3px;margin-left:6px;}
+  /* W4: the capture control lives ON the Trace/Timeline region title (the
+     proximity principle — it captures the timeline, so it sits with it;
+     NOT a detached toolbar button). */
+  #timelineTitle{display:flex;align-items:center;justify-content:space-between;
+    gap:8px;}
+  #btnCapture{font:inherit;font-size:11px;cursor:pointer;
+    color:var(--vscode-button-foreground);
+    background:var(--vscode-button-background);
+    border:none;padding:2px 8px;border-radius:3px;}
+  #btnCapture:disabled{opacity:.5;cursor:not-allowed;}
+  /* W4: the capture verdict — a DURABLE in-place line (NOT a toast). ✓
+     uses the calm charts-green; an error the error token. No animation. */
+  #captureMsg{padding:4px 10px;font-size:11px;}
+  #captureMsg.ok{color:var(--vscode-charts-green,#89d185);
+    border-bottom:1px solid var(--vscode-panel-border,#333);}
+  #captureMsg.err{color:var(--vscode-errorForeground,#f48771);
+    border-bottom:1px solid var(--vscode-panel-border,#333);}
   #timeline{flex:1;overflow:auto;}
   .tl-cur{color:var(--vscode-charts-green,#89d185);}
   /* W3: buffered-but-not-yet-revealed rows (paused mid-vector) — shown
@@ -1369,7 +1712,12 @@ export class DebugController {
         <button id="btnAdvance" disabled>⏩</button>
         <div id="timers" class="empty">pending timers: —</div>
       </div>
-      <div class="region-title">Trace / Timeline</div>
+      <div class="region-title" id="timelineTitle">
+        <span>Trace / Timeline</span>
+        <button id="btnCapture" disabled
+          title="Capture this session → a .trace.json fixture next to the .fsm (recorded from the oracle — fsm test replays it byte-identical). The check mark appears only after the file is written.">▷ capture .trace.json</button>
+      </div>
+      <div id="captureMsg" class="empty" style="display:none;"></div>
       <div id="timeline"><div class="empty">No steps yet.</div></div>
     </div>
   </div>
