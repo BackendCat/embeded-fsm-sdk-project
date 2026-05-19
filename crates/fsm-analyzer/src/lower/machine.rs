@@ -364,25 +364,23 @@ fn lower_queue(locs: &LocCtx, qb: Option<&ast::QueueBlock>) -> QueueConfig {
     let Some(qb) = qb else {
         return QueueConfig::default();
     };
-    let mut capacity = 16u32;
-    let mut overflow = OverflowPolicy::Assert;
+    // A present-but-key-omitting `queue {}` block falls back to the IR
+    // canonical default (`QueueConfig::default()` — capacity 16 / Assert),
+    // NOT a second hardcoded literal that could drift from it.
+    let defaults = QueueConfig::default();
+    let mut capacity = defaults.capacity;
+    let mut overflow = defaults.overflow_policy;
     for entry in qb.entries() {
         let Some(key) = entry.key() else { continue };
-        // Value is the first IntLiteral / Ident token after the `=`.
-        let val_tok = entry
-            .syntax()
-            .children_with_tokens()
-            .filter_map(|el| el.into_token())
-            .find(|t| {
-                matches!(
-                    t.kind(),
-                    SyntaxKind::IntLiteral
-                        | SyntaxKind::Ident
-                        | SyntaxKind::KwTrue
-                        | SyntaxKind::KwFalse
-                )
-            });
-        match (key.as_str(), val_tok.as_ref().map(|t| t.text().to_string())) {
+        // F-2 fix (#110/F-1 silent-misconfig class): take the RHS value via
+        // the single typed `ConfigEntry::value()` accessor, which skips the
+        // key `Ident` and the `=`. The prior "first value-shaped token"
+        // scan returned the *key* `Ident` (it is itself value-shaped), so
+        // `capacity = 32` parsed `"capacity"` → `u32::from_str` failed →
+        // the value silently fell back to the default 16, and
+        // `overflow = drop_newest` matched the catch-all → `Assert`. A
+        // user's explicit in-source queue config was silently miscompiled.
+        match (key.as_str(), entry.value()) {
             ("capacity", Some(v)) => {
                 if let Ok(n) = v.parse::<u32>() {
                     capacity = n;

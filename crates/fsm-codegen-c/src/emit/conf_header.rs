@@ -5,7 +5,7 @@
 //! include of the HAL header. The generated source uses these macros for
 //! preprocessor selection.
 
-use crate::config::{DispatchStrategy, OverflowPolicy};
+use crate::config::DispatchStrategy;
 
 use super::license::header_block;
 use super::{EmittedFile, FileRole, MachineEmitCtx};
@@ -19,7 +19,13 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
         Some(&format!("{}.fsm (compile-time configuration)", stem)),
     );
 
-    let overflow = OverflowPolicy::from_ir(ctx.machine.queue.overflow_policy);
+    // F-2: the EFFECTIVE overflow policy, resolved through
+    // `CodegenConfig::resolve_queue` (in-source `queue {}` > integrator
+    // override > default). Reading `ctx.machine.queue.overflow_policy`
+    // directly here would ignore an integrator `--queue-overflow`; reading
+    // `ctx.config.queue_overflow` directly would ignore the in-source
+    // block. `ctx.queue_overflow` is the single resolved truth.
+    let overflow = ctx.queue_overflow;
     let strategy = match ctx.strategy {
         DispatchStrategy::Switch => "FSM_STRATEGY_SWITCH",
         DispatchStrategy::Table => "FSM_STRATEGY_TABLE",
@@ -66,7 +72,7 @@ pub fn emit(ctx: &MachineEmitCtx<'_>) -> EmittedFile {
 "#,
         guard = guard,
         prefix = prefix,
-        qcap = ctx.config.queue_capacity,
+        qcap = ctx.queue_capacity,
         overflow_macro = overflow.macro_name(),
         strategy = strategy,
         regions = ctx.layout.max_parallel_regions,

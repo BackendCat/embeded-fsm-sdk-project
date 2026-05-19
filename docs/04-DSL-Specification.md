@@ -173,6 +173,16 @@ Using a construct without the corresponding feature flag is `FSM-E0610`.
 > _Updated 2026-05-14: code changed from FSM-E0600 to FSM-E0610 per Doc 00
 > §B-01 (E0600 retained its "parallel region has no initial" meaning; new
 > E0610 was allocated for the feature-flag check). See CHANGELOG._
+>
+> _Enforcement status (v1.1, 2026-05-19 — doc-honesty reconciliation, F-2
+> fold-in): the `FSM-E0610` feature gate is currently implemented **only
+> for `submachines`** (`checks/submachine.rs`). `hsm`, `parallel`,
+> `history`, `timers`, `deferred`, `fork_join` are declarative-only — the
+> flag is accepted and recommended for intent/portability but its absence
+> is **not** rejected. This is deliberate and uniform across those flags
+> (not a per-flag inconsistency); a future wave may extend the E0610 gate
+> to all flags. Do not document any individual flag as "rejected when
+> absent" unless its gate is actually wired._
 
 ## 2.3 Constants
 
@@ -968,19 +978,33 @@ every_internal_decl =
 
 ## 9.4 Deferred Events
 
-> _Updated 2026-05-14 in v1.0 doc reconciliation; see CHANGELOG._
+> _Updated 2026-05-14 in v1.0 doc reconciliation; **superseded 2026-05-19**
+> (doc-honesty reconciliation, F-2 fold-in) — `defer` shipped in v1.1; the
+> stale "rejected with FSM-E0903 / v1.0 limitation" paragraph is removed.
+> See CHANGELOG._
 
 ```ebnf
 defer_decl = "defer" , identifier ;
 ```
 
-Holds this event type while in this state. Released on exit to a non-deferring state.
-Requires `feature deferred`.
+Holds this event type while in this state. Released to the FRONT of the
+event queue on exit to a state no longer covered by a deferring ancestor
+(transition-wins, UML 2.5.1 §14.2.3.9.1: an enabled transition for the
+event beats `defer` in the same state).
 
-**v1.0 limitation.** The construct parses but is rejected by the analyzer with
-`FSM-E0903` ("`defer` not yet supported; v1.0 limitation, lands in v1.1") per
-Doc 00 §B-08 / §11.7 (option-b downgrade). Full defer-queue semantics
-(per-region bitmask, re-enqueue on exit) land in v1.1.
+`feature deferred` is the recommended intent/portability marker but is
+**not** enforced — its absence does not reject a `defer` (the uniform
+declarative-flag status; see §2.2's enforcement-status note: only
+`submachines` is gated by `FSM-E0610` today).
+
+**Status (v1.1).** Fully supported end-to-end: the analyzer lowers
+`defer`, the simulator holds + replays it (Doc 08 §10), and codegen-c
+emits the deferred-event runtime (per-region buffer, release-to-front on
+exit) for both dispatch strategies. The v1.0 `FSM-E0903` ("`defer` not yet
+supported") stopgap (Doc 00 §B-08 / §11.7 option-b) is **retired** — it
+survives only in `DeprecatedCode` so the suppression parser still accepts
+the old wire form. The remaining `defer` diagnostic is `FSM-E0310`
+(deferred event conflicts with an explicit transition in the same state).
 
 ---
 

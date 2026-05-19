@@ -341,6 +341,40 @@ impl ConfigEntry {
     pub fn key(&self) -> Option<String> {
         first_ident(&self.0)
     }
+
+    /// The right-hand-side value token of `key = value`, as written.
+    ///
+    /// F-2 (the #110/F-1 silent-misconfig class): a `CONFIG_ENTRY`'s child
+    /// tokens are `Ident(key)`, `Eq`, then the value token (`IntLiteral`,
+    /// `Ident`, `KwTrue`, or `KwFalse`). Any consumer that wants the *value*
+    /// MUST skip past the `=` — a naive "first value-shaped token" scan
+    /// returns the *key* `Ident` instead (`Ident` is itself value-shaped),
+    /// which is exactly how `queue { capacity = 32 }` was silently lowered
+    /// to the default 16 / `Assert`. This accessor is the single typed
+    /// source of truth so the lowerer and the analyzer queue check can
+    /// never diverge on what "the value" is.
+    pub fn value(&self) -> Option<String> {
+        let mut seen_eq = false;
+        for el in self.0.children_with_tokens() {
+            let Some(t) = el.into_token() else { continue };
+            if t.kind() == SyntaxKind::Eq {
+                seen_eq = true;
+                continue;
+            }
+            if seen_eq
+                && matches!(
+                    t.kind(),
+                    SyntaxKind::IntLiteral
+                        | SyntaxKind::Ident
+                        | SyntaxKind::KwTrue
+                        | SyntaxKind::KwFalse
+                )
+            {
+                return Some(t.text().to_string());
+            }
+        }
+        None
+    }
 }
 
 impl InitialDecl {

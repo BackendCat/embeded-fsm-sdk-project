@@ -1,0 +1,64 @@
+language fsm 2.0
+
+// F-2 sim≡codegen fixture — an EXPLICIT, non-default in-source `queue {}`
+// block must drive BOTH backends off the SAME IR `QueueConfig`:
+//   • the simulator: `EventQueue::new(machine.queue.capacity,
+//     machine.queue.overflow_policy)` (runtime/state.rs);
+//   • the generated C99 ring: `<M>_QUEUE_CAPACITY` / `<M>_QUEUE_OVERFLOW`,
+//     resolved via `CodegenConfig::resolve_queue` — the differential
+//     harness passes `CodegenConfig::default()` (NO integrator override),
+//     so the in-source `queue {}` IS the resolved config.
+//
+// Deliberately a FLAT, event-driven machine (the byte-equal `motor` shape:
+// no completion / no timer ⇒ no record-model residual ⇒ a genuine
+// BYTE_EQUAL, not a JUSTIFIED). Its ONLY F-2-relevant content is the
+// explicit non-default `queue { capacity = 32; overflow = drop_newest }`.
+// Both backends now source capacity + overflow from this SAME lowered IR
+// `QueueConfig`, so the projected traces are byte-identical by
+// construction.
+//
+// Why this is NOT vacuous (the F-2 discriminator): pre-fix the lowerer
+// parsed the `capacity` *key* token instead of its value, so this
+// `capacity = 32` / `overflow = drop_newest` was silently dropped to the
+// IR default (16 / Assert); codegen additionally ignored the IR queue
+// entirely (it emitted the `8` / `Assert` `CodegenConfig` default) while
+// the simulator honored the IR queue. The explicit block is therefore
+// load-bearing: the F-2 fix is exactly what makes BOTH backends agree on
+// THIS machine's queue. A regression re-introducing the silent drop, or
+// re-divorcing codegen from the IR queue, makes the conf-header /
+// queue-bytes diverge and is caught by the companion gcc-RUN acceptance
+// (`fsm-codegen-c/tests/queue_config_runs.rs`) + the F-2 analyzer/precedence
+// behavioural tests. `expected` intentionally empty — the harness drives
+// the LIVE shipped simulator oracle.
+
+machine Gate {
+    context {
+        passes: u32 = 0
+    }
+
+    events {
+        OPEN
+        CLOSE
+        LOCK
+    }
+
+    queue {
+        capacity = 32
+        overflow = drop_newest
+    }
+
+    initial Closed
+
+    state Closed {
+        on OPEN -> Open : ctx.passes = ctx.passes + 1
+    }
+
+    state Open {
+        on CLOSE -> Closed
+        on LOCK  -> Locked
+    }
+
+    state Locked {
+        on OPEN -> Open : ctx.passes = ctx.passes + 1
+    }
+}

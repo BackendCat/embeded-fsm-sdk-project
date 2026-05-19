@@ -28,18 +28,34 @@ fn motor_budget_is_nonempty_and_consistent() {
 
 #[test]
 fn larger_queue_means_more_ram() {
+    // F-2: `common::motor_ir()` carries an EXPLICIT in-source `QueueConfig`
+    // (loc = "motor.fsm" ⇒ `is_explicit()`), so the budget's effective
+    // capacity is resolved via `CodegenConfig::resolve_queue`. The bare
+    // `queue_capacity` field is now ONLY the bottom-tier fallback and is
+    // (correctly) ignored when the IR declares a `queue {}`. To make the
+    // integrator capacity the budget driver, use the integrator OVERRIDE
+    // (`queue_capacity_override`) — the post-F-2 way `--queue-size` /
+    // `fsm.toml` retargets a model's queue. Pre-F-2 this test passed only
+    // because codegen blindly used `config.queue_capacity` (the very
+    // silent-misconfig F-2 fixes); it now asserts the override path.
     let ir = common::motor_ir();
     let cfg4 = CodegenConfig {
-        queue_capacity: 4,
+        queue_capacity_override: Some(4),
         ..Default::default()
     };
     let cfg16 = CodegenConfig {
-        queue_capacity: 16,
+        queue_capacity_override: Some(16),
         ..Default::default()
     };
     let b4 = compute_budget(&ir, &cfg4).expect("budget cfg4");
     let b16 = compute_budget(&ir, &cfg16).expect("budget cfg16");
-    assert!(b16.queue_bytes > b4.queue_bytes);
+    assert!(
+        b16.queue_bytes > b4.queue_bytes,
+        "an integrator queue-size override of 16 must budget more queue RAM \
+         than 4 (b4={}, b16={})",
+        b4.queue_bytes,
+        b16.queue_bytes
+    );
     assert!(b16.total_ram_bytes > b4.total_ram_bytes);
 }
 

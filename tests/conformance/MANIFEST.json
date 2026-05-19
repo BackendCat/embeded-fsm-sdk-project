@@ -240,6 +240,20 @@
             "g7-code-lock",
             "timer"
           ]
+        },
+        {
+          "id": "VAL-NEG-010",
+          "kind": "negative",
+          "path": "validator/neg/010_non_power_of_2_queue_capacity/",
+          "description": "In-source `queue { capacity = 30 }` is not a power of two — FSM-E0412 hard error. The C99 ring buffer indexes with `& (capacity - 1)` (Doc 11 §12), so a non-2^N capacity would silently corrupt the modulo; rejected loudly (the F-2 class-of-issues completion, sibling of the F-1 E0411 silent-misconfig fix; exact-set).",
+          "normative": true,
+          "expectedCodes": [
+            "FSM-E0412"
+          ],
+          "tags": [
+            "g7-code-lock",
+            "queue"
+          ]
         }
       ]
     },

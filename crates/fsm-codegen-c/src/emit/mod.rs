@@ -38,6 +38,11 @@ pub mod transition;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EmittedFiles {
     pub files: Vec<EmittedFile>,
+    /// F-2 (F-1 doctrine: never a SILENT override). Non-fatal build notes
+    /// the CLI must surface — currently the "an integrator `--queue-size` /
+    /// `fsm.toml` shadowed an explicit in-source `queue {}`" disclosure.
+    /// Empty on the common path → no behaviour/output change when unused.
+    pub notes: Vec<String>,
 }
 
 impl EmittedFiles {
@@ -78,7 +83,7 @@ pub enum EmitError {
         "fsm-codegen-c: queue capacity {0} is not a power of two; \
          the C99 runtime uses bitwise-AND modulo and requires 2^N values"
     )]
-    QueueCapacityNotPowerOfTwo(u8),
+    QueueCapacityNotPowerOfTwo(u32),
     #[error(
         "fsm-codegen-c: state index overflowed u8 — codegen does not support > 255 states. \
          Split the machine, raise the index type, or audit the IR for accidental state duplication."
@@ -97,9 +102,19 @@ pub enum EmitError {
 
 /// Run the full emit pipeline for an IR document.
 pub fn emit(ir: &Ir, config: &CodegenConfig) -> Result<EmittedFiles, EmitError> {
-    // Pre-flight: queue capacity must be a power of two (Doc 11 §6 / §12).
-    if !is_power_of_two(config.queue_capacity) {
-        return Err(EmitError::QueueCapacityNotPowerOfTwo(config.queue_capacity));
+    // Pre-flight: the *fallback* queue capacity must be a power of two
+    // (Doc 11 §6 / §12). F-2: this only validates the bottom-tier default;
+    // the EFFECTIVE per-machine capacity (in-source `queue {}` may differ)
+    // is the ring-mask invariant that actually matters and is re-checked
+    // per machine in `emit_machine_recursive` after `resolve_queue`. The
+    // analyzer (FSM-E0412) is the authoritative user-facing gate for a
+    // non-power-of-2 in-source `capacity = N`; this is belt-and-braces so
+    // a regression there becomes a clean exit-2, not broken C (P1-8
+    // defense-in-depth pattern).
+    if !is_power_of_two(config.queue_capacity as u32) {
+        return Err(EmitError::QueueCapacityNotPowerOfTwo(
+            config.queue_capacity as u32,
+        ));
     }
 
     // v1.1 (2026-05-15): `defer EVENT` is a real UML 2.5.1 §14.2.3.9.1
@@ -111,6 +126,7 @@ pub fn emit(ir: &Ir, config: &CodegenConfig) -> Result<EmittedFiles, EmitError> 
     // `emit::defer` + `dispatch_switch` / `dispatch_table`).
 
     let mut files = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
     // Single HAL header shared by every emitted machine (Doc 16).
     files.push(hal::emit_hal_header(config));
 
@@ -139,10 +155,10 @@ pub fn emit(ir: &Ir, config: &CodegenConfig) -> Result<EmittedFiles, EmitError> 
         // one logical machine would be surprising). `Auto` is still resolved
         // per emitted unit against that unit's own state count below.
         let effective = config.strategy_for(&machine.name);
-        emit_machine_recursive(machine, config, effective, &mut files)?;
+        emit_machine_recursive(machine, config, effective, &mut files, &mut notes)?;
     }
 
-    Ok(EmittedFiles { files })
+    Ok(EmittedFiles { files, notes })
 }
 
 /// Emit one machine unit plus, depth-first, every submachine template it
@@ -161,6 +177,7 @@ fn emit_machine_recursive(
     config: &CodegenConfig,
     effective: crate::config::DispatchStrategy,
     files: &mut Vec<EmittedFile>,
+    notes: &mut Vec<String>,
 ) -> Result<(), EmitError> {
     if machine.root.states.is_empty() {
         return Err(EmitError::EmptyMachine(machine.name.clone()));
@@ -171,7 +188,7 @@ fn emit_machine_recursive(
     // their full struct definition. They inherit the parent's `effective`
     // strategy (W7) — same logical machine, same dispatch family.
     for sub in &machine.submachines {
-        emit_machine_recursive(sub, config, effective, files)?;
+        emit_machine_recursive(sub, config, effective, files, notes)?;
     }
 
     let index = crate::state_index::build_state_index(machine)?;
@@ -186,6 +203,44 @@ fn emit_machine_recursive(
     let layout = crate::region_layout::build_region_layout(machine, &index);
     let resolved_strategy = effective.resolve(index.count());
 
+    // F-2: resolve the EFFECTIVE queue config for THIS machine (in-source
+    // `queue {}` > integrator `--queue-size`/`fsm.toml` override > default).
+    // `resolve_queue` is the single precedence point; the optional note is
+    // the F-1-doctrine disclosure that an integrator override shadowed an
+    // explicit in-source block (never a SILENT override).
+    let (queue_capacity, queue_overflow, queue_note) = config.resolve_queue(&machine.queue);
+    if let Some(n) = queue_note {
+        let mut parts = Vec::new();
+        if n.capacity_overridden {
+            parts.push(format!(
+                "capacity {} (in-source) overridden to {} by --queue-size / fsm.toml",
+                n.in_source_capacity, n.effective_capacity
+            ));
+        }
+        if n.overflow_overridden {
+            parts.push(format!(
+                "overflow {:?} (in-source) overridden to {:?} by --queue-overflow / fsm.toml",
+                n.in_source_overflow, n.effective_overflow
+            ));
+        }
+        notes.push(format!(
+            "machine `{}`: an integrator override shadowed its in-source `queue {{}}` \
+             block — {}. The generated firmware uses the override; the in-source value \
+             is NOT in effect (this disclosure exists so the override is never silent).",
+            machine.name,
+            parts.join("; ")
+        ));
+    }
+    // The ring buffer indexes with `& (CAP-1)` (emit::queue) — the EFFECTIVE
+    // capacity (which may be the in-source `queue { capacity = N }`, not the
+    // fallback) MUST be a power of two. The analyzer (FSM-E0412) is the
+    // authoritative user-facing reject for an in-source non-2^N; this is the
+    // belt-and-braces guard so a slip there is a clean exit-2, not a
+    // corrupt-modulo miscompile (P1-8 defense-in-depth).
+    if !is_power_of_two(queue_capacity) {
+        return Err(EmitError::QueueCapacityNotPowerOfTwo(queue_capacity));
+    }
+
     let ctx = MachineEmitCtx {
         machine,
         index: &index,
@@ -193,6 +248,8 @@ fn emit_machine_recursive(
         layout: &layout,
         config,
         strategy: resolved_strategy,
+        queue_capacity,
+        queue_overflow,
     };
 
     files.push(conf_header::emit(&ctx));
@@ -291,6 +348,15 @@ pub struct MachineEmitCtx<'a> {
     pub layout: &'a crate::region_layout::RegionLayout,
     pub config: &'a CodegenConfig,
     pub strategy: crate::config::DispatchStrategy,
+    /// F-2: the effective queue capacity for THIS machine, already resolved
+    /// through [`CodegenConfig::resolve_queue`] (in-source `queue {}` >
+    /// integrator override > default). Emitters MUST read this, never
+    /// `config.queue_capacity` directly — the latter is only the bottom-tier
+    /// fallback and ignoring the IR `queue {}` is precisely the F-2 defect.
+    pub queue_capacity: u32,
+    /// F-2: the effective overflow policy for THIS machine (same resolution
+    /// as [`MachineEmitCtx::queue_capacity`]).
+    pub queue_overflow: crate::config::OverflowPolicy,
 }
 
 impl<'a> MachineEmitCtx<'a> {
@@ -337,7 +403,7 @@ impl<'a> MachineEmitCtx<'a> {
     }
 }
 
-fn is_power_of_two(n: u8) -> bool {
+fn is_power_of_two(n: u32) -> bool {
     n != 0 && (n & (n - 1)) == 0
 }
 

@@ -24,6 +24,7 @@ pub mod history;
 pub mod import;
 pub mod name_resolution;
 pub mod parallel;
+pub mod queue;
 pub mod submachine;
 pub mod timer;
 pub mod type_check;
@@ -35,6 +36,7 @@ pub fn run_all(file: &File, st: &SymbolTable, out: &mut Vec<Diagnostic>) {
     name_resolution::check(file, st, out);
     history::check(file, st, out);
     timer::check(file, st, out);
+    queue::check(file, st, out);
     parallel::check(file, st, out);
     submachine::check(file, st, out);
     defer::check(file, st, out);
