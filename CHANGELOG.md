@@ -7,6 +7,209 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [debug-interface] — 2026-05-19
+
+> **A quality milestone, NOT a `vX.Y.0` release.** The interactive
+> debug-interface epic (Phase-8.0) is tagged
+> `checkpoint/2026-05-19-debug-interface` (the proven `checkpoint/<name>`
+> immutable-anchor pattern — LOCAL, no push; G9 the owner's switch). It is
+> deliberately **not** a `vX.Y.0` tag: the owner's roadmap reserves
+> **v1.6.0 for the landing-page + doc-honesty pass (post-factory)**; this
+> minor lands as its **own post-v1.6 minor** (D-3/OWNER-1 — naming it
+> `v1.6.0` would unilaterally consume the owner-reserved minor; the
+> factory-epic `checkpoint/<name>`-not-`v1.6.0` precedent, Doc 00 §11.80).
+> The §11.30/factory-GT-12 cold-quad rigor applies to this checkpoint tag
+> identically to a release tag.
+
+**Theme: the interactive debug interface — an in-editor live
+simulation/debug surface that is JUST ANOTHER FRONTEND of the one shipped
+`fsm_simulator` oracle, never a second semantics.**
+
+> **Scope (Doc 33, owner-decided D-1/D-2/D-3).** With the pipeline
+> FACTORY-COMPLETE (v1.4), the UI/DX convenience layer shipped (v1.5), and
+> the factory-reliability/CI proof layer landed, this epic surfaces the
+> shipped simulator in VS Code via the proven v1.5 W-A2
+> `LspService::build().custom_method` LSP seam (the KEYSTONE-IN-DEBUG
+> binding tag-gate row — independently re-derived from source by the W4b
+> phase-audit, verdict `KEYSTONE-INTACT`; **no** forked semantics anywhere
+> in the W1 `fsm/simulate*` LSP transport or the `editors/vscode/src/debug/**`
+> webview; the shipped `fsm_simulator::execute_trace` oracle + the
+> `cmd/test.rs` seam + `write_trace_yaml` byte-untouched across the whole
+> epic arc save the single sanctioned non-stepping helper). **NO standalone
+> WS daemon, NO new port/socket, NO new network attack surface** (the
+> attack surface removed by construction — owner D-2). The single
+> keystone-violable surface is concentrated into **one gated wave (W1)**;
+> W2–W4 hold the no-fork invariant *trivially* (they render the oracle's
+> output and compute nothing). The Phase-8.0 **Rust** delta vs the factory
+> checkpoint is **moderate and additive by design**
+> (`git diff --shortstat fbae38b..8092d3a -- crates/` = 28 files / +3260 /
+> −214 — independently re-derived at the gate-doc commit, stated as exactly
+> that delta, **neither under-stated** [the v1.3 cardinal "zero Rust delta"
+> error] **nor over-stated**) with **0 new external dependencies** (the
+> single `Cargo.lock` edge is the *internal* `fsm-lsp`→`fsm-simulator`
+> path-dep edge; `fsm-simulator` is already a workspace member); the
+> differential oracle (`crates/fsm-simulator/src` + `cmd/test.rs`) is
+> byte-untouched save the one sanctioned additive non-stepping
+> `Interpreter::set_context_field` helper.
+
+### Added
+
+- **The `fsm/simulate*` LSP request layer + the `set_context_field` helper
+  (W1 — the SINGLE keystone-violable Rust/LSP wave):** a new `fsm/simulate`
+  LSP custom request (`crates/fsm-lsp/src/capabilities/simulate.rs` +693) —
+  a **pure transport frontend** of `fsm_simulator::Interpreter`: every `op`
+  (`init` / `dispatch`(+payload) / `advanceClock` / `setContext` /
+  `snapshot` / `restore` / `capture`) is **exactly one shipped `Interpreter`
+  call** (or one `write_trace_yaml` for `capture`) + serde marshalling,
+  computing **zero** simulator facts locally; ridden over the **existing**
+  v1.5 W-A2 `LspService::build().custom_method` stdio seam (no new
+  daemon/port/socket). The single Rust-layer enabling change is **one**
+  `fsm-simulator = { path = "../fsm-simulator" }` *internal path-dep edge*
+  on `crates/fsm-lsp/Cargo.toml` (+ a 1-line `Cargo.lock` dep-list entry) —
+  **no new crate, 0 new external `[[package]]`**. The **single sanctioned
+  `crates/` behaviour delta of the entire epic** is one additive
+  non-stepping `Interpreter::set_context_field` helper
+  (`crates/fsm-simulator/src/interpreter.rs` +25 — a 3-line guarded
+  `rt.context.insert` with a `NotInitialized` guard, the same nature as
+  `InitOptions::initial_context`, `Result<(), StepError>` so **no
+  `StepRecord` by construction**; it runs **no** transition/guard/step — it
+  does **not** implement semantics). Acceptance: the in-process tower-lsp
+  differential-oracle suite (`crates/fsm-lsp/tests/simulate_lsp_acceptance.rs`
+  +945 — the `StepRecord` stream byte-equals `fsm test`'s `execute_trace` +
+  the `set_context_field`-emits-zero-StepRecord contract + the
+  no-fake-clean-end bar; 7 tests, re-run `7/0` by both audits + this
+  closeout).
+- **The VS Code debug WebviewPanel (W2 — overlay/inject/inspector/timeline,
+  NO semantics):** the v1.3 statechart **reused VERBATIM** (`renderModel`
+  imported, not reimplemented — no second renderer) + active-config overlay
+  + transport rail + Inject panel (a typed-payload form revealed adjacent to
+  the picker — the proximity principle) + advance-clock + context inspector
+  with the Δ column + the `StepRecord` timeline; all driven through W1's
+  `fsm/simulate` over the **existing** v1.5 W-A2 `LanguageClient` boundary;
+  the v1.3 empty/honest states inherited (stale-banner reused VERBATIM,
+  transport disabled-with-inline-reason, never blanks/fakes). The one
+  v1.3-source change (`diagramWebview.ts`) is a **disclosed
+  behaviour-preserving** refactor (additive named exports + a
+  `getVsCodeApi()` singleton + an `#svg && #banner` standalone-guard) — the
+  v1.3 *bundled output* `dist/webview/diagramWebview.js` is byte-untouched
+  (esbuild per-entrypoint); `diagram.test.ts` is the pre/post-identity bar.
+- **Breakpoints + time-travel (W3 — the StepRecord-predicate +
+  snapshot/restore client logic, NO semantics):** breakpoint glyphs on
+  diagram nodes/edges (click-to-set) + the client-side **StepRecord-predicate**
+  evaluator `evaluateBreakpoint` (a pure filter over the three
+  oracle-emitted `StepRecord` fields — `enteredStates` / `exitedStates` /
+  `transitionTaken?.stableId` — **NEVER** a guard/transition re-evaluation)
+  + auto-pause-at-breakpoint via restore-the-pre-step-snapshot + the
+  timeline as the time-travel surface (`◀ rewind to #N` as a proximity row
+  action) + the UI-paced single-step reveal over W1's `Vec<StepRecord>`.
+  Time-travel is `Interpreter::snapshot`/`restore` only (no client-side
+  state reconstruction).
+- **Capture → `.trace.json` round-trip (W4a — recorded-from-the-oracle,
+  byte-identical by construction):** the `TraceCommand`s the author injected
+  + the W1 oracle's actual `Vec<StepRecord>` → the shipped `write_trace_yaml`
+  (whose content is JSON despite the historical name) → a `.trace.json`
+  fixture; `fsm test` later re-runs it via the SAME `execute_trace` ⇒
+  byte-identical by construction (this *inverts* the "guessed expected"
+  trap — the test is recorded-from-the-oracle). The `capture` op is **one
+  `write_trace_yaml` call + serde, zero `Interpreter`/semantics**; "captured
+  ✓" is posted **only after** the file exists on disk (the
+  no-premature-success bar); the op **rejects empty `expected`** at the
+  source ("`fsm test` would report nothing-to-verify — not a pass"). The
+  `.trace.json`-not-`.trace.yaml` self-correction is **real and
+  load-bearing** — `fsm test`'s `collect_traces` (`cmd/test.rs:159`) globs
+  `.trace`/`.trace.json`; a `.trace.yaml` would be **silently skipped → a
+  vacuous pass** (the W4b audit independently hand-confirmed the §W4 replay
+  reports a real `pass`, not `skip`).
+
+### Fixed
+
+- **The #128 F-1 const-resolver silent-miscompile (a #110-class
+  divergent-second-resolver bug):** the lowerer's `eval_i64` omitted
+  `EXPR_NAME_REF` while the analyzer check resolved it ⇒ `after CONST ms`
+  passed `fsm check` but the lowerer **silently dropped the timer**. Unified
+  into ONE shared `util::eval_const_expr_value` + `util::file_const_table`
+  consumed by **both** lowerer and check (lower ≡ check by construction —
+  the keystone-pattern applied to const-folding); the divergent copies
+  deleted; a hard rejecting `FSM-E0411` ("timer duration must be a
+  compile-time constant; runtime-variable is post-v1.0") replaces the
+  silent drop (never silent).
+- **The #128 F-2 queue-config silent-misconfig (a #110-class divergence):**
+  `lower_queue` matched the KEY `Ident` not the RHS (capacity silently
+  defaulted) + codegen read the CLI default not the IR queue ⇒ codegen ↔
+  sim **silently diverged**. Fixed via a typed `ConfigEntry::value()`
+  (single source of truth shared with the analyzer check — the F-1
+  principle) + `CodegenConfig::resolve_queue` (explicit per-field
+  precedence: integrator-override > in-source `queue {}` > default; a
+  `note:` on shadow, never silent); a hard rejecting `FSM-E0412` for a
+  non-power-of-2 in-source capacity (the class-of-issues coverage). The
+  silent-misconfig class is closed **end-to-end** (the gcc-compile-and-RUN
+  acceptance: analyzer 7/7 + codegen-c 4/4, both Switch & Table strategies).
+- **The `defer` doc-drift fold:** the stale "v1.0 limitation … rejected by
+  `FSM-E0903`" §9.4 paragraph in `docs/04-DSL-Specification.md` replaced
+  with honest v1.1-shipped status (the analyzer lowers / sim replays /
+  codegen emits) — a genuine doc-honesty correction.
+
+### Known limitations
+
+- **Carried owner-escalations (re-stated, not resolved):** **OWNER-1** the
+  release-numbering call (the `checkpoint/`-not-`vX.Y.0` parked default;
+  does not consume the owner-reserved v1.6 — D-3); **OWNER-2 / G9** the push
+  of the LOCAL `v1.0.0`–`v1.5.0` tags + **all** `checkpoint/*` anchors
+  (incl. `checkpoint/factory-reliability-ci-2026-05-18` + this epic's
+  `checkpoint/2026-05-19-debug-interface`) + commits + the CI matrix / SCA /
+  the 4 factory lanes / the new debug-epic ExtHost tests **never run on a
+  remote runner** (the JS lane is a binding *local* gate + the load-bearing
+  byte-identity proof was empirically re-run at the LSP/CLI layer, but
+  remote-unrun — G9 stays load-bearing); **OWNER-3** the deferred full
+  `signal`-primitive epic (D-1 decided the *shape*; D-3 sequenced it after
+  this epic + the owner-reserved v1.6 — its own gated Doc-34-class epic);
+  **Marketplace publish** (publish-*ready* via v1.5 B1, still
+  owner-published — Phase-8.0 added only the `fsm.openDebug` manifest
+  contributions, no extension runtime dep); the top-level
+  **`LICENSE`/`CONTRIBUTING`/`CoC`** gap (owner/legal, carried to v1.6 with
+  D1); the parked **Certifiability / MISRA–CERT-C codegen-mode** arc
+  (OWNER-3 — owner GO required; the factory epic un-parked only the
+  *testing* half); the **v1.6 D1 landing + the doc-honesty pass that must
+  precede/accompany it** (recorded, *not* scoped into this epic —
+  "publish-ready" = the factory-reliability proof + this debug interface +
+  the v1.6 D1 landing all land); the **5-platform binary tail**
+  (blocked-on-G9, **not** a ci.yml lane); the mechanised
+  **sim≡codegen-equivalence formal proof** (R7 — the named v1.4-stretch/later
+  deferral, unchanged); **task #17** CI-matrix owner-blocked.
+- **Carried Zero-Legacy findings (Doc 33 §5 / OWNER-4 — re-stated, not
+  fixed; NOT debug-interface items):** **CF-1** the AVR Harvard `.rodata` +
+  TABLE-dispatch UNTESTED CORRECTNESS HAZARD (a CI-runner-only `avr-gcc`
+  on-target-matrix candidate for the factory-reliability epic — a
+  *codegen-correctness* item, not auto-scoped here); **CF-2** the Doc 16
+  §2–§6 HAL-symbol staleness (folds into the owner-reserved v1.6
+  doc-honesty pass, cross-ref task #103 — the emitted symbols are the
+  correct shipped contract, the doc drifted).
+- **Accepted-tracked-debt (from the W4c pre-tag four-lens, `TAG-CLEAR`):**
+  the 3 pre-existing **devDependency-only** transitive npm vulns
+  (`{esbuild, serialize-javascript, mocha}` — 1 moderate / 2 high; NOT in
+  the shipped extension runtime, not exploitable in our build/CI usage, no
+  non-breaking fix; **byte-identical to the factory-tag baseline** — the
+  epic introduced **zero** of them, `package.json` is
+  manifest-contributions-only + `package-lock.json` is not in the delta) —
+  each `accept-with-written-rationale`, tracked for the v1.6 FE-hygiene
+  batch (DF-03); the `.contains` codegen-c conformance oracle (the
+  #123-class deferred tail, owned by the G7 wave — the W1/W2 differential +
+  the W3 lock the binding behavioural gate in the interim — DF-04); the
+  "v1.3 core untouched" framing precisely stated (the v1.3 *bundled output*
+  byte-untouched; the v1.3 *source* a disclosed behaviour-preserving
+  refactor — DF-01, folded into the gate doc prose); the DBGUX
+  `.trace.yaml`-prose precision deferred to the v1.6 doc-honesty pass (the
+  implementation is correct + disclosed in-code — DF-02); the F-1
+  adjacent-site `resolve_simple_literal` (an informational non-defect, no
+  action — DF-05).
+- **G7 / G9** are the same explicitly-tracked posture accepted at
+  v1.0–v1.5/factory (G7 *improved* this epic: the F-1/F-2 fixes add 2 codes
+  + 2 conformance fixtures — `EXPECTED` 73→75, conformance 53→55, the lock
+  GREEN + non-vacuous; G9's factory lanes + the new debug ExtHost tests are
+  *ready* + locally provable, still remote-unrun). Neither is a regression.
+
+See `docs/GATE_VERIFICATION_DEBUG_INTERFACE_2026_05_19.md` for the full milestone gate, the KEYSTONE-IN-DEBUG evidence (the frozen W4b `KEYSTONE-INTACT` + W4c `TAG-CLEAR` audits), the cold-quad + binding-JS-lane posture, the re-derived pinned gate numbers (live `DiagnosticCode`=75, `forbid(unsafe_code)`=12 roots/11 crates, conformance=55, the differential CORPUS 11+3+0=14, the 28 files/+3260/−214 Rust delta), and the carried owner-escalations.
+
 ## [factory-reliability-ci] — 2026-05-18
 
 > **A quality milestone, NOT a `vX.Y.0` release.** The Factory-Reliability/CI
