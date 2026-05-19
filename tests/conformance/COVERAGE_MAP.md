@@ -19,7 +19,7 @@ pointer (genuinely not isolatable as a conformance fixture: verify-only,
 lexer-recovery-coupled, co-emitted-by-design, or catalog-only). There is NO
 hand-maintained Tested/UNTESTED split — the old drift surface (GT-9) is gone.
 
-The live enum is **74** codes (the `all_codes_matches_expected_count` lock in
+The live enum is **75** codes (the `all_codes_matches_expected_count` lock in
 `fsm-diagnostics`). It was 75 in v1.0.0; `FSM-E0903` was retired in v1.1 and
 `FSM-W0500` in v1.2-FU-DEAD-CODES (each −1). Retired codes are not live
 variants and are not rows here.
@@ -28,9 +28,9 @@ variants and are not rows here.
 
 | Status | Count |
 | --- | --- |
-| Exact-set conformance fixture | 38 |
+| Exact-set conformance fixture | 39 |
 | Non-fixture (allowlisted, with test pointer) | 36 |
-| **Total live codes** | **74** |
+| **Total live codes** | **75** |
 
 ## Per-code map
 
@@ -81,6 +81,7 @@ variants and are not rows here.
 | FSM-E0401 | Error | exact-set fixture | `tests/conformance/MANIFEST.json` fixture `SEM-NEG-017` triggers exactly `FSM-E0401` |
 | FSM-E0410 | Error | exact-set fixture | `tests/conformance/MANIFEST.json` fixture `VAL-NEG-002` triggers exactly `FSM-E0410` |
 | FSM-E0411 | Error | exact-set fixture | `tests/conformance/MANIFEST.json` fixture `VAL-NEG-009` triggers exactly `FSM-E0411` |
+| FSM-E0412 | Error | exact-set fixture | `tests/conformance/MANIFEST.json` fixture `VAL-NEG-010` triggers exactly `FSM-E0412` |
 | FSM-E0500 | Error | exact-set fixture | `tests/conformance/MANIFEST.json` fixture `SEM-NEG-018` triggers exactly `FSM-E0500` |
 | FSM-E0501 | Error | exact-set fixture | `tests/conformance/MANIFEST.json` fixture `SEM-NEG-019` triggers exactly `FSM-E0501` |
 | FSM-E0502 | Error | exact-set fixture | `tests/conformance/MANIFEST.json` fixture `SEM-NEG-020` triggers exactly `FSM-E0502` |

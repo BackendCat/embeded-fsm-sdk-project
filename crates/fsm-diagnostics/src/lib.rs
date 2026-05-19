@@ -329,6 +329,16 @@ macro_rules! for_each_code {
             // class). Rejected loudly now, mirroring the `defer`→`FSM-E0903`
             // deferred-construct precedent (Doc 02 §5.3 / §9.4).
             E0411 => (Error,   "FSM-E0411", "timer duration must be a compile-time constant (runtime-variable durations are post-v1.0)"),
+            // F-2 (audit AUDIT_DETERMINISTIC_PRIMITIVE_COMPLETENESS_2026_05_18,
+            // the #110/F-1 silent-misconfig class — sibling of E0411): an
+            // in-source `queue { capacity = N }` whose N is not a power of
+            // two. The C99 ring buffer indexes with `& (CAP-1)` (Doc 11
+            // §12), so a non-2^N capacity would silently corrupt the modulo.
+            // Pre-F-2 the lowerer also silently dropped the whole in-source
+            // value (the F-2 root defect). Rejected loudly now — never
+            // silently rounded — mirroring the timer / `defer`→FSM-E0903
+            // deferred/invalid-config precedent (Doc 02 §5.3 / §9.4).
+            E0412 => (Error,   "FSM-E0412", "queue capacity must be a power of two (the C99 ring buffer uses bitwise-AND modulo)"),
 
             // §9 — Submachine Errors (FSM-E0500 – FSM-E0599)
             E0500 => (Error,   "FSM-E0500", "submachine entry point not declared"),
@@ -831,8 +841,14 @@ mod tests {
         // and the total 73→74. This is the live-enum SoT the G7
         // conformance-coverage lock derives from; its exact-set fixture is
         // `VAL-NEG-009` (`validator/neg/009_runtime_variable_timer/`).
+        // FW-F2 (2026-05-19): E0412 ADDED (queue capacity must be a power
+        // of two — the C99 ring uses `& (capacity-1)`; the F-2 class-of-
+        // issues completion, sibling of the F-1 E0411 silent-misconfig
+        // fix), raising the Error count 52→53 and the total 74→75. Its
+        // exact-set fixture is `VAL-NEG-010`
+        // (`validator/neg/010_non_power_of_2_queue_capacity/`).
         // If a new code is added, update this constant in lockstep.
-        const EXPECTED: usize = 74;
+        const EXPECTED: usize = 75;
         let table = DiagnosticCode::all_codes();
         assert_eq!(
             table.len(),

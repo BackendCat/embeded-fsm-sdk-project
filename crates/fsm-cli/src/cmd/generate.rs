@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fsm_analyzer::analyze_with_source;
-use fsm_codegen_c::{compute_budget, emit, CodegenConfig, DispatchStrategy};
+use fsm_codegen_c::{compute_budget, emit, CodegenConfig, DispatchStrategy, OverflowPolicy};
 use fsm_parser::import_resolver::{resolve_import, ImportError};
 use fsm_parser::parse;
 
@@ -170,6 +170,14 @@ pub(crate) fn run(args: GenerateArgs) -> ExitCode {
                 return ExitCode::from(2);
             }
         };
+
+        // F-2 (F-1 doctrine: an integrator override of an explicit in-source
+        // `queue {}` is ALLOWED, but NEVER silent). `resolve_queue` returns a
+        // note iff `--queue-size` / `fsm.toml` shadowed a declared block;
+        // surface it so the override is disclosed, not silently miscompiled.
+        for note in &emitted.notes {
+            eprintln!("note: {}", note);
+        }
 
         for f in &emitted.files {
             let dest = args.out.join(&f.path);
@@ -571,6 +579,25 @@ fn parse_strategy(value: &str, where_: &str) -> Result<DispatchStrategy, String>
     }
 }
 
+/// Parse a `--queue-overflow` / `fsm.toml [generate] queue_overflow` value
+/// to codegen's 2-path policy. The DSL/analyzer carry four variants
+/// (`assert`/`drop_oldest`/`drop_newest`/`error`); the C99 runtime ships
+/// only assert-or-drop (Doc 11 §6, `OverflowPolicy::from_ir`), so an
+/// integrator override collapses the same way. An invalid value is a clean
+/// exit-4 config error naming the offending source, never a silent fallback
+/// (zero-legacy, mirroring `parse_strategy`).
+fn parse_overflow(value: &str, where_: &str) -> Result<OverflowPolicy, String> {
+    match value {
+        "assert" | "error" => Ok(OverflowPolicy::Assert),
+        "drop_oldest" | "drop-oldest" | "drop_newest" | "drop-newest" => Ok(OverflowPolicy::Drop),
+        other => Err(format!(
+            "unknown queue overflow policy `{}` in {} — expected one of: \
+             assert, drop_oldest, drop_newest, error",
+            other, where_
+        )),
+    }
+}
+
 /// Merge TOML + CLI into a final [`CodegenConfig`]. CLI flags ALWAYS win;
 /// TOML supplies fallbacks; the codegen default supplies fallbacks for
 /// keys neither source mentions (Doc 18 §6.1 last-writer-wins).
@@ -612,11 +639,30 @@ fn build_codegen_config(
         }
     }
 
-    // Queue capacity.
+    // Queue config (F-2). `--queue-size` / `fsm.toml [generate] queue_size`
+    // (and the overflow analogues) are integrator OVERRIDES, not the
+    // codegen default: when set, they populate `queue_*_override` (Some),
+    // and `CodegenConfig::resolve_queue` shadows an in-source `queue {}`
+    // with a disclosing `note:` (F-1 doctrine — never silent). When unset
+    // (None), the machine's in-source `queue {}` flows through unchanged;
+    // absent both, the codegen default (8 / Assert) stays. CLI wins over
+    // TOML, same last-writer-wins precedence as every other knob here.
     let toml_qs = toml_cfg.and_then(|c| c.generate.queue_size);
-    if let Some(q) = args.queue_size.or(toml_qs) {
-        cfg.queue_capacity = q;
-    }
+    cfg.queue_capacity_override = args.queue_size.or(toml_qs);
+
+    let cli_ovf = args.queue_overflow.as_deref();
+    let toml_ovf = toml_cfg.and_then(|c| c.generate.queue_overflow.as_deref());
+    cfg.queue_overflow_override = match cli_ovf.or(toml_ovf) {
+        Some(s) => {
+            let where_ = if cli_ovf.is_some() {
+                "--queue-overflow"
+            } else {
+                "[generate] queue_overflow"
+            };
+            Some(parse_overflow(s, where_)?)
+        }
+        None => None,
+    };
 
     // License: CLI first, TOML fallback, default MIT (Doc 00 §10.4).
     let toml_license = toml_cfg.and_then(|c| c.generate.license.as_deref());
@@ -640,6 +686,7 @@ mod tests {
             out: PathBuf::from("/tmp"),
             strategy: "auto".into(),
             queue_size: None,
+            queue_overflow: None,
             license: "MIT".into(),
             report_memory: false,
             emit_ir: false,
@@ -660,6 +707,7 @@ mod tests {
             out: PathBuf::from("/tmp"),
             strategy: "auto".into(),
             queue_size: None,
+            queue_overflow: None,
             license: "BSD-2-Clause".into(),
             report_memory: false,
             emit_ir: false,
@@ -679,6 +727,7 @@ mod tests {
             out: PathBuf::from("/tmp"),
             strategy: "auto".into(),
             queue_size: None,
+            queue_overflow: None,
             license: "MIT".into(), // default — TOML should win
             report_memory: false,
             emit_ir: false,
@@ -695,6 +744,7 @@ mod tests {
             out: PathBuf::from("/tmp"),
             strategy: s.into(),
             queue_size: None,
+            queue_overflow: None,
             license: "MIT".into(),
             report_memory: false,
             emit_ir: false,

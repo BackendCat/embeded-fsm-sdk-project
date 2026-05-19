@@ -1,0 +1,22 @@
+language fsm 2.0
+
+machine M {
+    events {
+        E
+    }
+
+    queue {
+        capacity = 30
+        overflow = assert
+    }
+
+    initial A
+
+    state A {
+        on E -> B
+    }
+
+    state B {
+        on E -> A
+    }
+}

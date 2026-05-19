@@ -1,0 +1,12 @@
+{
+  "machineFile": "queue-overflow.fsm",
+  "description": "F-2 sim≡codegen: an EXPLICIT non-default in-source `queue { capacity = 32; overflow = drop_newest }` drives BOTH backends off the SAME lowered IR QueueConfig (simulator: machine.queue; generated C: resolve_queue with the differential harness's CodegenConfig::default(), i.e. NO integrator override). A FLAT event-driven machine (the byte-equal `motor` shape — no completion / no timer record-model residual). OPEN (Closed->Open, ctx.passes=1), LOCK (Open->Locked), OPEN (Locked->Open, ctx.passes=2), CLOSE (Open->Closed). Pre-F-2 the lowerer dropped this in-source queue{} (the `capacity` key-token bug) AND codegen ignored the IR queue (emitted the 8/Assert default), while the simulator honored the IR queue — so the explicit block was load-bearing-divergent. Only post-F-2 (both read this SAME IR QueueConfig) is the projection byte-identical. `expected` empty — the harness drives the LIVE shipped simulator oracle.",
+  "init": { "machineName": "Gate" },
+  "steps": [
+    { "action": "dispatch", "event": "OPEN" },
+    { "action": "dispatch", "event": "LOCK" },
+    { "action": "dispatch", "event": "OPEN" },
+    { "action": "dispatch", "event": "CLOSE" }
+  ],
+  "expected": []
+}

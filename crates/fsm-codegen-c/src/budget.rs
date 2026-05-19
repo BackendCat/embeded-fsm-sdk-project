@@ -66,7 +66,12 @@ pub fn compute_machine_budget(
     let index = build_state_index(machine)?;
 
     let sizeof_event = sizeof_event(machine);
-    let queue_bytes = (config.queue_capacity as usize) * sizeof_event;
+    // F-2: size the queue-bytes budget off the EFFECTIVE capacity (in-source
+    // `queue {}` > integrator override > default), not `config.queue_capacity`
+    // (the fallback tier) — otherwise the RAM budget silently mis-reports
+    // for any machine with an in-source `queue { capacity = N }`.
+    let (eff_capacity, _eff_overflow, _note) = config.resolve_queue(&machine.queue);
+    let queue_bytes = (eff_capacity as usize) * sizeof_event;
     let sizeof_context = sizeof_context(&machine.context.fields);
     let history_bytes = count_history_slots(&index); // u8 per history slot
     let timer_bytes = count_timers(machine) * 4; // uint32_t per timer

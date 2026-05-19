@@ -104,9 +104,16 @@ pub(crate) struct GenerateArgs {
     /// Dispatch strategy.
     #[arg(long, value_parser = ["switch", "table", "auto"], default_value = "auto")]
     pub(crate) strategy: String,
-    /// Event queue capacity (must be a power of two).
+    /// Event queue capacity (must be a power of two). An integrator
+    /// OVERRIDE: if set, it shadows a machine's in-source `queue {}` block
+    /// and a `note:` discloses the shadow (F-2 — never silent).
     #[arg(long)]
     pub(crate) queue_size: Option<u8>,
+    /// Event queue overflow policy. Integrator OVERRIDE with the same
+    /// shadow-disclosure semantics as `--queue-size` (F-2). Also settable
+    /// via `fsm.toml [generate] queue_overflow`.
+    #[arg(long, value_parser = ["assert", "drop_oldest", "drop_newest", "error"])]
+    pub(crate) queue_overflow: Option<String>,
     /// SPDX license identifier embedded in every emitted file (Doc 00 §10.4).
     #[arg(long, default_value = "MIT")]
     pub(crate) license: String,

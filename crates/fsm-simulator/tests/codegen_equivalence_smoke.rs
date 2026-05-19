@@ -204,6 +204,7 @@ const CORPUS: &[&str] = &[
     "stress-completion-chain",
     "stress-parallel-cross-exit",
     "timer-const-ref",
+    "queue-overflow",
 ];
 
 fn gcc_available() -> bool {
@@ -1221,6 +1222,7 @@ const BYTE_EQUAL: &[&str] = &[
     "stress-choice-guard-payload",
     "stress-every-timer",
     "timer-const-ref",
+    "queue-overflow",
 ];
 
 /// Corpus members whose byte-diff (correctly) REDs because the two engines
@@ -1479,7 +1481,15 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
     // Post-FW110-FU-E exact honest distribution (asserted dynamically below
     // — this comment is the human-readable record, the verify-the-record
     // discipline applied to the catalogue's own arithmetic):
-    //   BYTE_EQUAL                          = 10 (motor, deferred,
+    //   (FW-F2 adds `queue-overflow` to BOTH CORPUS and BYTE_EQUAL, +1
+    //    each — the first corpus member with an EXPLICIT non-default
+    //    in-source `queue {}` block. It proves the F-2 fix end-to-end: the
+    //    simulator (`machine.queue`) and the generated C (`resolve_queue`,
+    //    no integrator override) read the SAME IR `QueueConfig`, so the
+    //    `raise`-chain through the configured ring is byte-identical. A
+    //    pre-F-2 mis-resolved capacity would hard-overflow the generated
+    //    C and RED — BYTE_EQUAL not JUSTIFIED, no record-model residual.)
+    //   BYTE_EQUAL                          = 11 (motor, deferred,
     //       traffic-light, stress-parallel-cross-exit, stress-deep-history
     //       [MOVED by FW110-FU-B], stress-self-transitions [MOVED by
     //       FW110-FU-C: sibling-local LCA fixed], stress-self-transitions-
@@ -1513,10 +1523,11 @@ fn host_trace_differential_byte_equals_simulator_oracle_for_corpus() {
     //       equivalence guards — NOT gamed; a future genuine divergence
     //       MUST be re-listed here honestly.)
     //   ──────────────────────────────────────────────────────────────────
-    //   SUM                                 = 13 == CORPUS.len()
-    //   (10 + 3 + 0 = 13; dynamically enforced — the prose tracks reality.
-    //    FW-F1 added timer-const-ref to BOTH CORPUS and BYTE_EQUAL, +1 each,
-    //    so the sum stays consistent and KNOWN_DIVERGENT stays empty.)
+    //   SUM                                 = 14 == CORPUS.len()
+    //   (11 + 3 + 0 = 14; dynamically enforced — the prose tracks reality.
+    //    FW-F1 added timer-const-ref; FW-F2 added queue-overflow; each went
+    //    to BOTH CORPUS and BYTE_EQUAL (+1 each), so the sum stays
+    //    consistent and KNOWN_DIVERGENT stays empty.)
     {
         let mut all: Vec<&str> = BYTE_EQUAL
             .iter()

@@ -955,13 +955,40 @@ pub struct QueueConfig {
     pub loc: SourceLocation,
 }
 
+/// Sentinel `loc.file` stamped on a `QueueConfig` synthesized by
+/// [`QueueConfig::default`] (i.e. the machine had **no** in-source
+/// `queue {}` block). A real lowered block always carries the `.fsm`
+/// path. [`QueueConfig::is_explicit`] is the single predicate that
+/// distinguishes the two; nothing else should match this string directly
+/// (F-2: codegen precedence must know "did source declare a queue block"
+/// without an IR-schema change that would break the stable `.ir.json`).
+pub const QUEUE_CONFIG_SYNTHETIC_FILE: &str = "<default>";
+
 impl Default for QueueConfig {
     fn default() -> Self {
         Self {
             capacity: 16,
             overflow_policy: OverflowPolicy::Assert,
-            loc: SourceLocation::new("<default>", fsm_diagnostics::Span::empty(0), 0, 0),
+            loc: SourceLocation::new(
+                QUEUE_CONFIG_SYNTHETIC_FILE,
+                fsm_diagnostics::Span::empty(0),
+                0,
+                0,
+            ),
         }
+    }
+}
+
+impl QueueConfig {
+    /// `true` when this config was lowered from an in-source `queue {}`
+    /// block (Doc 04 §9), `false` when it is the synthesized
+    /// [`QueueConfig::default`]. The single source of truth for the F-2
+    /// codegen precedence decision (in-source `queue {}` is the machine's
+    /// declared config; a CLI `--queue-size` / `fsm.toml` value is an
+    /// integrator OVERRIDE that must NEVER silently shadow an explicit
+    /// block — it emits a note instead).
+    pub fn is_explicit(&self) -> bool {
+        self.loc.file != QUEUE_CONFIG_SYNTHETIC_FILE
     }
 }
 
