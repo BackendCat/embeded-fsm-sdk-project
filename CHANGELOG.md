@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Refactor
+
+- **AUDIT_2026_06_06 §2.2 P1.1** — split `crates/fsm-simulator/src/interpreter.rs`
+  (1899 LOC) into a `interpreter/` directory of 9 Doc 08-aligned submodules:
+  `mod.rs` (the public `Interpreter` struct + impl block — the API surface),
+  `step.rs` (§3/§4/§14), `transitions.rs` (§4), `path.rs` (§5/§6.1/§7.1 +
+  `MAX_STATE_DEPTH`), `run.rs` (§6.2/§7.2 + pseudo-state resolution),
+  `history.rs` (§8), `submachine.rs` (§12), `defer.rs` (§10), `timer.rs`
+  (§13). Public re-exports in `lib.rs` unchanged; behaviour byte-identical
+  (all snapshot + integration tests pass).
+- **AUDIT_2026_06_06 §2.4 P1.2** — introduced crate-private `wln!()` macro
+  in `crates/fsm-codegen-c/src/stmt.rs` to eliminate 14
+  `writeln!(buf: &mut String, …).unwrap()` sites. `fmt::Write for String`
+  is infallible; the macro encodes that invariant once at the definition
+  and preserves the defensive panic semantics.
+
+### Fix
+
+- **AUDIT_2026_06_06 §2.4 P1.3** — eliminated two real production
+  `Option::unwrap()` sites:
+    - `crates/fsm-codegen-c/src/emit/history.rs:87` — replaced the
+      `is_none()`-then-`unwrap()` pair with a `let-else` early-continue.
+    - `crates/fsm-simulator/src/eval/arith.rs:32` — replaced
+      `to_f64().unwrap()` inside a `matches!()` guard with explicit
+      `Value::F32` / `Value::F64` match arms. Side benefit: removes the
+      unreachable `else if to_f64()` fallback branch (`Value::to_i64()` is
+      saturating-Some for every numeric variant; only `String` / `Enum`
+      reach the `TypeError` path).
+
 ## [debug-interface] — 2026-05-19
 
 > **A quality milestone, NOT a `vX.Y.0` release.** The interactive
