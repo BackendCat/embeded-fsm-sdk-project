@@ -26,21 +26,22 @@ pub fn literal_to_value(lit: &Literal) -> Value {
 pub fn apply_unary(op: UnaryOp, v: Value) -> Result<Value, EvalError> {
     match op {
         UnaryOp::Not => Ok(Value::Bool(!v.as_bool())),
-        UnaryOp::Neg => {
-            if let Some(i) = v.to_i64() {
-                if matches!(v, Value::F32(_) | Value::F64(_)) {
-                    return Ok(Value::F64(-v.to_f64().unwrap()));
-                }
-                Ok(Value::I64(-i))
-            } else if let Some(f) = v.to_f64() {
-                Ok(Value::F64(-f))
-            } else {
-                Err(EvalError::TypeError(format!(
+        // AUDIT_2026_06_06 §2.4 P1.3 — explicit F32/F64 match removes
+        // `to_f64().unwrap()` and the (unreachable, given `to_i64` is
+        // saturating-Some for all numeric variants) `else if to_f64()`
+        // fallback. Behaviour identical: floats stay floats, integers
+        // stay integers, String/Enum are the only TypeError cases.
+        UnaryOp::Neg => match v {
+            Value::F32(x) => Ok(Value::F64(-(x as f64))),
+            Value::F64(x) => Ok(Value::F64(-x)),
+            other => match other.to_i64() {
+                Some(i) => Ok(Value::I64(-i)),
+                None => Err(EvalError::TypeError(format!(
                     "unary `-` on {}",
-                    v.type_name()
-                )))
-            }
-        }
+                    other.type_name()
+                ))),
+            },
+        },
         UnaryOp::BitNot => {
             let i = v
                 .to_i64()

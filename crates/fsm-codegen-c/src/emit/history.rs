@@ -81,10 +81,10 @@ pub fn emit_history_helpers(ctx: &MachineEmitCtx<'_>) -> String {
     let macro_prefix = ctx.macro_prefix();
     let mut s = String::new();
     for rec in &ctx.index.records {
-        if rec.history_pseudo.is_none() {
+        // AUDIT_2026_06_06 §2.4 P1.3 — let-else replaces is_none()+unwrap()
+        let Some(hp_idx) = rec.history_pseudo else {
             continue;
-        }
-        let hp_idx = rec.history_pseudo.unwrap();
+        };
         let hp_rec = ctx.index.get(hp_idx);
 
         // ── record ──────────────────────────────────────────────────────
