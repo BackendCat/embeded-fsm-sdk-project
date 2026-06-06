@@ -13,14 +13,35 @@
 //! 4. Entry set — root first from (but not including) the LCA down to
 //!    the target. If the target is a composite or parallel, the entry
 //!    set is extended with the initial-chain expansion of the substates.
+//!
+//! AUDIT_2026_06_06 §6 P2.2 — split from a single 1054-LOC `transition.rs`
+//! into:
+//!   - `mod.rs`       — the public `emit_transition_body` and
+//!                      `emit_initial_expansion_for_target`
+//!   - `find.rs`      — IR-tree lookups (initial target, composite, parallel)
+//!   - `parallel.rs`  — sibling-region exit + FW109 record-set helpers
+//!   - `composite.rs` — composite active-descendant exit-set walk
+//!   - `enter.rs`     — initial-chain entry emission + initial-chain resolver
 
-use fsm_ir::{BranchHint, StateNode, TransitionKind, TransitionObject};
+use fsm_ir::{BranchHint, TransitionKind, TransitionObject};
 
 use crate::expr::emit_guard;
 use crate::state_index::StateRecordKind;
 
 use super::entry_exit::{entry_path, exit_path};
 use super::MachineEmitCtx;
+
+mod composite;
+mod enter;
+mod find;
+mod parallel;
+
+use self::composite::composite_descendant_leaves;
+use self::enter::{emit_enter_chain, resolve_initial_chain};
+use self::find::{find_composite, find_parallel};
+use self::parallel::{
+    collect_parallel_region_leaves_all, collect_parallel_region_leaves_excluding,
+};
 
 /// Emit the inline body of a transition case (everything between the
 /// guard check and `return true;` / `return;`).
@@ -590,176 +611,6 @@ pub fn emit_transition_body(
     ));
 }
 
-/// Collect every leaf state in every region of `parallel_idx` EXCEPT the
-/// region containing `source_idx`. Used for sibling-region exit per Doc
-/// 08 §6.3.
-fn collect_parallel_region_leaves_excluding(
-    ctx: &MachineEmitCtx<'_>,
-    parallel_idx: u8,
-    source_idx: u8,
-) -> Vec<u8> {
-    let parallel_rec = ctx.index.get(parallel_idx);
-    let source_slot = ctx.layout.slot(source_idx);
-
-    // Walk every state whose slot differs from source_slot AND is inside
-    // this parallel.
-    let mut out = Vec::new();
-    let in_parallel = states_inside_parallel(ctx.machine, &parallel_rec.ir_id);
-    for ir_id in in_parallel {
-        let Some(idx) = ctx.index.lookup(&ir_id) else {
-            continue;
-        };
-        if ctx.layout.slot(idx) == source_slot {
-            continue;
-        }
-        if ctx.layout.slot(idx) == 0 {
-            continue;
-        }
-        let rec = ctx.index.get(idx);
-        if matches!(
-            rec.kind,
-            StateRecordKind::Simple | StateRecordKind::Final | StateRecordKind::Submachine
-        ) {
-            out.push(idx);
-        }
-    }
-    out
-}
-
-/// Collect every leaf state (simple / final / submachine-ref) in **every**
-/// region of `parallel_idx` — the source region's leaves included, Final
-/// leaves included.
-///
-/// FW109: the *trace-record* candidate set for the Parallel active-
-/// descendant exit-set. The shipped `fsm_simulator`'s `full_exits` records
-/// every active descendant of an exited Parallel — that is the runtime-
-/// active leaf of EVERY region (including the source region's leaf, which
-/// is still an active descendant of the Parallel, AND any Final leaf). This
-/// is the static candidate set; the emitted code's runtime
-/// `m->_active[slot] == STATE_X` guard selects exactly the live ones,
-/// mirroring the simulator's `active_states` membership test. Pure data —
-/// no semantics; the recorded set is read off the C's own `_active[]`.
-fn collect_parallel_region_leaves_all(ctx: &MachineEmitCtx<'_>, parallel_idx: u8) -> Vec<u8> {
-    let parallel_rec = ctx.index.get(parallel_idx);
-    let mut out = Vec::new();
-    for ir_id in states_inside_parallel(ctx.machine, &parallel_rec.ir_id) {
-        let Some(idx) = ctx.index.lookup(&ir_id) else {
-            continue;
-        };
-        let rec = ctx.index.get(idx);
-        if matches!(
-            rec.kind,
-            StateRecordKind::Simple | StateRecordKind::Final | StateRecordKind::Submachine
-        ) {
-            out.push(idx);
-        }
-    }
-    out
-}
-
-/// Collect every leaf state (simple / final / submachine-ref) nested
-/// anywhere inside the composite `composite_idx`, in declaration order.
-///
-/// FW1-FU-2: the set of states whose `_exit_X` may need to run when the
-/// composite is left, depending on which one is the live leaf at runtime.
-/// Mirrors the simulator's "active descendant of an exited state" walk
-/// (interpreter.rs `full_exits`), but expressed as the *static* candidate
-/// set the runtime switch selects from (the codegen analogue of the
-/// simulator's `active_states` membership test). Nested composites are
-/// recursed into so a deep leaf is reached; the composite/parallel
-/// container states themselves are NOT leaves (the simulator records them
-/// via the static exit chain / parallel emitter, not here).
-fn composite_descendant_leaves(ctx: &MachineEmitCtx<'_>, composite_idx: u8) -> Vec<u8> {
-    let rec = ctx.index.get(composite_idx);
-    let Some(c) = find_composite(ctx.machine, &rec.ir_id) else {
-        return Vec::new();
-    };
-    fn walk(states: &[StateNode], leaves: &mut Vec<String>) {
-        for s in states {
-            match s {
-                StateNode::Simple(x) => leaves.push(x.id.clone()),
-                StateNode::Final(f) => leaves.push(f.id.clone()),
-                StateNode::Submachine(sm) => leaves.push(sm.id.clone()),
-                StateNode::Composite(cc) => {
-                    for r in &cc.regions {
-                        walk(&r.states, leaves);
-                    }
-                }
-                StateNode::Parallel(p) => {
-                    for r in &p.regions {
-                        walk(&r.states, leaves);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    let mut leaf_ids = Vec::new();
-    for r in &c.regions {
-        walk(&r.states, &mut leaf_ids);
-    }
-    leaf_ids
-        .into_iter()
-        .filter_map(|id| ctx.index.lookup(&id))
-        .collect()
-}
-
-fn states_inside_parallel(m: &fsm_ir::MachineObject, parallel_ir_id: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    fn walk(states: &[StateNode], out: &mut Vec<String>) {
-        for s in states {
-            match s {
-                StateNode::Simple(s) => out.push(s.id.clone()),
-                StateNode::Final(f) => out.push(f.id.clone()),
-                StateNode::Submachine(s) => out.push(s.id.clone()),
-                StateNode::Composite(c) => {
-                    out.push(c.id.clone());
-                    for r in &c.regions {
-                        walk(&r.states, out);
-                    }
-                }
-                StateNode::Parallel(p) => {
-                    out.push(p.id.clone());
-                    for r in &p.regions {
-                        walk(&r.states, out);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    fn find_and_walk(states: &[StateNode], parallel_id: &str, out: &mut Vec<String>) -> bool {
-        for s in states {
-            match s {
-                StateNode::Parallel(p) if p.id == parallel_id => {
-                    for r in &p.regions {
-                        walk(&r.states, out);
-                    }
-                    return true;
-                }
-                StateNode::Parallel(p) => {
-                    for r in &p.regions {
-                        if find_and_walk(&r.states, parallel_id, out) {
-                            return true;
-                        }
-                    }
-                }
-                StateNode::Composite(c) => {
-                    for r in &c.regions {
-                        if find_and_walk(&r.states, parallel_id, out) {
-                            return true;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        false
-    }
-    find_and_walk(&m.root.states, parallel_ir_id, &mut out);
-    out
-}
-
 /// Emit the initial-chain expansion for a transition target that is a
 /// composite or parallel state. For a parallel target, every region's
 /// initial leaf is assigned to its slot and entry actions run; for a
@@ -810,245 +661,4 @@ pub(crate) fn emit_initial_expansion_for_target(
         }
         _ => {}
     }
-}
-
-fn emit_enter_chain(ctx: &MachineEmitCtx<'_>, state_idx: u8, pad: &str, out: &mut String) {
-    let rec = ctx.index.get(state_idx);
-    let prefix = ctx.type_prefix();
-    let macro_prefix = ctx.macro_prefix();
-    let all_timers = super::timer::collect_timers(ctx);
-    let arm_timers = |state_idx: u8, out: &mut String| {
-        for timer in &all_timers {
-            if timer.owner_state == state_idx {
-                out.push_str(&format!(
-                    "{pad}m->_timer_{tname}_remaining_ms = {dur}u; /* P0-4: arm timer on initial-chain entry */\n",
-                    pad = pad,
-                    tname = timer.field_name,
-                    dur = timer.duration_ms,
-                ));
-            }
-        }
-    };
-    // FW110-FU-B: record the initial-chain-entered state in the trace `ent`
-    // set, gated by `#ifdef FSM_TRACE`. The shipped `fsm_simulator` pushes
-    // EVERY `expand_initial` state into `entered_all` (interpreter.rs
-    // `execute_one_transition` step 6 — `run_entry(sid)` then
-    // `entered_all.push(sid)` for each expanded `sid`), so a composite/
-    // parallel transition target's initial-expanded inner states (e.g.
-    // `WorkA --GO--> WorkB` entering `WorkB`'s initial leaf `Deep1`) are
-    // recorded `ent` ids the C must report too. The static
-    // `emit_trace_record_transition` only emits the `entry_path` ids (the
-    // LCA→target chain); these expanded ids are the runtime analogue of the
-    // simulator's `expand_initial` contribution and were a latent
-    // record-fidelity gap (no prior BYTE_EQUAL fixture had a composite/
-    // parallel *transition target* that initial-expands — `traffic-light`
-    // only ever reaches its composite via init / shallow-history restore,
-    // both of which trace separately). `#ifndef FSM_TRACE` strips this
-    // entirely → the production C is byte-identical (the keystone).
-    let trace_ent = |state_idx: u8, out: &mut String| {
-        out.push_str(&format!(
-            "{pad}#ifdef FSM_TRACE\n{pad}fsm_trace_csv_append(m->_trace_ent, sizeof(m->_trace_ent), {lit});\n{pad}#endif\n",
-            pad = pad,
-            lit = super::trace_hook::c_string_literal(&ctx.index.get(state_idx).ir_id),
-        ));
-    };
-    match rec.kind {
-        StateRecordKind::Simple | StateRecordKind::Final | StateRecordKind::Submachine => {
-            let slot = ctx.layout.slot(state_idx);
-            out.push_str(&format!(
-                "{pad}m->_active[{slot}] = {macro}_STATE_{name};\n",
-                pad = pad,
-                slot = slot,
-                macro = macro_prefix,
-                name = rec.c_name,
-            ));
-            // Mirror `expand_initial`→`entered_all`: a leaf reached via the
-            // initial chain IS pushed to the simulator's `entered_all`
-            // (incl. Final — `is_leaflike(Final)` and `enter_state_path`
-            // push it). Record it BEFORE the entry-action emission so the
-            // raw append order is irrelevant (the step emitter sorts the
-            // whole `_trace_ent` union — see trace_hook.rs).
-            trace_ent(state_idx, out);
-            if rec.kind != StateRecordKind::Final {
-                // v1.1-W2d: a ref-state reached via an initial-chain
-                // expansion (a `state X is Sub` as a composite's initial)
-                // instantiates its sub-instance instead of a user
-                // `_entry_X`.
-                if let Some(sr) = super::submachine::ref_state_member(ctx, &rec.ir_id) {
-                    super::submachine::emit_sub_init(&sr, pad, out);
-                } else {
-                    out.push_str(&format!(
-                        "{pad}{prefix}_entry_{name}(m);\n",
-                        pad = pad,
-                        prefix = prefix,
-                        name = rec.c_name,
-                    ));
-                }
-                arm_timers(state_idx, out);
-            }
-        }
-        StateRecordKind::Composite => {
-            out.push_str(&format!(
-                "{pad}{prefix}_entry_{name}(m);\n",
-                pad = pad,
-                prefix = prefix,
-                name = rec.c_name,
-            ));
-            arm_timers(state_idx, out);
-            // The simulator's `expand_initial` pushes a composite reached
-            // via the initial chain into `entered_all` too (it recurses
-            // INTO it, having pushed it). Record it.
-            trace_ent(state_idx, out);
-            if let Some(c) = find_composite(ctx.machine, &rec.ir_id) {
-                if let Some(region) = c.regions.first() {
-                    if let Some(init_idx) = ctx.index.lookup(&region.initial) {
-                        let chain = resolve_initial_chain(ctx, init_idx);
-                        for child in chain {
-                            emit_enter_chain(ctx, child, pad, out);
-                        }
-                    }
-                }
-            }
-        }
-        StateRecordKind::Parallel => {
-            out.push_str(&format!(
-                "{pad}{prefix}_entry_{name}(m);\n",
-                pad = pad,
-                prefix = prefix,
-                name = rec.c_name,
-            ));
-            arm_timers(state_idx, out);
-            // As Composite: `expand_initial` pushes the parallel container
-            // into `entered_all` before recursing its regions. Record it.
-            trace_ent(state_idx, out);
-            if let Some(p) = find_parallel(ctx.machine, &rec.ir_id) {
-                for region in &p.regions {
-                    if let Some(init_idx) = ctx.index.lookup(&region.initial) {
-                        let chain = resolve_initial_chain(ctx, init_idx);
-                        for child in chain {
-                            emit_enter_chain(ctx, child, pad, out);
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn resolve_initial_chain(ctx: &MachineEmitCtx<'_>, mut cur: u8) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut bounce = 0;
-    while bounce < 32 {
-        bounce += 1;
-        let rec = ctx.index.get(cur);
-        match rec.kind {
-            StateRecordKind::Initial => {
-                if let Some(target_id) = find_initial_target(ctx.machine, &rec.ir_id) {
-                    if let Some(next) = ctx.index.lookup(&target_id) {
-                        cur = next;
-                        continue;
-                    }
-                }
-                break;
-            }
-            _ => {
-                out.push(cur);
-                break;
-            }
-        }
-    }
-    out
-}
-
-fn find_initial_target(machine: &fsm_ir::MachineObject, ir_id: &str) -> Option<String> {
-    fn walk(states: &[StateNode], id: &str) -> Option<String> {
-        for s in states {
-            match s {
-                StateNode::Initial(i) => {
-                    if i.id == id {
-                        return Some(i.target.clone());
-                    }
-                }
-                StateNode::Composite(c) => {
-                    for r in &c.regions {
-                        if let Some(hit) = walk(&r.states, id) {
-                            return Some(hit);
-                        }
-                    }
-                }
-                StateNode::Parallel(p) => {
-                    for r in &p.regions {
-                        if let Some(hit) = walk(&r.states, id) {
-                            return Some(hit);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-    walk(&machine.root.states, ir_id)
-}
-
-fn find_composite<'a>(
-    m: &'a fsm_ir::MachineObject,
-    id: &str,
-) -> Option<&'a fsm_ir::CompositeState> {
-    fn walk<'a>(states: &'a [StateNode], id: &str) -> Option<&'a fsm_ir::CompositeState> {
-        for s in states {
-            match s {
-                StateNode::Composite(c) => {
-                    if c.id == id {
-                        return Some(c);
-                    }
-                    for r in &c.regions {
-                        if let Some(hit) = walk(&r.states, id) {
-                            return Some(hit);
-                        }
-                    }
-                }
-                StateNode::Parallel(p) => {
-                    for r in &p.regions {
-                        if let Some(hit) = walk(&r.states, id) {
-                            return Some(hit);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-    walk(&m.root.states, id)
-}
-
-fn find_parallel<'a>(m: &'a fsm_ir::MachineObject, id: &str) -> Option<&'a fsm_ir::ParallelState> {
-    fn walk<'a>(states: &'a [StateNode], id: &str) -> Option<&'a fsm_ir::ParallelState> {
-        for s in states {
-            match s {
-                StateNode::Parallel(p) => {
-                    if p.id == id {
-                        return Some(p);
-                    }
-                    for r in &p.regions {
-                        if let Some(hit) = walk(&r.states, id) {
-                            return Some(hit);
-                        }
-                    }
-                }
-                StateNode::Composite(c) => {
-                    for r in &c.regions {
-                        if let Some(hit) = walk(&r.states, id) {
-                            return Some(hit);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-    walk(&m.root.states, id)
 }
