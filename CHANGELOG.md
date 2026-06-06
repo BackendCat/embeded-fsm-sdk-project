@@ -22,6 +22,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `writeln!(buf: &mut String, …).unwrap()` sites. `fmt::Write for String`
   is infallible; the macro encodes that invariant once at the definition
   and preserves the defensive panic semantics.
+- **AUDIT_2026_06_06 §6 P2.1** — split `crates/fsm-cli/src/import_header.rs`
+  (1405 LOC) into a stage-aligned `import_header/` directory: `mod.rs`
+  (public `SkipNote`/`ImportedHeader`/`parse_header*`), `util.rs` (small
+  lexical helpers), `types.rs` (C type → IR Type), `dsl_emit.rs` (render
+  ExternObject as a DSL extern line), `preproc.rs` (strip comments/
+  literals/preprocessor + split top-level decls), `classify.rs` (classify
+  chunk, parse prototype, parse params, finalize). `cmd/generate.rs`
+  unchanged; public API identical.
+- **AUDIT_2026_06_06 §6 P2.2** — split
+  `crates/fsm-codegen-c/src/emit/transition.rs` (1054 LOC) into a
+  role-aligned `emit/transition/` directory: `mod.rs` (the public
+  `emit_transition_body` and `emit_initial_expansion_for_target`),
+  `find.rs` (pure IR-tree lookups), `parallel.rs` (sibling-region exit +
+  FW109 record-set helpers), `composite.rs` (composite active-descendant
+  exit-set walk), `enter.rs` (initial-chain entry emitter). Generated C is
+  byte-identical (snapshot tests green).
 
 ### Fix
 
