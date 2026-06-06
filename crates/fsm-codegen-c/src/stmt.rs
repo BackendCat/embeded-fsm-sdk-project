@@ -10,6 +10,19 @@ use fsm_ir::Statement;
 
 use crate::expr::{emit_expr, emit_field_ref};
 
+// AUDIT_2026_06_06 §2.4 P1.2 — `writeln!` into a `String` cannot fail
+// (`fmt::Write for String` is infallible). The pre-audit code wrote
+// `writeln!(buf, …).unwrap()` at every call site; `wln!` keeps the call
+// sites readable without spelling out a guaranteed-infallible unwrap, and
+// preserves the defensive panic semantics if `out` is ever retyped to a
+// fallible writer.
+macro_rules! wln {
+    ($buf:expr, $($arg:tt)*) => {
+        writeln!($buf, $($arg)*)
+            .expect("writeln! into String is infallible (fmt::Write for String)")
+    };
+}
+
 /// Configuration knobs for the per-machine statement emitter. The
 /// machine-name prefix is used to emit calls like `Motor_raise(m, ...)`.
 pub struct StmtContext<'a> {
@@ -37,7 +50,7 @@ fn emit_one(s: &Statement, ctx: &StmtContext<'_>, indent: usize, out: &mut Strin
         Statement::Assign { target, value } => {
             let lhs = emit_field_ref(target, ctx.ctx_prefix, ctx.payload_prefix);
             let rhs = emit_expr(value, ctx.ctx_prefix, ctx.payload_prefix);
-            writeln!(out, "{:indent$}{} = {};", "", lhs, rhs, indent = indent).unwrap();
+            wln!(out, "{:indent$}{} = {};", "", lhs, rhs, indent = indent);
         }
         Statement::If {
             condition,
@@ -45,19 +58,19 @@ fn emit_one(s: &Statement, ctx: &StmtContext<'_>, indent: usize, out: &mut Strin
             else_,
         } => {
             let cond = emit_expr(condition, ctx.ctx_prefix, ctx.payload_prefix);
-            writeln!(out, "{:indent$}if ({}) {{", "", cond, indent = indent).unwrap();
+            wln!(out, "{:indent$}if ({}) {{", "", cond, indent = indent);
             out.push_str(&emit_stmts(then, ctx, indent + 4));
             if !else_.is_empty() {
-                writeln!(out, "{:indent$}}} else {{", "", indent = indent).unwrap();
+                wln!(out, "{:indent$}}} else {{", "", indent = indent);
                 out.push_str(&emit_stmts(else_, ctx, indent + 4));
             }
-            writeln!(out, "{:indent$}}}", "", indent = indent).unwrap();
+            wln!(out, "{:indent$}}}", "", indent = indent);
         }
         Statement::While { condition, body } => {
             let cond = emit_expr(condition, ctx.ctx_prefix, ctx.payload_prefix);
-            writeln!(out, "{:indent$}while ({}) {{", "", cond, indent = indent).unwrap();
+            wln!(out, "{:indent$}while ({}) {{", "", cond, indent = indent);
             out.push_str(&emit_stmts(body, ctx, indent + 4));
-            writeln!(out, "{:indent$}}}", "", indent = indent).unwrap();
+            wln!(out, "{:indent$}}}", "", indent = indent);
         }
         Statement::For {
             init,
@@ -69,21 +82,20 @@ fn emit_one(s: &Statement, ctx: &StmtContext<'_>, indent: usize, out: &mut Strin
             // sub-statements can be assignments. Emitting a true C `for`
             // header would require flattening — the while form is simpler
             // and matches the formal-semantics §6.4 reduction.
-            writeln!(out, "{:indent$}{{ /* for */", "", indent = indent).unwrap();
+            wln!(out, "{:indent$}{{ /* for */", "", indent = indent);
             emit_one(init, ctx, indent + 4, out);
             let cond = emit_expr(condition, ctx.ctx_prefix, ctx.payload_prefix);
-            writeln!(
+            wln!(
                 out,
                 "{:indent$}    while ({}) {{",
                 "",
                 cond,
                 indent = indent
-            )
-            .unwrap();
+            );
             out.push_str(&emit_stmts(body, ctx, indent + 8));
             emit_one(update, ctx, indent + 8, out);
-            writeln!(out, "{:indent$}    }}", "", indent = indent).unwrap();
-            writeln!(out, "{:indent$}}}", "", indent = indent).unwrap();
+            wln!(out, "{:indent$}    }}", "", indent = indent);
+            wln!(out, "{:indent$}}}", "", indent = indent);
         }
         Statement::Call { callee, args } => {
             let args_c = args
@@ -91,37 +103,35 @@ fn emit_one(s: &Statement, ctx: &StmtContext<'_>, indent: usize, out: &mut Strin
                 .map(|a| emit_expr(a, ctx.ctx_prefix, ctx.payload_prefix))
                 .collect::<Vec<_>>()
                 .join(", ");
-            writeln!(
+            wln!(
                 out,
                 "{:indent$}{}({});",
                 "",
                 callee,
                 args_c,
                 indent = indent
-            )
-            .unwrap();
+            );
         }
         Statement::Raise { event_id, args: _ } => {
             // The event_id at IR time is the stable id; the emitter looks up
             // the C enum value through the machine event table. For the
             // codegen surface we render `Motor_raise(m, MOTOR_EVENT_X)` and
             // expect the outer emitter to bind `event_id` → enum name.
-            writeln!(
+            wln!(
                 out,
                 "{:indent$}{}_raise(m, /* event */ {});",
                 "",
                 ctx.machine_prefix,
                 event_id,
                 indent = indent
-            )
-            .unwrap();
+            );
         }
         Statement::Send {
             event_id,
             args: _,
             machine_id,
         } => {
-            writeln!(
+            wln!(
                 out,
                 "{:indent$}{}_send_to({}, /* event */ {});",
                 "",
@@ -129,19 +139,17 @@ fn emit_one(s: &Statement, ctx: &StmtContext<'_>, indent: usize, out: &mut Strin
                 machine_id,
                 event_id,
                 indent = indent
-            )
-            .unwrap();
+            );
         }
         Statement::Defer { event_id } => {
-            writeln!(
+            wln!(
                 out,
                 "{:indent$}{}_defer(m, /* event */ {});",
                 "",
                 ctx.machine_prefix,
                 event_id,
                 indent = indent
-            )
-            .unwrap();
+            );
         }
     }
 }
